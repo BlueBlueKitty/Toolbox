@@ -11,7 +11,7 @@ import numpy as np
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QFileDialog, QLabel, QSlider, QComboBox, QMessageBox,
                                QSplitter, QGroupBox, QGridLayout, QCheckBox, QFormLayout)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -308,9 +308,16 @@ class PixelTimeSeriesViewerDialog(QDialog):
     
     def open_folder(self):
         """打开图像文件夹"""
-        folder = QFileDialog.getExistingDirectory(self, "选择图像文件夹")
+        # 读取上次打开的路径
+        settings = QSettings("YiboYuan", "Toolbox")
+        last_folder = settings.value("pixel_time_series_viewer/last_folder_path", "")
+        
+        folder = QFileDialog.getExistingDirectory(self, "选择图像文件夹", last_folder)
         if not folder:
             return
+        
+        # 保存当前路径
+        settings.setValue("pixel_time_series_viewer/last_folder_path", folder)
         
         try:
             # 查找支持的图像文件

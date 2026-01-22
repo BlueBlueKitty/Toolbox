@@ -2,3 +2,4 @@
 # 导出所有对话框，便于导入
 from .tiff_boundary_seettings_dialog import TiffBoundarySettingsDialog
 from .pixel_time_series_viewer_dialog import PixelTimeSeriesViewerDialog
+from .local_image_viewer_dialog import LocalImageViewerDialog

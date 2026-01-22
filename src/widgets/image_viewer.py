@@ -27,10 +27,14 @@ class ImageViewer(QGraphicsView):
     - 中键拖动平移
     - 左键点击像素
     - 选择colormap
+    - 鼠标移动时显示像素值
     """
     
     # 自定义信号：当用户点击图像时发出，参数为(x, y)坐标
     pixel_clicked = Signal(int, int)
+    
+    # 鼠标移动时显示像素值，参数为(x, y, value)
+    mouse_moved = Signal(int, int, object)
     
     # 视图变换信号（用于同步多个查看器）
     view_transformed = Signal(object)  # 发送transform对象
@@ -42,6 +46,10 @@ class ImageViewer(QGraphicsView):
     scroll_changed = Signal(int, int)  # 发送(h_value, v_value)
     
     def __init__(self, parent=None):
+        """
+        Args:
+            parent: 父窗口
+        """
         super().__init__(parent)
         
         # 创建场景
@@ -83,6 +91,13 @@ class ImageViewer(QGraphicsView):
         
         # 同步标志
         self.is_syncing = False
+        
+        # Nodata值
+        self.nodata_value = None
+        
+        # 启用鼠标跟踪以捕捉移动事件
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
         
         # 设置鼠标样式为箭头
         self.viewport().setCursor(Qt.ArrowCursor)
@@ -130,24 +145,37 @@ class ImageViewer(QGraphicsView):
         # 处理不同维度的数组
         if arr.ndim == 2:
             # 2D灰度图像
-            display_arr = self._apply_colormap(arr)
+            display_arr, alpha_channel = self._apply_colormap(arr)
         elif arr.ndim == 3:
             if arr.shape[2] == 3:
                 # RGB图像
                 display_arr = self._normalize_array(arr)
+                alpha_channel = None
             elif arr.shape[2] == 1:
                 # 单波段
-                display_arr = self._apply_colormap(arr[:, :, 0])
+                display_arr, alpha_channel = self._apply_colormap(arr[:, :, 0])
             else:
                 # 多波段图像，显示第一个波段
-                display_arr = self._apply_colormap(arr[:, :, 0])
+                display_arr, alpha_channel = self._apply_colormap(arr[:, :, 0])
         else:
             raise ValueError(f"不支持的数组维度: {arr.ndim}")
         
         # 转换为QImage，禁用平滑插值以显示栅格边界
         height, width = display_arr.shape[:2]
         
-        if display_arr.ndim == 2:
+        if alpha_channel is not None:
+            # 有alpha通道，创建RGBA图像
+            if display_arr.ndim == 2:
+                # 灰度图，转为RGB
+                rgb_arr = np.stack([display_arr, display_arr, display_arr], axis=-1)
+            else:
+                rgb_arr = display_arr
+            
+            # 添加alpha通道
+            rgba_arr = np.dstack([rgb_arr, alpha_channel])
+            bytes_per_line = 4 * width
+            qimage = QImage(rgba_arr.data, width, height, bytes_per_line, QImage.Format_RGBA8888)
+        elif display_arr.ndim == 2:
             # 灰度图
             qimage = QImage(display_arr.data, width, height, width, QImage.Format_Grayscale8)
         else:
@@ -166,12 +194,32 @@ class ImageViewer(QGraphicsView):
         self.fit_in_view()
         
     def _apply_colormap(self, arr):
-        """应用colormap到2D数组"""
-        # 归一化
-        normalized = self._normalize_array(arr)
+        """应用colormap到2D数组，返回RGB数组和alpha通道"""
+        # 创建alpha通道，默认全不透明
+        alpha_channel = np.full(arr.shape, 255, dtype=np.uint8)
+        
+        # 标记Nodata像素
+        if self.nodata_value is not None:
+            nodata_mask = (arr == self.nodata_value)
+            alpha_channel[nodata_mask] = 0  # Nodata像素设为完全透明
+        
+        # 对非Nodata像素进行归一化
+        valid_mask = alpha_channel > 0
+        if np.any(valid_mask):
+            valid_data = arr[valid_mask]
+            arr_min = np.nanmin(valid_data)
+            arr_max = np.nanmax(valid_data)
+            
+            if arr_max - arr_min == 0:
+                normalized = np.zeros_like(arr, dtype=np.uint8)
+            else:
+                normalized = np.zeros_like(arr, dtype=np.uint8)
+                normalized[valid_mask] = ((valid_data - arr_min) / (arr_max - arr_min) * 255).astype(np.uint8)
+        else:
+            normalized = np.zeros_like(arr, dtype=np.uint8)
         
         if self.current_colormap == 'gray' or not MATPLOTLIB_AVAILABLE:
-            return normalized
+            return normalized, alpha_channel
         
         # 使用matplotlib的colormap
         cmap = cm.get_cmap(self.current_colormap)
@@ -181,7 +229,8 @@ class ImageViewer(QGraphicsView):
         rgba = cmap(norm_arr)
         # 转换为0-255的RGB
         rgb = (rgba[:, :, :3] * 255).astype(np.uint8)
-        return rgb
+        
+        return rgb, alpha_channel
     
     def set_colormap(self, colormap_name):
         """设置colormap"""
@@ -267,6 +316,19 @@ class ImageViewer(QGraphicsView):
             
             event.accept()
         else:
+            # 普通鼠标移动，更新像素值显示
+            if self.image_item and self.image_array is not None:
+                scene_pos = self.mapToScene(event.pos())
+                if self.image_item.contains(scene_pos):
+                    item_pos = self.image_item.mapFromScene(scene_pos)
+                    x = int(item_pos.x())
+                    y = int(item_pos.y())
+                    
+                    if (0 <= x < self.image_array.shape[1] and 
+                        0 <= y < self.image_array.shape[0]):
+                        value = self.get_pixel_value(x, y)
+                        self.mouse_moved.emit(x, y, value)
+            
             super().mouseMoveEvent(event)
     
     def mouseReleaseEvent(self, event):
@@ -314,3 +376,48 @@ class ImageViewer(QGraphicsView):
                 0 <= y < self.image_array.shape[0]):
                 return self.image_array[y, x]
         return None
+    
+    def set_nodata_value(self, nodata_value):
+        """设置Nodata值"""
+        self.nodata_value = nodata_value
+
+
+class ImageViewerSynchronizer:
+    """
+    图像查看器同步器，用于同步多个ImageViewer的视图变换和滚动位置
+    """
+    def __init__(self, viewers):
+        """
+        Args:
+            viewers: ImageViewer列表
+        """
+        self.viewers = viewers
+        self._connect_signals()
+    
+    def _connect_signals(self):
+        """连接所有查看器的信号"""
+        for viewer in self.viewers:
+            viewer.view_transformed.connect(self._on_view_transformed)
+            viewer.cursor_changed.connect(self._on_cursor_changed)
+            viewer.scroll_changed.connect(self._on_scroll_changed)
+    
+    def _on_view_transformed(self, transform):
+        """处理视图变换"""
+        sender = self.sender()
+        for viewer in self.viewers:
+            if viewer != sender:
+                viewer.sync_transform(transform)
+    
+    def _on_cursor_changed(self, cursor):
+        """处理鼠标样式变化"""
+        sender = self.sender()
+        for viewer in self.viewers:
+            if viewer != sender:
+                viewer.sync_cursor(cursor)
+    
+    def _on_scroll_changed(self, h_value, v_value):
+        """处理滚动条位置变化"""
+        sender = self.sender()
+        for viewer in self.viewers:
+            if viewer != sender:
+                viewer.sync_scroll(h_value, v_value)

@@ -220,3 +220,4 @@ build/
 dist/
 test/
 docs/
+.vscode/

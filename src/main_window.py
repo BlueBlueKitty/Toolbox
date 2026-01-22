@@ -19,7 +19,8 @@ import sys
 import traceback
 
 # 导入自定义对话框
-from src.dialogs import TiffBoundarySettingsDialog, PixelTimeSeriesViewerDialog
+from src.dialogs import (TiffBoundarySettingsDialog, PixelTimeSeriesViewerDialog,
+                         LocalImageViewerDialog)
 
 # 导入工具函数
 from src.tools import tiff_boundary_to_vector
@@ -101,6 +102,29 @@ class MainWindow(QMainWindow):
         image_analysis_layout = QGridLayout()
         image_analysis_layout.setSpacing(10)
         
+        # 图像局部查看器按钮
+        self.button_local_image_viewer = QPushButton("图像局部查看器")
+        self.button_local_image_viewer.setMinimumHeight(50)
+        self.button_local_image_viewer.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:pressed {
+                background-color: #21618c;
+            }
+        """)
+        self.button_local_image_viewer.clicked.connect(self.on_button_local_image_viewer_click)
+        image_analysis_layout.addWidget(self.button_local_image_viewer, 0, 0)
+        
         # 像素时序查看器按钮
         self.button_pixel_time_series_viewer = QPushButton("像素时序查看器")
         self.button_pixel_time_series_viewer.setMinimumHeight(50)
@@ -122,7 +146,7 @@ class MainWindow(QMainWindow):
             }
         """)
         self.button_pixel_time_series_viewer.clicked.connect(self.on_button_pixel_time_series_viewer_click)
-        image_analysis_layout.addWidget(self.button_pixel_time_series_viewer, 0, 0)
+        image_analysis_layout.addWidget(self.button_pixel_time_series_viewer, 0, 1)
         
         image_analysis_group.setLayout(image_analysis_layout)
         scroll_layout.addWidget(image_analysis_group)
@@ -186,6 +210,18 @@ class MainWindow(QMainWindow):
         info_label.setStyleSheet("font-size: 12px; color: #95a5a6;")
         info_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(info_label)
+    
+    def on_button_local_image_viewer_click(self):
+        """
+        图像局部查看器按钮点击事件
+        """
+        try:
+            # 创建并显示图像局部查看器对话框
+            dialog = LocalImageViewerDialog(self)
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"打开图像局部查看器失败: {str(e)}")
+            traceback.print_exc()
     
     def on_button_pixel_time_series_viewer_click(self):
         """
