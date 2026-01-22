@@ -24,14 +24,22 @@ class ImageViewer(QGraphicsView):
     """
     图像查看器组件，支持：
     - 鼠标滚轮缩放
-    - 鼠标拖动平移
-    - 双击重置视图
-    - 右键菜单选择colormap
-    - 点击获取像素坐标
+    - 中键拖动平移
+    - 左键点击像素
+    - 选择colormap
     """
     
     # 自定义信号：当用户点击图像时发出，参数为(x, y)坐标
     pixel_clicked = Signal(int, int)
+    
+    # 视图变换信号（用于同步多个查看器）
+    view_transformed = Signal(object)  # 发送transform对象
+    
+    # 鼠标样式变化信号（用于同步鼠标样式）
+    cursor_changed = Signal(object)  # 发送cursor对象
+    
+    # 滚动条位置变化信号
+    scroll_changed = Signal(int, int)  # 发送(h_value, v_value)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -58,17 +66,26 @@ class ImageViewer(QGraphicsView):
         ]
         
         # 设置场景属性
-        self.setRenderHint(QPainter.Antialiasing)
-        self.setRenderHint(QPainter.SmoothPixmapTransform)
+        self.setRenderHint(QPainter.Antialiasing, False)  # 禁用抗锯齿
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setDragMode(QGraphicsView.NoDrag)  # 禁用默认拖动
         
         # 缩放参数
         self.zoom_factor = 1.15
         self.min_zoom = 0.1
-        self.max_zoom = 20.0
+        self.max_zoom = 1000.0  # 无限放大
         self.current_zoom = 1.0
+        
+        # 拖动状态
+        self.is_panning = False
+        self.pan_start_pos = None
+        
+        # 同步标志
+        self.is_syncing = False
+        
+        # 设置鼠标样式为箭头
+        self.viewport().setCursor(Qt.ArrowCursor)
         
     def set_image_from_array(self, image_array):
         """
@@ -127,7 +144,7 @@ class ImageViewer(QGraphicsView):
         else:
             raise ValueError(f"不支持的数组维度: {arr.ndim}")
         
-        # 转换为QImage
+        # 转换为QImage，禁用平滑插值以显示栅格边界
         height, width = display_arr.shape[:2]
         
         if display_arr.ndim == 2:
@@ -141,6 +158,8 @@ class ImageViewer(QGraphicsView):
         # 创建QPixmap并添加到场景
         pixmap = QPixmap.fromImage(qimage)
         self.image_item = QGraphicsPixmapItem(pixmap)
+        # 禁用平滑变换，显示栅格边界
+        self.image_item.setTransformationMode(Qt.FastTransformation)
         self.scene.addItem(self.image_item)
         
         # 适应视图
@@ -181,12 +200,16 @@ class ImageViewer(QGraphicsView):
         if self.current_zoom * self.zoom_factor <= self.max_zoom:
             self.scale(self.zoom_factor, self.zoom_factor)
             self.current_zoom *= self.zoom_factor
+            if not self.is_syncing:
+                self.view_transformed.emit(self.transform())
     
     def zoom_out(self):
         """缩小"""
         if self.current_zoom / self.zoom_factor >= self.min_zoom:
             self.scale(1 / self.zoom_factor, 1 / self.zoom_factor)
             self.current_zoom /= self.zoom_factor
+            if not self.is_syncing:
+                self.view_transformed.emit(self.transform())
     
     def wheelEvent(self, event):
         """鼠标滚轮事件：缩放"""
@@ -195,14 +218,10 @@ class ImageViewer(QGraphicsView):
         else:
             self.zoom_out()
     
-    def mouseDoubleClickEvent(self, event):
-        """双击事件：重置视图"""
-        if event.button() == Qt.LeftButton:
-            self.fit_in_view()
-    
     def mousePressEvent(self, event):
         """鼠标按下事件"""
         if event.button() == Qt.LeftButton and self.image_item:
+            # 左键：点击像素
             # 获取场景坐标
             scene_pos = self.mapToScene(event.pos())
             
@@ -218,34 +237,69 @@ class ImageViewer(QGraphicsView):
                     # 发送信号
                     self.pixel_clicked.emit(x, y)
         
-        # 调用父类方法以保持拖动功能
-        super().mousePressEvent(event)
+        elif event.button() == Qt.MiddleButton:
+            # 中键：开始拖动
+            self.is_panning = True
+            self.pan_start_pos = event.pos()
+            self.viewport().setCursor(Qt.ClosedHandCursor)
+            if not self.is_syncing:
+                self.cursor_changed.emit(Qt.ClosedHandCursor)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
     
-    def contextMenuEvent(self, event):
-        """右键菜单事件：选择colormap"""
-        menu = QMenu(self)
-        
-        colormap_menu = menu.addMenu("颜色映射")
-        
-        for cmap in self.available_colormaps:
-            action = colormap_menu.addAction(cmap)
-            if cmap == self.current_colormap:
-                action.setCheckable(True)
-                action.setChecked(True)
-            action.triggered.connect(lambda checked, c=cmap: self.set_colormap(c))
-        
-        menu.addSeparator()
-        
-        fit_action = menu.addAction("适应窗口")
-        fit_action.triggered.connect(self.fit_in_view)
-        
-        zoom_in_action = menu.addAction("放大")
-        zoom_in_action.triggered.connect(self.zoom_in)
-        
-        zoom_out_action = menu.addAction("缩小")
-        zoom_out_action.triggered.connect(self.zoom_out)
-        
-        menu.exec_(event.globalPos())
+    def mouseMoveEvent(self, event):
+        """鼠标移动事件"""
+        if self.is_panning and self.pan_start_pos is not None:
+            # 中键拖动
+            delta = event.pos() - self.pan_start_pos
+            self.pan_start_pos = event.pos()
+            
+            # 移动视图
+            h_bar = self.horizontalScrollBar()
+            v_bar = self.verticalScrollBar()
+            h_bar.setValue(h_bar.value() - delta.x())
+            v_bar.setValue(v_bar.value() - delta.y())
+            
+            if not self.is_syncing:
+                # 发送滚动条位置信号
+                self.scroll_changed.emit(h_bar.value(), v_bar.value())
+            
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """鼠标释放事件"""
+        if event.button() == Qt.MiddleButton:
+            # 结束拖动
+            self.is_panning = False
+            self.pan_start_pos = None
+            self.viewport().setCursor(Qt.ArrowCursor)
+            if not self.is_syncing:
+                self.cursor_changed.emit(Qt.ArrowCursor)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+    
+    def sync_transform(self, transform):
+        """同步视图变换（从另一个查看器）"""
+        self.is_syncing = True
+        self.setTransform(transform)
+        self.is_syncing = False
+    
+    def sync_cursor(self, cursor):
+        """同步鼠标样式（从另一个查看器）"""
+        self.is_syncing = True
+        self.viewport().setCursor(cursor)
+        self.is_syncing = False
+    
+    def sync_scroll(self, h_value, v_value):
+        """同步滚动条位置（从另一个查看器）"""
+        self.is_syncing = True
+        self.horizontalScrollBar().setValue(h_value)
+        self.verticalScrollBar().setValue(v_value)
+        self.is_syncing = False
     
     def get_image_size(self):
         """获取图像尺寸"""

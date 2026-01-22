@@ -2,17 +2,19 @@
 Author: Yibo Yuan 2633669459@qq.com
 Date: 2025-03-24 21:01:28
 LastEditors: Yibo Yuan 2633669459@qq.com
-LastEditTime: 2025-03-25 09:29:00
+LastEditTime: 2026-01-22
 FilePath: \Toolbox\src\main_window.py
-Description: 
+Description: 主窗口 - 使用纯Python代码创建UI
 
 Copyright (c) 2025 by Yibo Yuan 2633669459@qq.com, All Rights Reserved. 
 '''
 
 import os
-from PySide6.QtWidgets import QMainWindow, QApplication, QMessageBox, QDialog
-from PySide6.QtUiTools import QUiLoader
+from PySide6.QtWidgets import (QMainWindow, QApplication, QMessageBox, QDialog,
+                               QWidget, QVBoxLayout, QGridLayout, QPushButton, QLabel,
+                               QGroupBox, QScrollArea)
 from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt
 import sys
 import traceback
 
@@ -22,41 +24,168 @@ from src.dialogs import TiffBoundarySettingsDialog, PixelTimeSeriesViewerDialog
 # 导入工具函数
 from src.tools import tiff_boundary_to_vector
 
-# 在QApplication之前先实例化
-uiLoader = QUiLoader()
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super(MainWindow, self).__init__()
         
-        # 获取 UI 文件的绝对路径
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(current_dir)  # 获取项目根目录
-        ui_file_path = os.path.join(project_root, 'ui', 'main_window.ui')
+        # 设置窗口属性
+        self.setWindowTitle("遥感工具箱")
+        self.resize(800, 600)
         
-        # 加载 UI 文件
-        self.ui = uiLoader.load(ui_file_path, self)
+        # 获取项目根目录
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_dir)
         
         # 设置应用程序图标
         icon_path = os.path.join(project_root, 'resources', 'toolbox.ico')
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         
-        # 重要：必须将 UI 显示出来
-        self.setCentralWidget(self.ui)
-        
-        # 绑定信号与槽
-        self.init_signals()
+        # 创建UI
+        self._create_ui()
 
-    def init_signals(self):
-        """
-        初始化信号与槽的绑定
-        """
+    def _create_ui(self):
+        """创建用户界面"""
+        # 创建中央部件
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        # 主布局
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+        
+        # 标题
+        title_label = QLabel("遥感工具箱")
+        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
+        title_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(title_label)
+        
+        # 副标题
+        subtitle_label = QLabel("Remote Sensing Toolbox")
+        subtitle_label.setStyleSheet("font-size: 14px; color: #7f8c8d;")
+        subtitle_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(subtitle_label)
+        
+        main_layout.addSpacing(20)
+        
+        # 创建滚动区域
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.NoFrame)
+        
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setSpacing(20)
+        
+        # =============== 图像分析工具组 ===============
+        image_analysis_group = QGroupBox("图像分析工具")
+        image_analysis_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                border: 2px solid #3498db;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                color: #3498db;
+            }
+        """)
+        
+        image_analysis_layout = QGridLayout()
+        image_analysis_layout.setSpacing(10)
+        
         # 像素时序查看器按钮
-        self.ui.button_pixel_time_series_viewer.clicked.connect(self.on_button_pixel_time_series_viewer_click)
+        self.button_pixel_time_series_viewer = QPushButton("像素时序查看器")
+        self.button_pixel_time_series_viewer.setMinimumHeight(50)
+        self.button_pixel_time_series_viewer.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:pressed {
+                background-color: #21618c;
+            }
+        """)
+        self.button_pixel_time_series_viewer.clicked.connect(self.on_button_pixel_time_series_viewer_click)
+        image_analysis_layout.addWidget(self.button_pixel_time_series_viewer, 0, 0)
+        
+        image_analysis_group.setLayout(image_analysis_layout)
+        scroll_layout.addWidget(image_analysis_group)
+        
+        # =============== 栅格处理工具组 ===============
+        raster_tools_group = QGroupBox("栅格处理工具")
+        raster_tools_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                border: 2px solid #27ae60;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                color: #27ae60;
+            }
+        """)
+        
+        raster_tools_layout = QGridLayout()
+        raster_tools_layout.setSpacing(10)
         
         # TIFF边界转矢量按钮
-        self.ui.button_tiff_boundary_to_vector.clicked.connect(self.on_button_tiff_boundary_to_vector_click)
+        self.button_tiff_boundary_to_vector = QPushButton("TIFF边界转矢量")
+        self.button_tiff_boundary_to_vector.setMinimumHeight(50)
+        self.button_tiff_boundary_to_vector.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+            QPushButton:pressed {
+                background-color: #1e8449;
+            }
+        """)
+        self.button_tiff_boundary_to_vector.clicked.connect(self.on_button_tiff_boundary_to_vector_click)
+        raster_tools_layout.addWidget(self.button_tiff_boundary_to_vector, 0, 0)
+        
+        raster_tools_group.setLayout(raster_tools_layout)
+        scroll_layout.addWidget(raster_tools_group)
+        
+        # 添加弹性空间
+        scroll_layout.addStretch()
+        
+        scroll_area.setWidget(scroll_widget)
+        main_layout.addWidget(scroll_area)
+        
+        # 底部信息
+        info_label = QLabel("© 2026 Yibo Yuan. All Rights Reserved.")
+        info_label.setStyleSheet("font-size: 12px; color: #95a5a6;")
+        info_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(info_label)
     
     def on_button_pixel_time_series_viewer_click(self):
         """
