@@ -8,7 +8,19 @@ Copyright (c) 2025 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 '''
 import os
 import sys
+# 以下导入虽然没用到，但是打包时需要用到
 from osgeo import gdal, ogr, osr
+import numpy as np
+try:
+    import matplotlib.cm as cm
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    print("警告: matplotlib未安装，部分colormap功能将不可用")
+from PIL import Image
+from osgeo import gdal
+import traceback
+import h5py
 
 # 将项目根目录添加到Python模块搜索路径
 project_root = os.path.dirname(os.path.abspath(__file__))

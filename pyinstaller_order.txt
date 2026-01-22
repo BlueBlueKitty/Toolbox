@@ -2,4 +2,4 @@
 pyinstaller Toolbox.spec
 
 # 或者直接使用命令行参数，排除PyQt5和PyQt6，以免和PySide6造成冲突
-pyinstaller --exclude PyQt5 --exclude PyQt6 --name="Toolbox" --windowed --add-data="ui/*.ui;ui" --add-data="src;src" --hidden-import=PySide6.QtUiTools --icon=resources/toolbox.ico main.py
+pyinstaller --exclude PyQt5 --exclude PyQt6 --name="Toolbox" --windowed --add-data="src;src" --hidden-import=PySide6.QtUiTools --icon=resources/toolbox.ico main.py

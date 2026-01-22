@@ -12,13 +12,14 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                                QFileDialog, QLabel, QSlider, QComboBox, QMessageBox,
                                QSplitter, QGroupBox, QGridLayout, QCheckBox, QFormLayout)
 from PySide6.QtCore import Qt, QSettings
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 from PIL import Image
 from osgeo import gdal
 import traceback
+import h5py
 
 from src.widgets import ImageViewer, ColormapComboBox
 
@@ -39,9 +40,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 存储时序图像数据
         self.image_files = []  # 文件路径列表
         self.image_data_list = []  # 图像数据列表
+        self.date_list = []  # 日期列表（用于h5时序数据）
         self.current_image_index_1 = 0  # 窗口1当前显示的图像索引
         self.current_image_index_2 = 0  # 窗口2当前显示的图像索引
         self.selected_pixel = None  # 选中的像素坐标 (x, y)
+        self.nodata_value = None  # Nodata值
         
         # 创建UI
         self._create_ui()
@@ -60,6 +63,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.open_folder_btn.clicked.connect(self.open_folder)
         control_layout.addWidget(self.open_folder_btn)
         
+        self.open_h5_btn = QPushButton("打开h5时序数据")
+        self.open_h5_btn.clicked.connect(self.open_h5_timeseries)
+        control_layout.addWidget(self.open_h5_btn)
+        
         control_layout.addWidget(QLabel("排序方式:"))
         self.sort_order_combo = QComboBox()
         self.sort_order_combo.addItems(["正序", "倒序"])
@@ -76,6 +83,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.colormap_combo = ColormapComboBox()
         self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
         control_layout.addWidget(self.colormap_combo)
+        
+        # Nodata值设置
+        self.set_nodata_btn = QPushButton("设置Nodata值")
+        self.set_nodata_btn.clicked.connect(self.set_nodata_value)
+        control_layout.addWidget(self.set_nodata_btn)
         
         main_layout.addLayout(control_layout)
         
@@ -189,7 +201,15 @@ class PixelTimeSeriesViewerDialog(QDialog):
         setattr(self, f'image_info_label_{viewer_id}', image_info_label)
         control_layout.addWidget(image_info_label)
         
+        # 像素信息标签（显示当前像素值）
+        pixel_value_label = QLabel("像素值: -")
+        setattr(self, f'pixel_value_label_{viewer_id}', pixel_value_label)
+        control_layout.addWidget(pixel_value_label)
+        
         layout.addLayout(control_layout)
+        
+        # 连接鼠标移动事件，指標显示像素值
+        viewer.mouse_moved.connect(lambda x, y, val: self.on_viewer_mouse_moved(viewer_id, x, y, val))
         
         return panel
         
@@ -343,6 +363,119 @@ class PixelTimeSeriesViewerDialog(QDialog):
             QMessageBox.critical(self, "错误", f"打开文件夹失败: {str(e)}")
             traceback.print_exc()
     
+    def open_h5_timeseries(self):
+        """打开h5时序数据"""
+        # 读取上次打开的路径
+        settings = QSettings("YiboYuan", "Toolbox")
+        last_folder = settings.value("pixel_time_series_viewer/last_h5_path", "")
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择h5时序数据文件", last_folder, "HDF5 Files (*.h5 *.hdf5);;All Files (*)")
+        
+        if not file_path:
+            return
+        
+        # 保存当前路径
+        settings.setValue("pixel_time_series_viewer/last_h5_path", os.path.dirname(file_path))
+        
+        try:
+            # 打开h5文件
+            with h5py.File(file_path, 'r') as h5f:
+                # 读取日期列表
+                if 'date' not in h5f:
+                    QMessageBox.critical(self, "错误", "h5文件中未找到'date'数据集！")
+                    return
+                
+                # 读取时序数据
+                if 'timeseries' not in h5f:
+                    QMessageBox.critical(self, "错误", "h5文件中未找到'timeseries'数据集！")
+                    return
+                
+                # 读取日期
+                dates = h5f['date'][:]
+                # 将字节串转换为字符串（如果需要）
+                if dates.dtype.kind == 'S' or dates.dtype.kind == 'U':
+                    self.date_list = [d.decode('utf-8') if isinstance(d, bytes) else str(d) for d in dates]
+                else:
+                    self.date_list = [str(d) for d in dates]
+                
+                # 读取时序影像数据
+                timeseries_data = h5f['timeseries'][:]
+                
+                # 检查数据维度
+                if timeseries_data.ndim != 3:
+                    QMessageBox.critical(self, "错误", 
+                                       f"时序数据维度错误！期望3维(时间, 高度, 宽度)，得到{timeseries_data.ndim}维")
+                    return
+                
+                num_dates = timeseries_data.shape[0]
+                height = timeseries_data.shape[1]
+                width = timeseries_data.shape[2]
+                
+                # 检查第一帧是否全为0，如果是则跳过
+                start_index = 0
+                if num_dates > 0 and np.all(timeseries_data[0, :, :] == 0):
+                    start_index = 1
+                    QMessageBox.information(self, "提示", "检测到第一帧数据全为0，已自动跳过")
+                
+                # 调整日期列表
+                if start_index > 0 and len(self.date_list) > start_index:
+                    self.date_list = self.date_list[start_index:]
+                
+                # 清空之前的数据
+                self.image_files = []
+                self.image_data_list = []
+                self.selected_pixel = None
+                
+                # 将每个时间切片作为一张图像（跳过第一帧如果需要）
+                for i in range(start_index, num_dates):
+                    image_data = timeseries_data[i, :, :]
+                    self.image_data_list.append(image_data)
+                    # 使用日期作为文件名
+                    idx = i - start_index
+                    if idx < len(self.date_list):
+                        self.image_files.append(f"{self.date_list[idx]}.h5")
+                    else:
+                        self.image_files.append(f"frame_{i:04d}.h5")
+                
+                # 更新UI
+                self.image_count_label.setText(f"已加载 {len(self.image_data_list)} 张时序影像")
+                
+                # 更新两个窗口的控件
+                for viewer_id in [1, 2]:
+                    slider = getattr(self, f'image_slider_{viewer_id}')
+                    prev_btn = getattr(self, f'prev_btn_{viewer_id}')
+                    next_btn = getattr(self, f'next_btn_{viewer_id}')
+                    
+                    slider.setMaximum(len(self.image_data_list) - 1)
+                    slider.setEnabled(True)
+                    prev_btn.setEnabled(True)
+                    next_btn.setEnabled(True)
+                
+                # 设置默认的彩色colormap
+                self.colormap_combo.setCurrentText('jet')
+                
+                # 设置默认Nodata值为0（h5数据）
+                self.nodata_value = 0
+                self.image_viewer_1.set_nodata_value(0)
+                self.image_viewer_2.set_nodata_value(0)
+                
+                # 显示第一张和第二张图像
+                self.current_image_index_1 = 0
+                self.current_image_index_2 = min(1, len(self.image_data_list) - 1)
+                self.show_image(1)
+                self.show_image(2)
+                
+                QMessageBox.information(self, "成功", 
+                                      f"成功加载h5时序数据！\n" +
+                                      f"影像数量: {len(self.image_data_list)}\n" +
+                                      f"影像尺寸: {width} x {height}\n" +
+                                      f"日期范围: {self.date_list[0]} 至 {self.date_list[-1]}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"打开h5文件失败: {str(e)}")
+            traceback.print_exc()
+    
     def load_images(self, file_list):
         """加载图像列表"""
         if not file_list:
@@ -352,13 +485,18 @@ class PixelTimeSeriesViewerDialog(QDialog):
             # 清空之前的数据
             self.image_files = []
             self.image_data_list = []
+            self.date_list = []
             self.selected_pixel = None
+            self.nodata_value = None
             
             # 读取第一张图像以检查尺寸和波段数
-            first_image_data = self._read_image(file_list[0])
+            first_image_data, first_nodata = self._read_image(file_list[0])
             if first_image_data is None:
                 QMessageBox.critical(self, "错误", f"无法读取第一张图像: {file_list[0]}")
                 return
+            
+            # 保存第一张图像的nodata值
+            self.nodata_value = first_nodata
             
             reference_shape = first_image_data.shape
             
@@ -366,7 +504,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             inconsistent_files = []
             
             for file_path in file_list:
-                image_data = self._read_image(file_path)
+                image_data, _ = self._read_image(file_path)
                 
                 if image_data is None:
                     inconsistent_files.append(f"{os.path.basename(file_path)}: 读取失败")
@@ -405,6 +543,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 prev_btn.setEnabled(True)
                 next_btn.setEnabled(True)
             
+            # 设置Nodata值到两个查看器
+            self.image_viewer_1.set_nodata_value(self.nodata_value)
+            self.image_viewer_2.set_nodata_value(self.nodata_value)
+            
             # 显示第一张和第二张图像
             self.current_image_index_1 = 0
             self.current_image_index_2 = min(1, len(self.image_data_list) - 1)  # 如果只有一张图像，两个窗口都显示第一张
@@ -423,7 +565,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         读取图像文件，支持普通图像和TIFF
         
         Returns:
-            numpy array: 图像数据，格式为(H, W)或(H, W, C)
+            tuple: (图像数据, nodata值) 或 (None, None)
         """
         try:
             ext = os.path.splitext(file_path)[1].lower()
@@ -432,14 +574,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 # 使用GDAL读取TIFF
                 ds = gdal.Open(file_path)
                 if ds is None:
-                    return None
+                    return None, None
                 
                 band_count = ds.RasterCount
                 
+                # 获取Nodata值（从第一个波段）
+                band1 = ds.GetRasterBand(1)
+                nodata_value = band1.GetNoDataValue()
+                
                 if band_count == 1:
                     # 单波段
-                    band = ds.GetRasterBand(1)
-                    data = band.ReadAsArray()
+                    data = band1.ReadAsArray()
                 else:
                     # 多波段
                     data = []
@@ -449,7 +594,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     data = np.stack(data, axis=-1)
                 
                 ds = None
-                return data
+                return data, nodata_value
             else:
                 # 使用PIL读取普通图像
                 img = Image.open(file_path)
@@ -457,18 +602,18 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 
                 # 如果是单通道灰度图，确保是2D
                 if data.ndim == 2:
-                    return data
+                    return data, None
                 elif data.ndim == 3:
                     # 如果有alpha通道，去掉
                     if data.shape[2] == 4:
                         data = data[:, :, :3]
-                    return data
+                    return data, None
                 else:
-                    return None
+                    return None, None
                 
         except Exception as e:
             print(f"读取图像失败 {file_path}: {e}")
-            return None
+            return None, None
     
     def sort_images(self):
         """排序图像"""
@@ -527,15 +672,26 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 values.append(img_data[y, x])
             
             ax = self.figure.add_subplot(111)
-            ax.plot(time_indices, values, 'o-', label='像素值', linewidth=2, color='blue')
+            ax.plot(time_indices, values, 'o-', label='像素值', linewidth=1, markersize=4, color='blue')
             
             # 高亮两个窗口当前图像的点，用不同颜色
             ax.plot(self.current_image_index_1, values[self.current_image_index_1], 
-                   'ro', markersize=12, label='窗口1', zorder=10)
+                   'ro', markersize=6, label='窗口1', zorder=10)
             ax.plot(self.current_image_index_2, values[self.current_image_index_2], 
-                   'go', markersize=12, label='窗口2', zorder=10)
+                   'go', markersize=6, label='窗口2', zorder=10)
             
-            ax.set_xlabel('图像索引')
+            # 如果有日期列表，使用日期作为x轴标签
+            if self.date_list:
+                ax.set_xlabel('日期')
+                # 设置x轴刻度标签（每隔一定间隔显示日期）
+                step = max(1, len(self.date_list) // 10)  # 最多显示10个日期标签
+                tick_positions = list(range(0, len(self.date_list), step))
+                tick_labels = [self.date_list[i] for i in tick_positions]
+                ax.set_xticks(tick_positions)
+                ax.set_xticklabels(tick_labels, rotation=45, ha='right')
+            else:
+                ax.set_xlabel('图像索引')
+            
             ax.set_ylabel('像素值')
             ax.set_title(f'像素 ({x}, {y}) 的时序曲线')
             ax.legend()
@@ -556,7 +712,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 
                 color = band_colors[band_idx % len(band_colors)]
                 ax.plot(time_indices, values, 'o-', label=f'波段{band_idx+1}', 
-                       linewidth=2, color=color, alpha=0.7)
+                       linewidth=1, markersize=3, color=color, alpha=0.7)
             
             # 高亮两个窗口当前图像的位置（用竖线）
             ax.axvline(x=self.current_image_index_1, color='red', linestyle='--', 
@@ -574,13 +730,116 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     gray_values.append(gray)
                 
                 ax.plot(time_indices, gray_values, 's--', label='灰度值', 
-                       linewidth=2, alpha=0.5, color='black')
+                       linewidth=1, markersize=3, alpha=0.5, color='black')
             
-            ax.set_xlabel('图像索引')
+            # 如果有日期列表，使用日期作为x轴标签
+            if self.date_list:
+                ax.set_xlabel('日期')
+                # 设置x轴刻度标签（每隔一定间隔显示日期）
+                step = max(1, len(self.date_list) // 10)  # 最多显示10个日期标签
+                tick_positions = list(range(0, len(self.date_list), step))
+                tick_labels = [self.date_list[i] for i in tick_positions]
+                ax.set_xticks(tick_positions)
+                ax.set_xticklabels(tick_labels, rotation=45, ha='right')
+            else:
+                ax.set_xlabel('图像索引')
+            
             ax.set_ylabel('像素值')
             ax.set_title(f'像素 ({x}, {y}) 的时序曲线')
             ax.legend()
             ax.grid(True, alpha=0.3)
         
         self.figure.tight_layout()
-        self.canvas.draw()
+        self.canvas.draw()    
+    def set_nodata_value(self):
+        """设置Nodata值"""
+        from PySide6.QtWidgets import QInputDialog
+        
+        # 获取当前Nodata值
+        current_nodata = self.image_viewer_1.nodata_value if hasattr(self.image_viewer_1, 'nodata_value') else None
+        if np.isnan(current_nodata) if isinstance(current_nodata, float) else False:
+            current_text = "nan"
+        else:
+            current_text = str(current_nodata) if current_nodata is not None else ""
+        
+        # 弹出对话框让用户输入
+        text, ok = QInputDialog.getText(self, "设置Nodata值", 
+                                        "请输入Nodata值（nan表示NaN，留空表示取消设置）:",
+                                        text=current_text)
+        
+        if ok:
+            if text.strip() == "":
+                # 取消Nodata设置
+                self.image_viewer_1.set_nodata_value(None)
+                self.image_viewer_2.set_nodata_value(None)
+                QMessageBox.information(self, "成功", "已取消Nodata值设置")
+            else:
+                try:
+                    # 支持nan值
+                    if text.lower().strip() == "nan":
+                        nodata_value = np.nan
+                    else:
+                        nodata_value = float(text)
+                    
+                    self.image_viewer_1.set_nodata_value(nodata_value)
+                    self.image_viewer_2.set_nodata_value(nodata_value)
+                    QMessageBox.information(self, "成功", f"已设置Nodata值为: {nodata_value}")
+                except ValueError:
+                    QMessageBox.warning(self, "错误", "请输入有效的数字或'nan'！")
+    
+    def on_viewer_mouse_moved(self, viewer_id, x, y, value):
+        """鼠标位置移动事件，显示像素值
+        
+        Args:
+            viewer_id: 查看器ID（1或2）
+            x: X坐标
+            y: Y坐标
+            value: 像素值
+        """
+        # 更新当前窗口的像素值标签
+        pixel_value_label = getattr(self, f'pixel_value_label_{viewer_id}')
+        if value is not None:
+            if isinstance(value, (int, float, np.integer, np.floating)):
+                if np.isnan(value) if isinstance(value, float) else False:
+                    pixel_value_label.setText(f"像素值: ({x}, {y}) = NaN")
+                else:
+                    pixel_value_label.setText(f"像素值: ({x}, {y}) = {value:.6g}")
+            elif isinstance(value, np.ndarray):
+                if value.ndim == 0:
+                    pixel_value_label.setText(f"像素值: ({x}, {y}) = {value:.6g}")
+                else:
+                    value_str = ", ".join([f"{v:.6g}" for v in value])
+                    pixel_value_label.setText(f"像素值: ({x}, {y}) = [{value_str}]")
+        else:
+            pixel_value_label.setText("像素值: -")
+        
+        # 同时更新另一个窗口的像素值，基于它当前显示的图像
+        other_viewer_id = 2 if viewer_id == 1 else 1
+        other_viewer = getattr(self, f'image_viewer_{other_viewer_id}')
+        other_pixel_label = getattr(self, f'pixel_value_label_{other_viewer_id}')
+        
+        # 获取另一个窗口当前显示的图像
+        other_image_index = getattr(self, f'current_image_index_{other_viewer_id}')
+        if self.image_data_list and 0 <= other_image_index < len(self.image_data_list):
+            other_image_data = self.image_data_list[other_image_index]
+            # 检查坐标是否有效
+            if 0 <= x < other_image_data.shape[1] and 0 <= y < other_image_data.shape[0]:
+                other_value = other_image_data[y, x]
+                
+                # 显示另一个窗口的像素值
+                if isinstance(other_value, (int, float, np.integer, np.floating)):
+                    if np.isnan(other_value) if isinstance(other_value, float) else False:
+                        other_pixel_label.setText(f"像素值: ({x}, {y}) = NaN")
+                    else:
+                        other_pixel_label.setText(f"像素值: ({x}, {y}) = {other_value:.6g}")
+                elif isinstance(other_value, np.ndarray):
+                    if other_value.ndim == 0:
+                        other_pixel_label.setText(f"像素值: ({x}, {y}) = {other_value:.6g}")
+                    else:
+                        value_str = ", ".join([f"{v:.6g}" for v in other_value])
+                        other_pixel_label.setText(f"像素值: ({x}, {y}) = [{value_str}]")
+            else:
+                other_pixel_label.setText("像素值: -")  # 坐标超出范围
+        else:
+            other_pixel_label.setText("像素值: -")
+

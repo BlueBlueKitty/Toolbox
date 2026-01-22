@@ -200,8 +200,12 @@ class ImageViewer(QGraphicsView):
         
         # 标记Nodata像素
         if self.nodata_value is not None:
+            # 标记Nodata像素、nan和inf为透明
             nodata_mask = (arr == self.nodata_value)
-            alpha_channel[nodata_mask] = 0  # Nodata像素设为完全透明
+            nan_mask = np.isnan(arr)
+            inf_mask = ~np.isfinite(arr)
+            combined_mask = nodata_mask | nan_mask | inf_mask
+            alpha_channel[combined_mask] = 0  # 这些像素设为完全透明
         
         # 对非Nodata像素进行归一化
         valid_mask = alpha_channel > 0
@@ -236,6 +240,16 @@ class ImageViewer(QGraphicsView):
         """设置colormap"""
         if colormap_name in self.available_colormaps:
             self.current_colormap = colormap_name
+            self._update_display()
+    
+    def set_nodata_value(self, nodata_value):
+        """设置Nodata值
+        
+        Args:
+            nodata_value: Nodata值，设为None表示取消Nodata设置
+        """
+        self.nodata_value = nodata_value
+        if self.image_array is not None:
             self._update_display()
     
     def fit_in_view(self):
@@ -380,6 +394,8 @@ class ImageViewer(QGraphicsView):
     def set_nodata_value(self, nodata_value):
         """设置Nodata值"""
         self.nodata_value = nodata_value
+        if self.image_array is not None:
+            self._update_display()
 
 
 class ImageViewerSynchronizer:

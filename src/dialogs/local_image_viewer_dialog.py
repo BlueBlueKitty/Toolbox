@@ -10,14 +10,16 @@ import os
 import numpy as np
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QFileDialog, QLabel, QMessageBox, QSplitter, 
-                               QGroupBox, QButtonGroup, QRadioButton)
+                               QGroupBox, QButtonGroup, QRadioButton, QListWidget,
+                               QDialogButtonBox, QInputDialog)
 from PySide6.QtCore import Qt, QSettings
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 from PIL import Image
 from osgeo import gdal
 import traceback
+import h5py
 
 from src.widgets import InteractiveImageViewer, ColormapComboBox
 
@@ -51,10 +53,18 @@ class LocalImageViewerDialog(QDialog):
         self.open_btn.clicked.connect(self.open_image)
         control_layout.addWidget(self.open_btn)
         
+        self.open_h5_btn = QPushButton("打开h5文件")
+        self.open_h5_btn.clicked.connect(self.open_h5_file)
+        control_layout.addWidget(self.open_h5_btn)
+        
         control_layout.addWidget(QLabel("颜色映射:"))
         self.colormap_combo = ColormapComboBox()
         self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
         control_layout.addWidget(self.colormap_combo)
+        
+        self.set_nodata_btn = QPushButton("设置Nodata值")
+        self.set_nodata_btn.clicked.connect(self.set_nodata_value)
+        control_layout.addWidget(self.set_nodata_btn)
         
         # 绘制模式选择
         control_layout.addWidget(QLabel("绘制模式:"))
@@ -286,12 +296,12 @@ class LocalImageViewerDialog(QDialog):
         """鼠标移动事件"""
         if value is not None:
             if isinstance(value, (int, float, np.integer, np.floating)):
-                self.pixel_info_label.setText(f"像素位置: ({x}, {y}) | 值: {value:.2f}")
+                self.pixel_info_label.setText(f"像素位置: ({x}, {y}) | 值: {value:.6g}")
             elif isinstance(value, np.ndarray):
                 if value.ndim == 0:
-                    self.pixel_info_label.setText(f"像素位置: ({x}, {y}) | 值: {value:.2f}")
+                    self.pixel_info_label.setText(f"像素位置: ({x}, {y}) | 值: {value:.6g}")
                 else:
-                    value_str = ", ".join([f"{v:.2f}" for v in value])
+                    value_str = ", ".join([f"{v:.6g}" for v in value])
                     self.pixel_info_label.setText(f"像素位置: ({x}, {y}) | 值: [{value_str}]")
         else:
             self.pixel_info_label.setText("像素信息: -")
@@ -535,4 +545,196 @@ class LocalImageViewerDialog(QDialog):
         # 连接鼠标移动事件
         self.canvas.mpl_connect('motion_notify_event', self.on_chart_mouse_move)
         
-        self.chart_info_label.setText(f"折线图: 共{len(points)}个点")
+        self.chart_info_label.setText(f"折线图: 共{len(points)}个点")    
+    def open_h5_file(self):
+        """打开h5文件"""
+        # 读取上次打开的路径
+        settings = QSettings("YiboYuan", "Toolbox")
+        last_path = settings.value("local_image_viewer/last_h5_path", "")
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "打开h5文件",
+            last_path,
+            "HDF5 Files (*.h5 *.hdf5);;所有文件 (*.*)"
+        )
+        
+        if not file_path:
+            return
+        
+        # 保存当前路径
+        settings.setValue("local_image_viewer/last_h5_path", os.path.dirname(file_path))
+        
+        try:
+            # 打开h5文件并列出所有数据集
+            with h5py.File(file_path, 'r') as h5f:
+                # 递归获取所有数据集
+                datasets = []
+                
+                def find_datasets(name, obj):
+                    if isinstance(obj, h5py.Dataset):
+                        # 只显示2D或3D数据集
+                        if obj.ndim >= 2:
+                            shape_str = f"({', '.join(map(str, obj.shape))})"
+                            datasets.append((name, shape_str, obj.shape))
+                
+                h5f.visititems(find_datasets)
+                
+                if not datasets:
+                    QMessageBox.warning(self, "警告", "h5文件中没有找到合适的图像数据集！")
+                    return
+                
+                # 如果只有一个数据集，直接加载
+                if len(datasets) == 1:
+                    selected_dataset = datasets[0][0]
+                else:
+                    # 弹出对话框让用户选择数据集
+                    selected_dataset = self._show_dataset_selection_dialog(datasets)
+                    if not selected_dataset:
+                        return
+                
+                # 加载选中的数据集
+                data = h5f[selected_dataset][:]
+                
+                # 处理数据维度
+                if data.ndim == 2:
+                    # 2D数据，直接使用
+                    self.image_data = data.astype(np.float32)
+                elif data.ndim == 3:
+                    # 3D数据，如果是时序数据，选择第一帧；如果是多波段，直接使用
+                    if data.shape[0] < data.shape[1] and data.shape[0] < data.shape[2]:
+                        # 可能是多波段图像 (bands, height, width)
+                        self.image_data = np.moveaxis(data, 0, -1).astype(np.float32)  # 转换为 (height, width, bands)
+                    else:
+                        # 可能是时序数据，让用户选择帧
+                        frame_idx, ok = QInputDialog.getInt(
+                            self, "选择帧", 
+                            f"数据包含 {data.shape[0]} 帧，请选择要显示的帧（0-{data.shape[0]-1}）:",
+                            0, 0, data.shape[0]-1)
+                        
+                        if ok:
+                            self.image_data = data[frame_idx, :, :].astype(np.float32)
+                        else:
+                            return
+                else:
+                    QMessageBox.critical(self, "错误", f"不支持的数据维度: {data.ndim}D")
+                    return
+                
+                self.image_file = file_path
+                self.nodata_value = None  # h5文件默认没有Nodata值
+                
+                # 显示图像
+                self.image_viewer.set_image_from_array(self.image_data)
+                
+                # 设置Nodata值到图像查看器
+                self.image_viewer.set_nodata_value(self.nodata_value)
+                
+                # 设置默认colormap为jet（h5数据）
+                self.colormap_combo.setCurrentText('jet')
+                
+                # 更新信息
+                shape = self.image_data.shape
+                if self.image_data.ndim == 2:
+                    info = f"{os.path.basename(file_path)} [{selected_dataset}] | 尺寸: {shape[1]}x{shape[0]} | 单波段"
+                elif self.image_data.ndim == 3:
+                    info = f"{os.path.basename(file_path)} [{selected_dataset}] | 尺寸: {shape[1]}x{shape[0]} | {shape[2]}波段"
+                else:
+                    info = f"{os.path.basename(file_path)} [{selected_dataset}] | 尺寸: {shape}"
+                
+                self.image_info_label.setText(info)
+                
+                # 自动显示整个图像的直方图
+                self.show_image_histogram()
+                
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"打开h5文件失败: {str(e)}")
+            traceback.print_exc()
+    
+    def _show_dataset_selection_dialog(self, datasets):
+        """显示数据集选择对话框
+        
+        Args:
+            datasets: 数据集列表，每项为(name, shape_str, shape)元组
+            
+        Returns:
+            选中的数据集名称，或None
+        """
+        dialog = QDialog(self)
+        dialog.setWindowTitle("选择数据集")
+        dialog.resize(500, 400)
+        
+        layout = QVBoxLayout(dialog)
+        
+        label = QLabel("h5文件包含多个数据集，请双击要打开的数据集：")
+        layout.addWidget(label)
+        
+        # 列表控件
+        list_widget = QListWidget()
+        for name, shape_str, _ in datasets:
+            list_widget.addItem(f"{name}  {shape_str}")
+        list_widget.setCurrentRow(0)
+        layout.addWidget(list_widget)
+        
+        # 连接双击事件
+        list_widget.doubleClicked.connect(dialog.accept)
+        
+        # 按钮
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        
+        if dialog.exec() == QDialog.Accepted:
+            selected_idx = list_widget.currentRow()
+            if selected_idx >= 0:
+                return datasets[selected_idx][0]
+        
+        return None
+    
+    def set_nodata_value(self):
+        """设置Nodata值"""
+        # 获取当前Nodata值
+        if np.isnan(self.nodata_value) if isinstance(self.nodata_value, float) else False:
+            current_text = "nan"
+        else:
+            current_text = str(self.nodata_value) if self.nodata_value is not None else ""
+        
+        # 弹出对话框让用户输入
+        text, ok = QInputDialog.getText(self, "设置Nodata值", 
+                                        "请输入Nodata值（nan表示NaN，留空表示取消设置）:",
+                                        text=current_text)
+        
+        if ok:
+            if text.strip() == "":
+                # 取消Nodata设置
+                self.nodata_value = None
+                self.image_viewer.set_nodata_value(None)
+                QMessageBox.information(self, "成功", "已取消Nodata值设置")
+            else:
+                try:
+                    # 支持nan值
+                    if text.lower().strip() == "nan":
+                        nodata_value = np.nan
+                    else:
+                        nodata_value = float(text)
+                    
+                    self.nodata_value = nodata_value
+                    self.image_viewer.set_nodata_value(nodata_value)
+                    QMessageBox.information(self, "成功", f"已设置Nodata值为: {nodata_value}")
+                except ValueError:
+                    QMessageBox.warning(self, "错误", "请输入有效的数字或'nan'！")
+            
+            # 更新图像信息
+            if self.image_file:
+                shape = self.image_data.shape
+                if self.image_data.ndim == 2:
+                    info = f"{os.path.basename(self.image_file)} | 尺寸: {shape[1]}x{shape[0]} | 单波段"
+                elif self.image_data.ndim == 3:
+                    info = f"{os.path.basename(self.image_file)} | 尺寸: {shape[1]}x{shape[0]} | {shape[2]}波段"
+                else:
+                    info = f"{os.path.basename(self.image_file)} | 尺寸: {shape}"
+                
+                if self.nodata_value is not None:
+                    info += f" | Nodata: {self.nodata_value}"
+                
+                self.image_info_label.setText(info)
