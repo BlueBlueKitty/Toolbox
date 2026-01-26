@@ -221,3 +221,4 @@ dist/
 test/
 docs/
 .vscode/
+DEM_downloader/
