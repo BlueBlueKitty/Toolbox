@@ -13,3 +13,6 @@ dependencies = [
     "pyside6>=6.10.1",
     "requests>=2.32.5",
 ]
+
+[tool.uv.sources]
+gdal = { path = "/path_to_your_gdal_wheel_path/gdal-3.11.4-cp312-cp312-win_amd64.whl" }

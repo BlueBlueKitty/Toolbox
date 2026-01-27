@@ -5,4 +5,8 @@ Remove-Item -Recurse -Force dist, build
 $env:PATH = "C:\Windows\system32;C:\Windows;D:\实验\Toolbox\.venv\Scripts"
 
 # 3. 执行打包
-python -m PyInstaller Toolbox.spec --clean --noconfirm
+# 目录模式
+$env:ONEFILE='0'; python -m PyInstaller Toolbox.spec --clean --noconfirm
+
+# 单文件模式
+$env:ONEFILE="1"; python -m PyInstaller Toolbox.spec --clean --noconfirm; Remove-Item Env:\ONEFILE
