@@ -211,14 +211,24 @@ class ImageViewer(QGraphicsView):
         valid_mask = alpha_channel > 0
         if np.any(valid_mask):
             valid_data = arr[valid_mask]
-            arr_min = np.nanmin(valid_data)
-            arr_max = np.nanmax(valid_data)
+            # 进一步过滤NaN和inf值
+            finite_mask = np.isfinite(valid_data)
+            valid_data = valid_data[finite_mask]
             
-            if arr_max - arr_min == 0:
-                normalized = np.zeros_like(arr, dtype=np.uint8)
+            if len(valid_data) > 0:
+                arr_min = np.min(valid_data)
+                arr_max = np.max(valid_data)
+                
+                if arr_max - arr_min == 0:
+                    normalized = np.zeros_like(arr, dtype=np.uint8)
+                else:
+                    normalized = np.zeros_like(arr, dtype=np.uint8)
+                    # 只对真正有效的像素进行标准化
+                    valid_indices = np.where(valid_mask)[0]
+                    valid_indices = valid_indices[finite_mask]
+                    normalized.flat[valid_indices] = ((valid_data - arr_min) / (arr_max - arr_min) * 255).astype(np.uint8)
             else:
                 normalized = np.zeros_like(arr, dtype=np.uint8)
-                normalized[valid_mask] = ((valid_data - arr_min) / (arr_max - arr_min) * 255).astype(np.uint8)
         else:
             normalized = np.zeros_like(arr, dtype=np.uint8)
         

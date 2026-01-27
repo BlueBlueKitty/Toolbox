@@ -18,7 +18,7 @@ Copyright (c) 2025 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 
 import os
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-                               QPushButton, QFileDialog, QComboBox, QCheckBox, 
+                               QPushButton, QFileDialog, QCheckBox, 
                                QFormLayout, QDialogButtonBox, QGroupBox)
 from PySide6.QtCore import Qt
 
@@ -32,26 +32,30 @@ class TiffBoundarySettingsDialog(QDialog):
         try:
             settings = self.get_settings()
             if not settings["input_file"]:
-                QMessageBox.warning(self, "参数错误", "请选择输入TIFF文件!", parent=self)
+                QMessageBox.warning(self, "参数错误", "请选择输入TIFF文件!")
                 return False
             if not settings["output_file"]:
-                QMessageBox.warning(self, "参数错误", "请指定输出矢量文件!", parent=self)
+                QMessageBox.warning(self, "参数错误", "请指定输出矢量文件!")
                 return False
+            
+            # 保存输入文件所在目录到配置文件
+            input_dir = os.path.dirname(settings["input_file"])
+            self.save_config({"last_input_dir": input_dir})
+            
             # 延迟导入，避免循环依赖
-            from src.utils import tiff_boundary_to_vector
+            from src.utils.tiff_boundary_to_vector import tiff_boundary_to_vector
             success = tiff_boundary_to_vector(
                 settings["input_file"],
                 settings["output_file"],
-                to_wgs84=settings["to_wgs84"],
-                output_format=settings["output_format"]
+                to_wgs84=settings["to_wgs84"]
             )
             if success:
-                QMessageBox.information(self, "成功", "TIFF边界已成功转换为矢量文件!", parent=self)
+                QMessageBox.information(self, "成功", "TIFF边界已成功转换为矢量文件!")
             else:
-                QMessageBox.critical(self, "错误", "转换过程中出现错误，请查看控制台输出。", parent=self)
+                QMessageBox.critical(self, "错误", "转换过程中出现错误，请查看控制台输出。")
             return success
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"发生异常: {str(e)}", parent=self)
+            QMessageBox.critical(self, "错误", f"发生异常: {str(e)}")
             import traceback
             traceback.print_exc()
             return False
@@ -60,7 +64,11 @@ class TiffBoundarySettingsDialog(QDialog):
         super(TiffBoundarySettingsDialog, self).__init__(parent)
         
         self.setWindowTitle("TIFF边界转矢量 - 参数设置")
-        self.resize(500, 300)
+        self.resize(500, 250)
+        # 配置文件保存到用户主目录下的.toolbox文件夹
+        config_dir = os.path.join(os.path.expanduser("~"), ".toolbox")
+        os.makedirs(config_dir, exist_ok=True)
+        self.config_file = os.path.join(config_dir, "tiff_boundary_settings.ini")
         
         # 创建布局
         main_layout = QVBoxLayout(self)
@@ -96,11 +104,6 @@ class TiffBoundarySettingsDialog(QDialog):
         
         output_layout.addRow("输出矢量文件:", output_file_layout)
         
-        self.output_format = QComboBox()
-        self.output_format.addItems(["Shapefile (*.shp)", "KML (*.kml)", "KMZ (*.kmz)"])
-        self.output_format.currentIndexChanged.connect(self.update_file_extension)
-        output_layout.addRow("输出格式:", self.output_format)
-        
         output_group.setLayout(output_layout)
         
         # 坐标系设置
@@ -131,63 +134,103 @@ class TiffBoundarySettingsDialog(QDialog):
         main_layout.addWidget(buttons)
         
         self.setLayout(main_layout)
+        
+        # 加载配置
+        self.load_config()
+
+    
+    def load_config(self):
+        """从ini配置文件加载上次的输入目录"""
+        try:
+            import configparser
+            config = configparser.ConfigParser()
+            if os.path.exists(self.config_file):
+                config.read(self.config_file, encoding='utf-8')
+                last_dir = config.get('TIFF', 'last_input_dir', fallback=None)
+                if last_dir and os.path.exists(last_dir):
+                    self.last_input_dir = last_dir
+                else:
+                    self.last_input_dir = str(os.path.expanduser("~"))
+            else:
+                self.last_input_dir = str(os.path.expanduser("~"))
+        except Exception as e:
+            print(f"加载配置失败: {e}")
+            self.last_input_dir = str(os.path.expanduser("~"))
+    
+    def save_config(self, config_dict):
+        """保存配置到ini文件"""
+        try:
+            import configparser
+            config = configparser.ConfigParser()
+            
+            # 如果文件存在，先读取
+            if os.path.exists(self.config_file):
+                config.read(self.config_file, encoding='utf-8')
+            
+            # 确保有TIFF section
+            if 'TIFF' not in config:
+                config['TIFF'] = {}
+            
+            # 更新配置
+            config['TIFF'].update(config_dict)
+            
+            # 写入配置文件
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                config.write(f)
+        except Exception as e:
+            print(f"保存配置失败: {e}")
     
     def browse_input_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择TIFF文件", "", "TIFF文件 (*.tif *.tiff);;所有文件 (*.*)"
+            self, "选择TIFF文件", self.last_input_dir, "TIFF文件 (*.tif *.tiff);;所有文件 (*.*)"
         )
         if file_path:
             self.input_file.setText(file_path)
+            self.last_input_dir = os.path.dirname(file_path)
             # 如果还没有设置输出路径，则自动设置一个同名的输出文件
             if not self.output_file.text():
                 base_name = os.path.splitext(os.path.basename(file_path))[0]
-                output_ext = ".shp" if self.output_format.currentIndex() == 0 else \
-                            ".kml" if self.output_format.currentIndex() == 1 else \
-                            ".kmz"
-                suggested_output = os.path.join(os.path.dirname(file_path), f"{base_name}_boundary{output_ext}")
+                suggested_output = os.path.join(os.path.dirname(file_path), f"{base_name}_boundary.shp")
                 self.output_file.setText(suggested_output)
     
     def browse_output_file(self):
-        current_format = self.output_format.currentIndex()
-        filter_str = "Shapefile (*.shp)" if current_format == 0 else \
-                     "KML (*.kml)" if current_format == 1 else \
-                     "KMZ (*.kmz)"
-                     
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "保存矢量文件", "", filter_str
+        """打开保存文件对话框，集成输出格式选择"""
+        filter_str = "Shapefile (*.shp);;KML (*.kml);;KMZ (*.kmz)"
+        
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self, "保存矢量文件", self.last_input_dir, filter_str
         )
         if file_path:
+            # 根据选中的过滤器确定扩展名
+            if "Shapefile" in selected_filter:
+                ext = ".shp"
+            elif "KML" in selected_filter and "KMZ" not in selected_filter:
+                ext = ".kml"
+            elif "KMZ" in selected_filter:
+                ext = ".kmz"
+            else:
+                # 从文件路径推断
+                current_ext = os.path.splitext(file_path)[1].lower()
+                if current_ext in ['.shp', '.kml', '.kmz']:
+                    ext = current_ext
+                else:
+                    ext = ".shp"
+            
             # 确保文件扩展名正确
-            expected_ext = ".shp" if current_format == 0 else \
-                          ".kml" if current_format == 1 else \
-                          ".kmz"
-            if not file_path.lower().endswith(expected_ext):
-                file_path += expected_ext
+            if not file_path.lower().endswith(ext):
+                file_path = os.path.splitext(file_path)[0] + ext
                 
             self.output_file.setText(file_path)
     
     def update_file_extension(self):
-        """当用户更改输出格式时更新文件扩展名"""
-        current_path = self.output_file.text()
-        if not current_path:
-            return
-            
-        # 获取当前路径的基本部分（不含扩展名）
-        base_path = os.path.splitext(current_path)[0]
-        
-        # 根据当前选择添加正确的扩展名
-        current_format = self.output_format.currentIndex()
-        new_ext = ".shp" if current_format == 0 else \
-                 ".kml" if current_format == 1 else \
-                 ".kmz"
-                 
-        self.output_file.setText(base_path + new_ext)
+        """已废弃，保留以兼容"""
+        pass
+
     
     def get_settings(self):
         """返回用户设置的参数"""
         return {
             "input_file": self.input_file.text(),
             "output_file": self.output_file.text(),
-            "to_wgs84": self.use_wgs84.isChecked(),
-            "output_format": ["shp", "kml", "kmz"][self.output_format.currentIndex()]
+            "to_wgs84": self.use_wgs84.isChecked()
         }

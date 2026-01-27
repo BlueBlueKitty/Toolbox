@@ -414,11 +414,16 @@ class LocalImageViewerDialog(QDialog):
             if len(data) == 0:
                 continue
             
+            # 过滤NaN和inf值
+            finite_data = data[np.isfinite(data)]
+            if len(finite_data) == 0:
+                continue
+            
             color = colors[i % len(colors)]
             label = f'波段{i+1}' if len(data_list) > 1 else '像素值'
             
             # 计算直方图
-            counts, bins = np.histogram(data, bins=50)
+            counts, bins = np.histogram(finite_data, bins=50)
             bin_centers = (bins[:-1] + bins[1:]) / 2
             
             # 绘制填充折线图
