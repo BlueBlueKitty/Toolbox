@@ -8,11 +8,19 @@ Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 
 import os
 import numpy as np
+from pathlib import Path
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QFileDialog, QLabel, QMessageBox, QSplitter, 
                                QGroupBox, QButtonGroup, QRadioButton, QListWidget,
                                QDialogButtonBox, QInputDialog)
 from PySide6.QtCore import Qt, QSettings
+
+# 配置文件路径
+def get_settings():
+    config_dir = Path.home() / ".toolbox"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_file = config_dir / "local_image_viewer.ini"
+    return QSettings(str(config_file), QSettings.IniFormat)
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -146,8 +154,8 @@ class LocalImageViewerDialog(QDialog):
     def open_image(self):
         """打开图像文件"""
         # 读取上次打开的路径
-        settings = QSettings("YiboYuan", "Toolbox")
-        last_path = settings.value("local_image_viewer/last_file_path", "")
+        settings = get_settings()
+        last_path = settings.value("last_file_path", "")
         
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -160,7 +168,7 @@ class LocalImageViewerDialog(QDialog):
             return
         
         # 保存当前路径
-        settings.setValue("local_image_viewer/last_file_path", os.path.dirname(file_path))
+        settings.setValue("last_file_path", os.path.dirname(file_path))
         
         try:
             self.image_file = file_path
@@ -549,8 +557,8 @@ class LocalImageViewerDialog(QDialog):
     def open_h5_file(self):
         """打开h5文件"""
         # 读取上次打开的路径
-        settings = QSettings("YiboYuan", "Toolbox")
-        last_path = settings.value("local_image_viewer/last_h5_path", "")
+        settings = get_settings()
+        last_path = settings.value("last_h5_path", "")
         
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -563,7 +571,7 @@ class LocalImageViewerDialog(QDialog):
             return
         
         # 保存当前路径
-        settings.setValue("local_image_viewer/last_h5_path", os.path.dirname(file_path))
+        settings.setValue("last_h5_path", os.path.dirname(file_path))
         
         try:
             # 打开h5文件并列出所有数据集

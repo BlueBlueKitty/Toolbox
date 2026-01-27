@@ -7,5 +7,7 @@ Toolbox 源代码包
 - 工具函数
 """
 
-# 导入常用组件，方便从包中直接导入
-from .main_window import MainWindow
+# 延迟导入，避免在导入其他模块时触发 PySide6 依赖
+def get_main_window():
+    from .main_window import MainWindow
+    return MainWindow

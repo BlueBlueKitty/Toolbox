@@ -24,6 +24,38 @@ from PySide6.QtCore import Qt
 
 
 class TiffBoundarySettingsDialog(QDialog):
+    def execute_conversion(self):
+        """
+        执行TIFF边界转矢量的主逻辑，包含参数校验、调用工具函数、弹窗反馈
+        """
+        from PySide6.QtWidgets import QMessageBox
+        try:
+            settings = self.get_settings()
+            if not settings["input_file"]:
+                QMessageBox.warning(self, "参数错误", "请选择输入TIFF文件!", parent=self)
+                return False
+            if not settings["output_file"]:
+                QMessageBox.warning(self, "参数错误", "请指定输出矢量文件!", parent=self)
+                return False
+            # 延迟导入，避免循环依赖
+            from src.utils import tiff_boundary_to_vector
+            success = tiff_boundary_to_vector(
+                settings["input_file"],
+                settings["output_file"],
+                to_wgs84=settings["to_wgs84"],
+                output_format=settings["output_format"]
+            )
+            if success:
+                QMessageBox.information(self, "成功", "TIFF边界已成功转换为矢量文件!", parent=self)
+            else:
+                QMessageBox.critical(self, "错误", "转换过程中出现错误，请查看控制台输出。", parent=self)
+            return success
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"发生异常: {str(e)}", parent=self)
+            import traceback
+            traceback.print_exc()
+            return False
+        
     def __init__(self, parent=None):
         super(TiffBoundarySettingsDialog, self).__init__(parent)
         

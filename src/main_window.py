@@ -20,10 +20,10 @@ import traceback
 
 # 导入自定义对话框
 from src.dialogs import (TiffBoundarySettingsDialog, PixelTimeSeriesViewerDialog,
-                         LocalImageViewerDialog)
+                         LocalImageViewerDialog, DEMAcquisitionDialog)
 
 # 导入工具函数
-from src.tools import tiff_boundary_to_vector
+from src.utils import tiff_boundary_to_vector
 
 
 class MainWindow(QMainWindow):
@@ -196,6 +196,29 @@ class MainWindow(QMainWindow):
         self.button_tiff_boundary_to_vector.clicked.connect(self.on_button_tiff_boundary_to_vector_click)
         raster_tools_layout.addWidget(self.button_tiff_boundary_to_vector, 0, 0)
         
+        # DEM数据获取按钮
+        self.button_dem_acquisition = QPushButton("DEM数据获取")
+        self.button_dem_acquisition.setMinimumHeight(50)
+        self.button_dem_acquisition.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+            QPushButton:pressed {
+                background-color: #1e8449;
+            }
+        """)
+        self.button_dem_acquisition.clicked.connect(self.on_button_dem_acquisition_click)
+        raster_tools_layout.addWidget(self.button_dem_acquisition, 0, 1)
+        
         raster_tools_group.setLayout(raster_tools_layout)
         scroll_layout.addWidget(raster_tools_group)
         
@@ -237,43 +260,27 @@ class MainWindow(QMainWindow):
     
     def on_button_tiff_boundary_to_vector_click(self):
         """
-        按钮点击事件的处理逻辑，弹出参数设置对话框
+        按钮点击事件的处理逻辑，弹出参数设置对话框并执行转换（执行逻辑已迁移到对话框类）
         """
         try:
-            # 创建并显示参数设置对话框
             dialog = TiffBoundarySettingsDialog(self)
             result = dialog.exec()
-            
-            # 如果用户点击了确定按钮
             if result == QDialog.Accepted:
-                # 获取用户设置的参数
-                settings = dialog.get_settings()
-                
-                # 检查必要的参数是否已设置
-                if not settings["input_file"]:
-                    QMessageBox.warning(self, "参数错误", "请选择输入TIFF文件!")
-                    return
-                    
-                if not settings["output_file"]:
-                    QMessageBox.warning(self, "参数错误", "请指定输出矢量文件!")
-                    return
-                
-                # 调用工具函数进行转换
-                success = tiff_boundary_to_vector(
-                    settings["input_file"], 
-                    settings["output_file"], 
-                    to_wgs84=settings["to_wgs84"], 
-                    output_format=settings["output_format"]
-                )
-                
-                # 显示结果
-                if success:
-                    QMessageBox.information(self, "成功", "TIFF边界已成功转换为矢量文件!")
-                else:
-                    QMessageBox.critical(self, "错误", "转换过程中出现错误，请查看控制台输出。")
-                    
+                dialog.execute_conversion()
         except Exception as e:
             QMessageBox.critical(self, "错误", f"发生异常: {str(e)}")
+            traceback.print_exc()
+    
+    def on_button_dem_acquisition_click(self):
+        """
+        DEM数据获取按钮点击事件
+        """
+        try:
+            # 创建并显示DEM数据获取对话框
+            dialog = DEMAcquisitionDialog(self)
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"打开DEM数据获取工具失败: {str(e)}")
             traceback.print_exc()
 
 

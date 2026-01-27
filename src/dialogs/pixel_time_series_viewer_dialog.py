@@ -8,10 +8,18 @@ Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 
 import os
 import numpy as np
+from pathlib import Path
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QFileDialog, QLabel, QSlider, QComboBox, QMessageBox,
                                QSplitter, QGroupBox, QGridLayout, QCheckBox, QFormLayout)
 from PySide6.QtCore import Qt, QSettings
+
+# 配置文件路径
+def get_settings():
+    config_dir = Path.home() / ".toolbox"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_file = config_dir / "pixel_time_series_viewer.ini"
+    return QSettings(str(config_file), QSettings.IniFormat)
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -329,15 +337,15 @@ class PixelTimeSeriesViewerDialog(QDialog):
     def open_folder(self):
         """打开图像文件夹"""
         # 读取上次打开的路径
-        settings = QSettings("YiboYuan", "Toolbox")
-        last_folder = settings.value("pixel_time_series_viewer/last_folder_path", "")
+        settings = get_settings()
+        last_folder = settings.value("last_folder_path", "")
         
         folder = QFileDialog.getExistingDirectory(self, "选择图像文件夹", last_folder)
         if not folder:
             return
         
         # 保存当前路径
-        settings.setValue("pixel_time_series_viewer/last_folder_path", folder)
+        settings.setValue("last_folder_path", folder)
         
         try:
             # 查找支持的图像文件
@@ -366,8 +374,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
     def open_h5_timeseries(self):
         """打开h5时序数据"""
         # 读取上次打开的路径
-        settings = QSettings("YiboYuan", "Toolbox")
-        last_folder = settings.value("pixel_time_series_viewer/last_h5_path", "")
+        settings = get_settings()
+        last_folder = settings.value("last_h5_path", "")
         
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择h5时序数据文件", last_folder, "HDF5 Files (*.h5 *.hdf5);;All Files (*)")
@@ -376,7 +384,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             return
         
         # 保存当前路径
-        settings.setValue("pixel_time_series_viewer/last_h5_path", os.path.dirname(file_path))
+        settings.setValue("last_h5_path", os.path.dirname(file_path))
         
         try:
             # 打开h5文件
