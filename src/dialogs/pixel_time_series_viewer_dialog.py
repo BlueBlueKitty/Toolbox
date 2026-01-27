@@ -11,7 +11,8 @@ import numpy as np
 from pathlib import Path
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QFileDialog, QLabel, QSlider, QComboBox, QMessageBox,
-                               QSplitter, QGroupBox, QGridLayout, QCheckBox, QFormLayout)
+                               QSplitter, QGroupBox, QGridLayout, QCheckBox, QFormLayout,
+                               QDialogButtonBox, QInputDialog)
 from PySide6.QtCore import Qt, QSettings
 
 # 配置文件路径
@@ -30,6 +31,15 @@ import traceback
 import h5py
 
 from src.widgets import ImageViewer, ColormapComboBox
+from src.utils.gamma_file_process import (
+    GAMMA_FORMATS,
+    read_gamma_downsampled,
+    read_gamma_pixel,
+    find_valid_par_for_binary,
+    validate_dimensions,
+    complex_to_phase,
+    is_gamma_binary_file,
+)
 
 # 设置matplotlib支持中文显示
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'KaiTi', 'FangSong']
@@ -68,6 +78,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._cached_index_2 = -1  # 窗口2缓存的图像索引
         self._cached_original_size_2 = None  # 窗口2缓存的原始尺寸
         
+        # GAMMA时序文件相关
+        self.is_gamma_timeseries = False  # 是否为GAMMA时序数据
+        self.gamma_format = "float32"  # GAMMA数据格式
+        self.gamma_width = None  # GAMMA图像宽度
+        self.gamma_height = None  # GAMMA图像高度
+        
         # 时序曲线悬浮提示相关
         self._plot_data_points = []  # 存储绘图数据点 [(x, y, index), ...]
         self._plot_annotation = None  # matplotlib annotation对象
@@ -89,6 +105,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.open_folder_btn = QPushButton("打开图像文件夹")
         self.open_folder_btn.clicked.connect(self.open_folder)
         control_layout.addWidget(self.open_folder_btn)
+        
+        self.open_gamma_folder_btn = QPushButton("打开GAMMA时序")
+        self.open_gamma_folder_btn.clicked.connect(self.open_gamma_folder)
+        control_layout.addWidget(self.open_gamma_folder_btn)
         
         self.open_h5_btn = QPushButton("打开h5时序数据")
         self.open_h5_btn.clicked.connect(self.open_h5_timeseries)
@@ -362,6 +382,15 @@ class PixelTimeSeriesViewerDialog(QDialog):
             except Exception as e:
                 print(f"读取h5数据失败 (索引 {index}): {e}")
                 return None, None
+        elif self.data_source_type == 'gamma':
+            # 从GAMMA二进制文件读取
+            if index < len(self.image_files):
+                image_data, _, original_size = self._read_gamma_image_downsampled(
+                    self.image_files[index],
+                    max_size=max_display_size
+                )
+                return image_data, original_size
+            return None, None
         else:
             # 从文件夹按需读取（使用降采样读取）
             if index < len(self.image_files):
@@ -771,6 +800,169 @@ class PixelTimeSeriesViewerDialog(QDialog):
             QMessageBox.critical(self, "错误", f"加载图像失败: {str(e)}")
             traceback.print_exc()
     
+    def open_gamma_folder(self):
+        """打开GAMMA二进制文件时序文件夹"""
+        settings = get_settings()
+        last_folder = settings.value("last_gamma_folder_path", "")
+        last_format = settings.value("last_gamma_format", "float32")
+        
+        folder = QFileDialog.getExistingDirectory(self, "选择GAMMA时序文件夹", last_folder)
+        if not folder:
+            return
+        
+        settings.setValue("last_gamma_folder_path", folder)
+        
+        try:
+            # 查找目录中的二进制文件（排除.par文件）
+            all_files = []
+            for filename in os.listdir(folder):
+                file_path = os.path.join(folder, filename)
+                if os.path.isfile(file_path) and not filename.endswith('.par'):
+                    # 检查是否可能是GAMMA二进制文件
+                    if is_gamma_binary_file(file_path):
+                        all_files.append(file_path)
+            
+            if not all_files:
+                QMessageBox.warning(self, "警告", "文件夹中没有找到GAMMA二进制文件！")
+                return
+            
+            # 弹出格式选择对话框
+            format_dialog = GammaTimeSeriesFormatDialog(self, last_format, all_files)
+            if format_dialog.exec() != QDialog.Accepted:
+                return
+            
+            gamma_format = format_dialog.get_selected_format()
+            valid_files = format_dialog.get_valid_files()
+            width = format_dialog.get_width()
+            height = format_dialog.get_height()
+            
+            if not valid_files:
+                QMessageBox.warning(self, "警告", "没有找到有效的GAMMA二进制文件！")
+                return
+            
+            # 保存设置
+            settings.setValue("last_gamma_format", gamma_format)
+            
+            # 设置GAMMA相关属性
+            self.is_gamma_timeseries = True
+            self.gamma_format = gamma_format
+            self.gamma_width = width
+            self.gamma_height = height
+            
+            # 设置数据源类型
+            self.data_source_type = 'gamma'
+            self.h5_file_path = None
+            self.h5_start_index = 0
+            self.image_shape = (height, width)
+            
+            # 清空缓存
+            self._cached_image_1 = None
+            self._cached_index_1 = -1
+            self._cached_original_size_1 = None
+            self._cached_image_2 = None
+            self._cached_index_2 = -1
+            self._cached_original_size_2 = None
+            self.selected_pixel = None
+            self.date_list = []
+            
+            # 按文件名排序
+            valid_files.sort()
+            self.image_files = valid_files
+            self.image_count = len(valid_files)
+            
+            # 设置默认Nodata值
+            self.nodata_value = 0
+            self.image_viewer_1.set_nodata_value(0)
+            self.image_viewer_2.set_nodata_value(0)
+            
+            # 更新UI
+            self.image_count_label.setText(f"已加载 {self.image_count} 张GAMMA时序影像")
+            
+            # 更新两个窗口的控件
+            for viewer_id in [1, 2]:
+                slider = getattr(self, f'image_slider_{viewer_id}')
+                prev_btn = getattr(self, f'prev_btn_{viewer_id}')
+                next_btn = getattr(self, f'next_btn_{viewer_id}')
+                
+                slider.setMaximum(self.image_count - 1)
+                slider.setEnabled(True)
+                prev_btn.setEnabled(True)
+                next_btn.setEnabled(True)
+            
+            # 设置默认colormap
+            is_complex = gamma_format.startswith('cpx')
+            if is_complex:
+                self.colormap_combo.setCurrentText('hsv')
+            else:
+                self.colormap_combo.setCurrentText('gray')
+            
+            # 显示第一张和第二张图像
+            self.current_image_index_1 = 0
+            self.current_image_index_2 = min(1, self.image_count - 1)
+            self.show_image(1)
+            self.show_image(2)
+            
+            QMessageBox.information(self, "成功", 
+                f"成功加载GAMMA时序数据！\n" +
+                f"文件数量: {self.image_count}\n" +
+                f"尺寸: {width} x {height}\n" +
+                f"格式: {gamma_format}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"打开GAMMA文件夹失败: {str(e)}")
+            traceback.print_exc()
+    
+    def _read_gamma_image_downsampled(self, file_path, max_size=2048):
+        """
+        读取GAMMA二进制文件并降采样
+        
+        Returns:
+            tuple: (图像数据, nodata值, 原始尺寸) 或 (None, None, None)
+        """
+        if not self.is_gamma_timeseries:
+            return None, None, None
+        
+        try:
+            data, downsample_factor = read_gamma_downsampled(
+                file_path, 
+                self.gamma_width, 
+                self.gamma_height, 
+                self.gamma_format,
+                max_size
+            )
+            
+            # 处理复数数据
+            if self.gamma_format.startswith('cpx'):
+                data = complex_to_phase(data)
+            
+            original_size = (self.gamma_width, self.gamma_height) if downsample_factor > 1 else None
+            
+            return data.astype(np.float32), 0, original_size
+            
+        except Exception as e:
+            traceback.print_exc()
+            return None, None, None
+    
+    def _read_gamma_pixel_value(self, file_path, x, y):
+        """
+        从GAMMA二进制文件读取单个像素值
+        """
+        try:
+            value = read_gamma_pixel(
+                file_path, x, y,
+                self.gamma_width, self.gamma_height,
+                self.gamma_format
+            )
+            
+            # 处理复数数据
+            if self.gamma_format.startswith('cpx'):
+                value = np.angle(value)
+            
+            return value
+        except Exception as e:
+            traceback.print_exc()
+            return None
+
     def _read_image(self, file_path):
         """
         读取图像文件，支持普通图像和TIFF
@@ -1244,6 +1436,16 @@ class PixelTimeSeriesViewerDialog(QDialog):
             except Exception as e:
                 print(f"批量读取h5像素值失败 (位置 ({x}, {y})): {e}")
                 return [np.nan] * self.image_count
+        elif self.data_source_type == 'gamma':
+            # 从GAMMA二进制文件逐个读取
+            values = []
+            for i in range(self.image_count):
+                if i < len(self.image_files):
+                    val = self._read_gamma_pixel_value(self.image_files[i], x, y)
+                    values.append(val if val is not None else np.nan)
+                else:
+                    values.append(np.nan)
+            return values
         else:
             # 从文件夹逐个读取
             values = []
@@ -1609,4 +1811,192 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 other_pixel_label.setText("像素值: -")  # 坐标超出范围
         else:
             other_pixel_label.setText("像素值: -")
+
+
+class GammaTimeSeriesFormatDialog(QDialog):
+    """GAMMA时序文件格式选择对话框"""
+    
+    def __init__(self, parent=None, default_format="float32", file_list=None):
+        super().__init__(parent)
+        self.file_list = file_list or []
+        self.valid_files = []
+        self.width = None
+        self.height = None
+        
+        self.setWindowTitle("GAMMA时序设置")
+        self.resize(600, 400)
+        
+        layout = QVBoxLayout(self)
+        
+        # 格式选择
+        format_group = QGroupBox("数据格式")
+        format_layout = QVBoxLayout(format_group)
+        
+        format_row = QHBoxLayout()
+        format_row.addWidget(QLabel("数据类型:"))
+        self.format_combo = QComboBox()
+        for fmt, desc in GAMMA_FORMATS.items():
+            self.format_combo.addItem(f"{fmt} - {desc}", fmt)
+        # 设置默认值
+        for i in range(self.format_combo.count()):
+            if self.format_combo.itemData(i) == default_format:
+                self.format_combo.setCurrentIndex(i)
+                break
+        format_row.addWidget(self.format_combo)
+        format_layout.addLayout(format_row)
+        
+        layout.addWidget(format_group)
+        
+        # 尺寸检测
+        size_group = QGroupBox("图像尺寸")
+        size_layout = QVBoxLayout(size_group)
+        
+        self.status_label = QLabel("点击'检测尺寸'按钮自动检测...")
+        size_layout.addWidget(self.status_label)
+        
+        size_row = QHBoxLayout()
+        self.detect_btn = QPushButton("检测尺寸")
+        self.detect_btn.clicked.connect(self._detect_dimensions)
+        size_row.addWidget(self.detect_btn)
+        
+        self.manual_btn = QPushButton("手动输入尺寸")
+        self.manual_btn.clicked.connect(self._manual_input)
+        size_row.addWidget(self.manual_btn)
+        
+        size_row.addStretch()
+        size_layout.addLayout(size_row)
+        
+        # 显示检测到的尺寸
+        dim_row = QHBoxLayout()
+        dim_row.addWidget(QLabel("宽度:"))
+        self.width_label = QLabel("-")
+        dim_row.addWidget(self.width_label)
+        dim_row.addWidget(QLabel("高度:"))
+        self.height_label = QLabel("-")
+        dim_row.addWidget(self.height_label)
+        dim_row.addStretch()
+        size_layout.addLayout(dim_row)
+        
+        layout.addWidget(size_group)
+        
+        # 文件列表
+        files_group = QGroupBox(f"检测到的文件 ({len(self.file_list)} 个)")
+        files_layout = QVBoxLayout(files_group)
+        
+        self.files_status_label = QLabel("尚未验证文件")
+        files_layout.addWidget(self.files_status_label)
+        
+        layout.addWidget(files_group)
+        
+        # 按钮
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self._validate_and_accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        # 格式变化时重置检测结果
+        self.format_combo.currentIndexChanged.connect(self._reset_detection)
+    
+    def _reset_detection(self):
+        """重置检测结果"""
+        self.valid_files = []
+        self.width = None
+        self.height = None
+        self.width_label.setText("-")
+        self.height_label.setText("-")
+        self.status_label.setText("格式已更改，请重新检测尺寸...")
+        self.files_status_label.setText("尚未验证文件")
+    
+    def _detect_dimensions(self):
+        """自动检测尺寸"""
+        if not self.file_list:
+            self.status_label.setText("没有文件可检测！")
+            return
+        
+        fmt = self.format_combo.currentData()
+        self.status_label.setText("正在检测...")
+        
+        # 尝试从第一个文件的par文件获取尺寸
+        first_file = self.file_list[0]
+        par_file, dims = find_valid_par_for_binary(first_file, fmt)
+        
+        if par_file and dims:
+            self.width, self.height = dims
+            self.width_label.setText(str(self.width))
+            self.height_label.setText(str(self.height))
+            self.status_label.setText(
+                f"✓ 从PAR文件检测到尺寸: {self.width} x {self.height}"
+            )
+            self.status_label.setStyleSheet("color: green;")
+            
+            # 验证所有文件
+            self._validate_files()
+        else:
+            self.status_label.setText(
+                "✗ 未找到PAR文件，请手动输入尺寸"
+            )
+            self.status_label.setStyleSheet("color: red;")
+    
+    def _manual_input(self):
+        """手动输入尺寸"""
+        width, ok1 = QInputDialog.getInt(self, "输入宽度", "请输入图像宽度（列数）:", 0, 1, 100000)
+        if not ok1:
+            return
+        
+        height, ok2 = QInputDialog.getInt(self, "输入高度", "请输入图像高度（行数）:", 0, 1, 100000)
+        if not ok2:
+            return
+        
+        self.width = width
+        self.height = height
+        self.width_label.setText(str(width))
+        self.height_label.setText(str(height))
+        
+        # 验证文件
+        self._validate_files()
+    
+    def _validate_files(self):
+        """验证所有文件是否符合当前尺寸"""
+        if self.width is None or self.height is None:
+            return
+        
+        fmt = self.format_combo.currentData()
+        self.valid_files = []
+        invalid_count = 0
+        
+        for file_path in self.file_list:
+            if validate_dimensions(file_path, self.width, self.height, fmt):
+                self.valid_files.append(file_path)
+            else:
+                invalid_count += 1
+        
+        if self.valid_files:
+            self.files_status_label.setText(
+                f"✓ 有效文件: {len(self.valid_files)} 个" + 
+                (f"，无效: {invalid_count} 个" if invalid_count > 0 else "")
+            )
+            self.files_status_label.setStyleSheet("color: green;")
+        else:
+            self.files_status_label.setText("✗ 没有找到有效文件")
+            self.files_status_label.setStyleSheet("color: red;")
+    
+    def _validate_and_accept(self):
+        """验证并接受"""
+        if not self.valid_files:
+            QMessageBox.warning(self, "警告", "没有有效的文件可加载！请检测或输入正确的尺寸。")
+            return
+        
+        self.accept()
+    
+    def get_selected_format(self):
+        return self.format_combo.currentData()
+    
+    def get_valid_files(self):
+        return self.valid_files
+    
+    def get_width(self):
+        return self.width
+    
+    def get_height(self):
+        return self.height
 

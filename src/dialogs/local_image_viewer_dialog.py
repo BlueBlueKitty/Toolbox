@@ -12,7 +12,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QFileDialog, QLabel, QMessageBox, QSplitter, 
                                QGroupBox, QButtonGroup, QRadioButton, QListWidget,
-                               QDialogButtonBox, QInputDialog)
+                               QDialogButtonBox, QInputDialog, QComboBox)
 from PySide6.QtCore import Qt, QSettings
 
 # 配置文件路径
@@ -30,6 +30,18 @@ import traceback
 import h5py
 
 from src.widgets import InteractiveImageViewer, ColormapComboBox
+from src.utils.gamma_file_process import (
+    GAMMA_FORMATS,
+    read_gamma_binary,
+    read_gamma_downsampled,
+    read_gamma_region,
+    read_gamma_pixel,
+    find_valid_par_for_binary,
+    validate_dimensions,
+    complex_to_phase,
+    complex_to_amplitude,
+    is_gamma_binary_file,
+)
 
 
 class LocalImageViewerDialog(QDialog):
@@ -56,6 +68,11 @@ class LocalImageViewerDialog(QDialog):
         self.downsample_factor = 1   # 降采样因子
         self.is_tiff = False         # 是否为TIFF格式
         
+        # GAMMA二进制文件相关
+        self.is_gamma = False           # 是否为GAMMA二进制文件
+        self.gamma_format = "float32"   # GAMMA数据格式
+        self.gamma_par_file = None      # PAR文件路径
+        
         # 创建UI
         self._create_ui()
         
@@ -69,6 +86,10 @@ class LocalImageViewerDialog(QDialog):
         self.open_btn = QPushButton("打开图像")
         self.open_btn.clicked.connect(self.open_image)
         control_layout.addWidget(self.open_btn)
+        
+        self.open_gamma_btn = QPushButton("打开GAMMA文件")
+        self.open_gamma_btn.clicked.connect(self.open_gamma_file)
+        control_layout.addWidget(self.open_gamma_btn)
         
         self.open_h5_btn = QPushButton("打开h5文件")
         self.open_h5_btn.clicked.connect(self.open_h5_file)
@@ -376,7 +397,10 @@ class LocalImageViewerDialog(QDialog):
             return None
         
         try:
-            if self.is_tiff:
+            # GAMMA文件使用专用读取方法
+            if self.is_gamma:
+                return self._read_gamma_original_region(x1, y1, x2, y2)
+            elif self.is_tiff:
                 ds = gdal.Open(self.image_file)
                 if ds is None:
                     return None
@@ -420,7 +444,10 @@ class LocalImageViewerDialog(QDialog):
             return None
         
         try:
-            if self.is_tiff:
+            # GAMMA文件使用专用读取方法
+            if self.is_gamma:
+                return self._read_gamma_original_pixel(x, y)
+            elif self.is_tiff:
                 ds = gdal.Open(self.image_file)
                 if ds is None:
                     return None
@@ -1027,3 +1054,323 @@ class LocalImageViewerDialog(QDialog):
                     info += f" | Nodata: {self.nodata_value}"
                 
                 self.image_info_label.setText(info)
+
+    def open_gamma_file(self):
+        """打开GAMMA二进制文件"""
+        settings = get_settings()
+        last_path = settings.value("last_gamma_path", "")
+        last_format = settings.value("last_gamma_format", "float32")
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "打开GAMMA二进制文件",
+            last_path,
+            "所有文件 (*.*)"
+        )
+        
+        if not file_path:
+            return
+        
+        # 保存当前路径
+        settings.setValue("last_gamma_path", os.path.dirname(file_path))
+        
+        try:
+            # 弹出格式选择对话框
+            format_dialog = GammaFormatDialog(self, last_format, file_path)
+            if format_dialog.exec() != QDialog.Accepted:
+                return
+            
+            gamma_format = format_dialog.get_selected_format()
+            manual_width = format_dialog.get_manual_width()
+            manual_height = format_dialog.get_manual_height()
+            selected_par = format_dialog.get_selected_par()
+            
+            # 保存用户选择的格式
+            settings.setValue("last_gamma_format", gamma_format)
+            
+            # 确定尺寸
+            if manual_width is not None and manual_height is not None:
+                # 使用手动输入的尺寸
+                if not validate_dimensions(file_path, manual_width, manual_height, gamma_format):
+                    QMessageBox.critical(self, "错误", 
+                        f"输入的尺寸 {manual_width}x{manual_height} 与文件大小不匹配！")
+                    return
+                width, height = manual_width, manual_height
+                par_file_used = None
+            elif selected_par:
+                # 使用选择的PAR文件
+                from src.utils.gamma_file_process import get_dimensions_from_par
+                width, height = get_dimensions_from_par(selected_par)
+                if not validate_dimensions(file_path, width, height, gamma_format):
+                    QMessageBox.critical(self, "错误", 
+                        f"PAR文件中的尺寸 {width}x{height} 与二进制文件不匹配！")
+                    return
+                par_file_used = selected_par
+            else:
+                # 自动查找PAR文件
+                par_file_used, dims = find_valid_par_for_binary(file_path, gamma_format)
+                if par_file_used is None or dims is None:
+                    QMessageBox.critical(self, "错误", 
+                        "无法自动找到匹配的PAR文件！请手动指定尺寸或PAR文件。")
+                    return
+                width, height = dims
+            
+            # 设置GAMMA相关属性
+            self.is_gamma = True
+            self.is_tiff = False
+            self.gamma_format = gamma_format
+            self.gamma_par_file = par_file_used
+            self.original_width = width
+            self.original_height = height
+            self.image_file = file_path
+            
+            # 读取图像数据（使用降采样）
+            data, downsample_factor = read_gamma_downsampled(
+                file_path, width, height, gamma_format, self.MAX_DISPLAY_SIZE
+            )
+            
+            self.downsample_factor = downsample_factor
+            
+            # 处理复数数据
+            is_complex = gamma_format.startswith('cpx')
+            if is_complex:
+                # 默认显示相位
+                self.image_data = complex_to_phase(data).astype(np.float32)
+                data_type_str = "相位"
+            else:
+                self.image_data = data.astype(np.float32) if data.dtype != np.float32 else data
+                data_type_str = "幅度"
+            
+            self.nodata_value = None
+            
+            # 显示图像
+            original_size = (width, height) if downsample_factor > 1 else None
+            self.image_viewer.set_image_from_array(self.image_data, original_size=original_size)
+            
+            # 设置默认colormap
+            if is_complex:
+                self.colormap_combo.setCurrentText('hsv')  # 相位使用hsv
+            else:
+                self.colormap_combo.setCurrentText('gray')
+            
+            # 更新信息
+            info = f"{os.path.basename(file_path)} | GAMMA {gamma_format}"
+            if downsample_factor > 1:
+                info += f" | 原始: {width}x{height} | 显示: {self.image_data.shape[1]}x{self.image_data.shape[0]} (1/{downsample_factor})"
+            else:
+                info += f" | 尺寸: {width}x{height}"
+            if is_complex:
+                info += f" | 显示: {data_type_str}"
+            if par_file_used:
+                info += f" | PAR: {os.path.basename(par_file_used)}"
+            
+            self.image_info_label.setText(info)
+            
+            # 显示直方图
+            self.show_image_histogram()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"打开GAMMA文件失败: {str(e)}")
+            traceback.print_exc()
+    
+    def _read_gamma_original_region(self, x1, y1, x2, y2):
+        """
+        从GAMMA二进制文件读取指定区域的数据（原始坐标）
+        """
+        if not self.is_gamma or self.image_file is None:
+            return None
+        
+        try:
+            data = read_gamma_region(
+                self.image_file, x1, y1, x2, y2,
+                self.original_width, self.original_height,
+                self.gamma_format
+            )
+            
+            # 处理复数数据
+            if self.gamma_format.startswith('cpx'):
+                data = complex_to_phase(data)
+            
+            return data.astype(np.float32)
+        except Exception as e:
+            traceback.print_exc()
+            return None
+    
+    def _read_gamma_original_pixel(self, x, y):
+        """
+        从GAMMA二进制文件读取指定像素的值（原始坐标）
+        """
+        if not self.is_gamma or self.image_file is None:
+            return None
+        
+        try:
+            value = read_gamma_pixel(
+                self.image_file, x, y,
+                self.original_width, self.original_height,
+                self.gamma_format
+            )
+            
+            # 处理复数数据
+            if self.gamma_format.startswith('cpx'):
+                value = np.angle(value)
+            
+            return value
+        except Exception as e:
+            traceback.print_exc()
+            return None
+
+
+class GammaFormatDialog(QDialog):
+    """GAMMA文件格式选择对话框"""
+    
+    def __init__(self, parent=None, default_format="float32", binary_file=None):
+        super().__init__(parent)
+        self.binary_file = binary_file
+        self.setWindowTitle("GAMMA文件设置")
+        self.resize(500, 350)
+        
+        layout = QVBoxLayout(self)
+        
+        # 格式选择
+        format_group = QGroupBox("数据格式")
+        format_layout = QVBoxLayout(format_group)
+        
+        format_row = QHBoxLayout()
+        format_row.addWidget(QLabel("数据类型:"))
+        self.format_combo = QComboBox()
+        for fmt, desc in GAMMA_FORMATS.items():
+            self.format_combo.addItem(f"{fmt} - {desc}", fmt)
+        # 设置默认值
+        for i in range(self.format_combo.count()):
+            if self.format_combo.itemData(i) == default_format:
+                self.format_combo.setCurrentIndex(i)
+                break
+        format_row.addWidget(self.format_combo)
+        format_layout.addLayout(format_row)
+        
+        layout.addWidget(format_group)
+        
+        # 尺寸设置
+        size_group = QGroupBox("图像尺寸")
+        size_layout = QVBoxLayout(size_group)
+        
+        # 自动查找状态
+        self.auto_status_label = QLabel("正在检测...")
+        size_layout.addWidget(self.auto_status_label)
+        
+        # PAR文件选择
+        par_row = QHBoxLayout()
+        par_row.addWidget(QLabel("PAR文件:"))
+        self.par_combo = QComboBox()
+        self.par_combo.addItem("（自动检测）", None)
+        par_row.addWidget(self.par_combo)
+        self.browse_par_btn = QPushButton("浏览...")
+        self.browse_par_btn.clicked.connect(self._browse_par_file)
+        par_row.addWidget(self.browse_par_btn)
+        size_layout.addLayout(par_row)
+        
+        # 手动输入尺寸
+        manual_row = QHBoxLayout()
+        manual_row.addWidget(QLabel("或手动输入:"))
+        manual_row.addWidget(QLabel("宽度:"))
+        self.width_edit = QLabel("-")
+        manual_row.addWidget(self.width_edit)
+        manual_row.addWidget(QLabel("高度:"))
+        self.height_edit = QLabel("-")
+        manual_row.addWidget(self.height_edit)
+        self.manual_input_btn = QPushButton("手动输入尺寸")
+        self.manual_input_btn.clicked.connect(self._manual_input_size)
+        manual_row.addWidget(self.manual_input_btn)
+        size_layout.addLayout(manual_row)
+        
+        layout.addWidget(size_group)
+        
+        # 手动输入的值存储
+        self.manual_width = None
+        self.manual_height = None
+        
+        # 按钮
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        # 格式变化时重新检测
+        self.format_combo.currentIndexChanged.connect(self._update_detection)
+        
+        # 初始检测
+        self._update_detection()
+    
+    def _update_detection(self):
+        """更新自动检测结果"""
+        if not self.binary_file:
+            self.auto_status_label.setText("未指定二进制文件")
+            return
+        
+        fmt = self.format_combo.currentData()
+        par_file, dims = find_valid_par_for_binary(self.binary_file, fmt)
+        
+        # 更新PAR文件列表
+        self.par_combo.clear()
+        self.par_combo.addItem("（自动检测）", None)
+        
+        if par_file:
+            self.par_combo.addItem(os.path.basename(par_file), par_file)
+            self.par_combo.setCurrentIndex(1)
+            width, height = dims
+            self.auto_status_label.setText(
+                f"✓ 找到匹配的PAR文件: {os.path.basename(par_file)} ({width}x{height})"
+            )
+            self.auto_status_label.setStyleSheet("color: green;")
+        else:
+            self.auto_status_label.setText(
+                "✗ 未找到匹配的PAR文件，请手动指定尺寸或选择PAR文件"
+            )
+            self.auto_status_label.setStyleSheet("color: red;")
+    
+    def _browse_par_file(self):
+        """浏览PAR文件"""
+        start_dir = os.path.dirname(self.binary_file) if self.binary_file else ""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择PAR文件", start_dir, "PAR文件 (*.par);;所有文件 (*.*)"
+        )
+        if file_path:
+            # 添加到下拉框
+            self.par_combo.addItem(os.path.basename(file_path), file_path)
+            self.par_combo.setCurrentIndex(self.par_combo.count() - 1)
+    
+    def _manual_input_size(self):
+        """手动输入尺寸"""
+        width, ok1 = QInputDialog.getInt(self, "输入宽度", "请输入图像宽度（列数）:", 0, 1, 100000)
+        if not ok1:
+            return
+        
+        height, ok2 = QInputDialog.getInt(self, "输入高度", "请输入图像高度（行数）:", 0, 1, 100000)
+        if not ok2:
+            return
+        
+        self.manual_width = width
+        self.manual_height = height
+        self.width_edit.setText(str(width))
+        self.height_edit.setText(str(height))
+        
+        # 验证尺寸
+        fmt = self.format_combo.currentData()
+        if validate_dimensions(self.binary_file, width, height, fmt):
+            self.auto_status_label.setText(f"✓ 尺寸 {width}x{height} 验证通过")
+            self.auto_status_label.setStyleSheet("color: green;")
+        else:
+            self.auto_status_label.setText(f"✗ 尺寸 {width}x{height} 与文件大小不匹配")
+            self.auto_status_label.setStyleSheet("color: red;")
+    
+    def get_selected_format(self):
+        return self.format_combo.currentData()
+    
+    def get_manual_width(self):
+        return self.manual_width
+    
+    def get_manual_height(self):
+        return self.manual_height
+    
+    def get_selected_par(self):
+        return self.par_combo.currentData()

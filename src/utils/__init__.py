@@ -34,6 +34,26 @@ except Exception as e:
     ADMIN_BOUNDARY_AVAILABLE = False
     AdministrativeBoundarySelector = None
 
+# GAMMA二进制文件处理
+from .gamma_file_process import (
+    freadbkB,
+    parse_par_file,
+    get_dimensions_from_par,
+    validate_dimensions,
+    find_matching_par_file,
+    find_valid_par_for_binary,
+    read_gamma_binary,
+    read_gamma_region,
+    read_gamma_pixel,
+    read_gamma_downsampled,
+    complex_to_phase,
+    complex_to_amplitude,
+    complex_to_intensity,
+    is_gamma_binary_file,
+    get_gamma_file_info,
+    GAMMA_FORMATS,
+)
+
 __all__ = [
     'LocalDEMProcessor',
     'calculate_area_km2',
@@ -52,4 +72,21 @@ __all__ = [
     'is_raster_file',
     'AdministrativeBoundarySelector',
     'ADMIN_BOUNDARY_AVAILABLE',
+    # GAMMA相关
+    'freadbkB',
+    'parse_par_file',
+    'get_dimensions_from_par',
+    'validate_dimensions',
+    'find_matching_par_file',
+    'find_valid_par_for_binary',
+    'read_gamma_binary',
+    'read_gamma_region',
+    'read_gamma_pixel',
+    'read_gamma_downsampled',
+    'complex_to_phase',
+    'complex_to_amplitude',
+    'complex_to_intensity',
+    'is_gamma_binary_file',
+    'get_gamma_file_info',
+    'GAMMA_FORMATS',
 ]
