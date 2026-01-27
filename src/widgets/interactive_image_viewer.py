@@ -279,11 +279,18 @@ class InteractiveImageViewer(ImageViewer):
         if len(self.polyline_points) == 0:
             return
         
-        # 移除旧的折线
+        # 移除旧的折线（安全检查避免C++对象已删除错误）
         if self.polyline_item:
-            self.scene.removeItem(self.polyline_item)
+            try:
+                self.scene.removeItem(self.polyline_item)
+            except RuntimeError:
+                pass  # 对象已被删除
+            self.polyline_item = None
         for marker in self.polyline_markers:
-            self.scene.removeItem(marker)
+            try:
+                self.scene.removeItem(marker)
+            except RuntimeError:
+                pass  # 对象已被删除
         self.polyline_markers.clear()
         
         # 创建已确定部分的折线路径（实线）

@@ -15,6 +15,9 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                                QDialogButtonBox, QInputDialog)
 from PySide6.QtCore import Qt, QSettings
 
+# 导入共享的GAMMA对话框
+from src.dialogs.gamma_dialogs import GammaTimeSeriesDialog
+
 # 配置文件路径
 def get_settings():
     config_dir = Path.home() / ".toolbox"
@@ -25,10 +28,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
-from PIL import Image
-from osgeo import gdal
 import traceback
-import h5py
 
 from src.widgets import ImageViewer, ColormapComboBox
 from src.utils.gamma_file_process import (
@@ -39,6 +39,25 @@ from src.utils.gamma_file_process import (
     validate_dimensions,
     complex_to_phase,
     is_gamma_binary_file,
+)
+from src.utils.image_io import (
+    read_tiff,
+    read_tiff_downsampled,
+    read_tiff_pixel,
+    get_tiff_info,
+    read_image,
+    read_image_downsampled,
+    read_any_image_downsampled,
+    read_any_image_pixel,
+    get_image_info,
+    find_best_overview,
+    check_tiff_needs_overview,
+    build_tiff_overviews,
+    read_h5_timeseries_metadata,
+    read_h5_timeseries_frame,
+    read_h5_timeseries_pixel,
+    list_h5_datasets,
+    read_h5_dataset,
 )
 
 # 设置matplotlib支持中文显示
@@ -348,40 +367,14 @@ class PixelTimeSeriesViewerDialog(QDialog):
             return None, None
         
         if self.data_source_type == 'h5':
-            # 从h5文件按需读取
-            try:
-                with h5py.File(self.h5_file_path, 'r') as h5f:
-                    actual_index = index + self.h5_start_index
-                    # 获取原始尺寸
-                    original_height, original_width = h5f['timeseries'].shape[1:3]
-                    original_size = (original_width, original_height)
-                    
-                    # 计算是否需要降采样
-                    max_dim = max(original_width, original_height)
-                    if max_dim <= max_display_size:
-                        # 不需要降采样
-                        image_data = h5f['timeseries'][actual_index, :, :]
-                    else:
-                        # 需要降采样
-                        scale = max_display_size / max_dim
-                        target_height = int(original_height * scale)
-                        target_width = int(original_width * scale)
-                        
-                        # 读取完整数据然后降采样（h5不支持直接降采样读取）
-                        full_data = h5f['timeseries'][actual_index, :, :]
-                        
-                        # 使用简单的步进降采样
-                        step_y = original_height // target_height
-                        step_x = original_width // target_width
-                        image_data = full_data[::step_y, ::step_x]
-                        
-                        # 确保尺寸正确
-                        image_data = image_data[:target_height, :target_width]
-                    
-                    return image_data, original_size
-            except Exception as e:
-                print(f"读取h5数据失败 (索引 {index}): {e}")
-                return None, None
+            # 使用image_io模块从h5文件按需读取
+            actual_index = index + self.h5_start_index
+            image_data, original_size = read_h5_timeseries_frame(
+                self.h5_file_path, 
+                actual_index, 
+                max_size=max_display_size
+            )
+            return image_data, original_size
         elif self.data_source_type == 'gamma':
             # 从GAMMA二进制文件读取
             if index < len(self.image_files):
@@ -550,107 +543,86 @@ class PixelTimeSeriesViewerDialog(QDialog):
         settings.setValue("last_h5_path", os.path.dirname(file_path))
         
         try:
-            # 打开h5文件获取元信息（不加载全部数据）
-            with h5py.File(file_path, 'r') as h5f:
-                # 读取日期列表
-                if 'date' not in h5f:
-                    QMessageBox.critical(self, "错误", "h5文件中未找到'date'数据集！")
-                    return
-                
-                # 读取时序数据元信息
-                if 'timeseries' not in h5f:
-                    QMessageBox.critical(self, "错误", "h5文件中未找到'timeseries'数据集！")
-                    return
-                
-                # 读取日期
-                dates = h5f['date'][:]
-                # 将字节串转换为字符串（如果需要）
-                if dates.dtype.kind == 'S' or dates.dtype.kind == 'U':
-                    self.date_list = [d.decode('utf-8') if isinstance(d, bytes) else str(d) for d in dates]
+            # 使用image_io模块获取h5时序元信息
+            date_list, timeseries_shape, start_index = read_h5_timeseries_metadata(file_path)
+            
+            if date_list is None or timeseries_shape is None:
+                QMessageBox.critical(self, "错误", "h5文件格式不正确，需要包含'date'和'timeseries'数据集！")
+                return
+            
+            # 检查数据维度
+            if len(timeseries_shape) != 3:
+                QMessageBox.critical(self, "错误", 
+                                   f"时序数据维度错误！期望3维(时间, 高度, 宽度)，得到{len(timeseries_shape)}维")
+                return
+            
+            num_dates = timeseries_shape[0]
+            height = timeseries_shape[1]
+            width = timeseries_shape[2]
+            
+            # 保存日期列表
+            self.date_list = date_list[start_index:] if start_index > 0 else date_list
+            
+            if start_index > 0:
+                QMessageBox.information(self, "提示", "检测到第一帧数据全为0，已自动跳过")
+            
+            # 设置按需加载相关属性
+            self.data_source_type = 'h5'
+            self.h5_file_path = file_path
+            self.h5_start_index = start_index
+            self.image_shape = (height, width)
+            self.image_count = num_dates - start_index
+            
+            # 清空缓存
+            self._cached_image_1 = None
+            self._cached_index_1 = -1
+            self._cached_original_size_1 = None
+            self._cached_image_2 = None
+            self._cached_index_2 = -1
+            self._cached_original_size_2 = None
+            self.selected_pixel = None
+            
+            # 生成文件名列表（用于显示）
+            self.image_files = []
+            for i in range(self.image_count):
+                if i < len(self.date_list):
+                    self.image_files.append(f"{self.date_list[i]}.h5")
                 else:
-                    self.date_list = [str(d) for d in dates]
+                    self.image_files.append(f"frame_{i + start_index:04d}.h5")
+            
+            # 更新UI
+            self.image_count_label.setText(f"已加载 {self.image_count} 张时序影像")
+            
+            # 更新两个窗口的控件
+            for viewer_id in [1, 2]:
+                slider = getattr(self, f'image_slider_{viewer_id}')
+                prev_btn = getattr(self, f'prev_btn_{viewer_id}')
+                next_btn = getattr(self, f'next_btn_{viewer_id}')
                 
-                # 获取时序数据的形状（不读取数据本身）
-                timeseries_shape = h5f['timeseries'].shape
-                
-                # 检查数据维度
-                if len(timeseries_shape) != 3:
-                    QMessageBox.critical(self, "错误", 
-                                       f"时序数据维度错误！期望3维(时间, 高度, 宽度)，得到{len(timeseries_shape)}维")
-                    return
-                
-                num_dates = timeseries_shape[0]
-                height = timeseries_shape[1]
-                width = timeseries_shape[2]
-                
-                # 检查第一帧是否全为0，如果是则跳过
-                start_index = 0
-                first_frame = h5f['timeseries'][0, :, :]
-                if num_dates > 0 and np.all(first_frame == 0):
-                    start_index = 1
-                    QMessageBox.information(self, "提示", "检测到第一帧数据全为0，已自动跳过")
-                
-                # 调整日期列表
-                if start_index > 0 and len(self.date_list) > start_index:
-                    self.date_list = self.date_list[start_index:]
-                
-                # 设置按需加载相关属性
-                self.data_source_type = 'h5'
-                self.h5_file_path = file_path
-                self.h5_start_index = start_index
-                self.image_shape = (height, width)
-                self.image_count = num_dates - start_index
-                
-                # 清空缓存
-                self._cached_image_1 = None
-                self._cached_index_1 = -1
-                self._cached_original_size_1 = None
-                self._cached_image_2 = None
-                self._cached_index_2 = -1
-                self._cached_original_size_2 = None
-                self.selected_pixel = None
-                
-                # 生成文件名列表（用于显示）
-                self.image_files = []
-                for i in range(self.image_count):
-                    if i < len(self.date_list):
-                        self.image_files.append(f"{self.date_list[i]}.h5")
-                    else:
-                        self.image_files.append(f"frame_{i + start_index:04d}.h5")
-                
-                # 更新UI
-                self.image_count_label.setText(f"已加载 {self.image_count} 张时序影像")
-                
-                # 更新两个窗口的控件
-                for viewer_id in [1, 2]:
-                    slider = getattr(self, f'image_slider_{viewer_id}')
-                    prev_btn = getattr(self, f'prev_btn_{viewer_id}')
-                    next_btn = getattr(self, f'next_btn_{viewer_id}')
-                    
-                    slider.setMaximum(self.image_count - 1)
-                    slider.setEnabled(True)
-                    prev_btn.setEnabled(True)
-                    next_btn.setEnabled(True)
-                
-                # 设置默认的彩色colormap
-                self.colormap_combo.setCurrentText('jet')
-                
-                # 设置默认Nodata值为0（h5数据）
-                self.nodata_value = 0
-                self.image_viewer_1.set_nodata_value(0)
-                self.image_viewer_2.set_nodata_value(0)
-                
-                # 显示第一张和第二张图像
-                self.current_image_index_1 = 0
-                self.current_image_index_2 = min(1, self.image_count - 1)
-                self.show_image(1)
-                self.show_image(2)
-                
-                QMessageBox.information(self, "成功", 
-                                      f"成功加载h5时序数据！\n" +
-                                      f"影像数量: {self.image_count}\n" +
-                                      f"影像尺寸: {width} x {height}\n" +
-                                      f"日期范围: {self.date_list[0]} 至 {self.date_list[-1]}")
+                slider.setMaximum(self.image_count - 1)
+                slider.setEnabled(True)
+                prev_btn.setEnabled(True)
+                next_btn.setEnabled(True)
+            
+            # 设置默认的彩色colormap
+            self.colormap_combo.setCurrentText('jet')
+            
+            # 设置默认Nodata值为0（h5数据）
+            self.nodata_value = 0
+            self.image_viewer_1.set_nodata_value(0)
+            self.image_viewer_2.set_nodata_value(0)
+            
+            # 显示第一张和第二张图像
+            self.current_image_index_1 = 0
+            self.current_image_index_2 = min(1, self.image_count - 1)
+            self.show_image(1)
+            self.show_image(2)
+            
+            QMessageBox.information(self, "成功", 
+                                  f"成功加载h5时序数据！\n" +
+                                  f"影像数量: {self.image_count}\n" +
+                                  f"影像尺寸: {width} x {height}\n" +
+                                  f"日期范围: {self.date_list[0]} 至 {self.date_list[-1]}")
                 
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开h5文件失败: {str(e)}")
@@ -680,7 +652,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             first_file = file_list[0]
             ext = os.path.splitext(first_file)[1].lower()
             if ext in ['.tif', '.tiff']:
-                self._check_and_build_overviews(first_file)
+                self._check_and_build_overviews_local(first_file)
             
             # 使用降采样读取第一张图像以检查尺寸和波段数
             first_image_data, first_nodata, first_original_size = self._read_image_downsampled(file_list[0])
@@ -724,14 +696,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 try:
                     ext = os.path.splitext(file_path)[1].lower()
                     if ext in ['.tif', '.tiff']:
-                        ds = gdal.Open(file_path)
-                        if ds is None:
+                        # 使用高效的get_tiff_info获取尺寸
+                        size_info, band_count, nodata = get_tiff_info(file_path)
+                        if size_info is None:
                             inconsistent_files.append(f"{os.path.basename(file_path)}: 读取失败")
                             continue
-                        width = ds.RasterXSize
-                        height = ds.RasterYSize
-                        band_count = ds.RasterCount
-                        ds = None
+                        width, height = size_info
                         
                         # 检查尺寸一致性
                         if reference_shape[0] != height or reference_shape[1] != width:
@@ -740,9 +710,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
                             )
                             continue
                     else:
-                        # 对于非TIFF文件，使用PIL检查尺寸
-                        img = Image.open(file_path)
-                        img_width, img_height = img.size
+                        # 对于非TIFF文件，使用高效的get_image_info获取尺寸
+                        size_info, channels = get_image_info(file_path)
+                        if size_info is None:
+                            inconsistent_files.append(f"{os.path.basename(file_path)}: 读取失败")
+                            continue
+                        img_width, img_height = size_info
                         if reference_shape[0] != img_height or reference_shape[1] != img_width:
                             inconsistent_files.append(
                                 f"{os.path.basename(file_path)}: 尺寸({img_width}x{img_height}) != 参考尺寸({reference_shape[1]}x{reference_shape[0]})"
@@ -827,7 +800,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 return
             
             # 弹出格式选择对话框
-            format_dialog = GammaTimeSeriesFormatDialog(self, last_format, all_files)
+            format_dialog = GammaTimeSeriesDialog(self, last_format, all_files)
             if format_dialog.exec() != QDialog.Accepted:
                 return
             
@@ -974,34 +947,14 @@ class PixelTimeSeriesViewerDialog(QDialog):
             ext = os.path.splitext(file_path)[1].lower()
             
             if ext in ['.tif', '.tiff']:
-                # 使用GDAL读取TIFF
-                ds = gdal.Open(file_path)
-                if ds is None:
-                    return None, None
-                
-                band_count = ds.RasterCount
-                
-                # 获取Nodata值（从第一个波段）
-                band1 = ds.GetRasterBand(1)
-                nodata_value = band1.GetNoDataValue()
-                
-                if band_count == 1:
-                    # 单波段
-                    data = band1.ReadAsArray()
-                else:
-                    # 多波段
-                    data = []
-                    for i in range(1, band_count + 1):
-                        band = ds.GetRasterBand(i)
-                        data.append(band.ReadAsArray())
-                    data = np.stack(data, axis=-1)
-                
-                ds = None
-                return data, nodata_value
+                # 使用image_io读取TIFF
+                data, nodata, _ = read_tiff(file_path)
+                return data, nodata
             else:
-                # 使用PIL读取普通图像
-                img = Image.open(file_path)
-                data = np.array(img)
+                # 使用image_io读取普通图像
+                data = read_image(file_path)
+                if data is None:
+                    return None, None
                 
                 # 如果是单通道灰度图，确保是2D
                 if data.ndim == 2:
@@ -1033,20 +986,14 @@ class PixelTimeSeriesViewerDialog(QDialog):
             ext = os.path.splitext(file_path)[1].lower()
             
             if ext in ['.tif', '.tiff']:
-                return self._read_tiff_downsampled(file_path, max_size)
+                # 使用image_io读取TIFF
+                data, nodata, original_size, factor = read_tiff_downsampled(file_path, max_size)
+                return data, nodata, original_size
             else:
-                # 使用PIL读取普通图像（PIL支持降采样）
-                img = Image.open(file_path)
-                original_size = img.size  # (width, height)
-                
-                # 计算降采样比例
-                max_dim = max(original_size)
-                if max_dim > max_size:
-                    scale = max_size / max_dim
-                    new_size = (int(original_size[0] * scale), int(original_size[1] * scale))
-                    img = img.resize(new_size, Image.Resampling.LANCZOS)
-                
-                data = np.array(img)
+                # 使用image_io读取普通图像
+                data, original_size, factor = read_image_downsampled(file_path, max_size)
+                if data is None:
+                    return None, None, None
                 
                 # 如果是单通道灰度图，确保是2D
                 if data.ndim == 2:
@@ -1062,148 +1009,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         except Exception as e:
             print(f"降采样读取图像失败 {file_path}: {e}")
             return None, None, None
-    
-    def _read_tiff_downsampled(self, file_path, max_size=2048):
-        """
-        使用GDAL降采样读取TIFF，优先使用金字塔（Overview）
-        
-        Args:
-            file_path: TIFF文件路径
-            max_size: 最大边长（像素）
-            
-        Returns:
-            tuple: (降采样后的图像数据, nodata值, 原始尺寸(width, height)) 或 (None, None, None)
-        """
-        try:
-            ds = gdal.Open(file_path)
-            if ds is None:
-                return None, None, None
-            
-            original_width = ds.RasterXSize
-            original_height = ds.RasterYSize
-            original_size = (original_width, original_height)
-            band_count = ds.RasterCount
-            
-            # 获取Nodata值
-            band1 = ds.GetRasterBand(1)
-            nodata_value = band1.GetNoDataValue()
-            
-            # 计算目标尺寸
-            max_dim = max(original_width, original_height)
-            if max_dim <= max_size:
-                # 不需要降采样
-                if band_count == 1:
-                    data = band1.ReadAsArray()
-                else:
-                    data = []
-                    for i in range(1, band_count + 1):
-                        band = ds.GetRasterBand(i)
-                        data.append(band.ReadAsArray())
-                    data = np.stack(data, axis=-1)
-                ds = None
-                return data, nodata_value, original_size
-            
-            # 计算降采样后的尺寸
-            scale = max_size / max_dim
-            target_width = int(original_width * scale)
-            target_height = int(original_height * scale)
-            
-            # 检查是否有金字塔（Overview）
-            overview_count = band1.GetOverviewCount()
-            
-            if overview_count > 0:
-                # 找到最适合的金字塔级别
-                best_overview = self._find_best_overview(band1, target_width, target_height)
-                if best_overview is not None:
-                    # 从金字塔读取
-                    if band_count == 1:
-                        data = best_overview.ReadAsArray(
-                            buf_xsize=target_width, 
-                            buf_ysize=target_height
-                        )
-                    else:
-                        data = []
-                        for i in range(1, band_count + 1):
-                            band = ds.GetRasterBand(i)
-                            ov = self._find_best_overview(band, target_width, target_height)
-                            if ov:
-                                band_data = ov.ReadAsArray(
-                                    buf_xsize=target_width, 
-                                    buf_ysize=target_height
-                                )
-                            else:
-                                band_data = band.ReadAsArray(
-                                    buf_xsize=target_width, 
-                                    buf_ysize=target_height
-                                )
-                            data.append(band_data)
-                        data = np.stack(data, axis=-1)
-                    ds = None
-                    return data, nodata_value, original_size
-            
-            # 没有金字塔，直接降采样读取
-            if band_count == 1:
-                data = band1.ReadAsArray(
-                    buf_xsize=target_width, 
-                    buf_ysize=target_height
-                )
-            else:
-                data = []
-                for i in range(1, band_count + 1):
-                    band = ds.GetRasterBand(i)
-                    band_data = band.ReadAsArray(
-                        buf_xsize=target_width, 
-                        buf_ysize=target_height
-                    )
-                    data.append(band_data)
-                data = np.stack(data, axis=-1)
-            
-            ds = None
-            return data, nodata_value, original_size
-            
-        except Exception as e:
-            print(f"降采样读取TIFF失败 {file_path}: {e}")
-            traceback.print_exc()
-            return None, None, None
-    
-    def _find_best_overview(self, band, target_width, target_height):
-        """
-        找到最适合目标尺寸的金字塔级别
-        
-        Args:
-            band: GDAL Band对象
-            target_width: 目标宽度
-            target_height: 目标高度
-            
-        Returns:
-            最佳的Overview对象，如果没有合适的返回None
-        """
-        overview_count = band.GetOverviewCount()
-        if overview_count == 0:
-            return None
-        
-        best_overview = None
-        best_size_diff = float('inf')
-        
-        for i in range(overview_count):
-            ov = band.GetOverview(i)
-            ov_width = ov.XSize
-            ov_height = ov.YSize
-            
-            # 选择尺寸大于等于目标尺寸且最接近的金字塔
-            if ov_width >= target_width and ov_height >= target_height:
-                size_diff = (ov_width - target_width) + (ov_height - target_height)
-                if size_diff < best_size_diff:
-                    best_size_diff = size_diff
-                    best_overview = ov
-        
-        # 如果没有找到大于目标的，选择最大的那个
-        if best_overview is None and overview_count > 0:
-            best_overview = band.GetOverview(0)  # 第一个通常是最大的
-        
-        return best_overview
-    
-    def _check_and_build_overviews(self, file_path):
+
+    def _check_and_build_overviews_local(self, file_path):
         """
         检查TIFF文件是否有金字塔，如果没有则询问用户是否创建
         
@@ -1218,22 +1025,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
             if ext not in ['.tif', '.tiff']:
                 return False
             
-            ds = gdal.Open(file_path)
-            if ds is None:
-                return False
+            # 使用image_io模块检查是否需要金字塔
+            needs_overview, width, height = check_tiff_needs_overview(file_path, threshold=4096)
             
-            band1 = ds.GetRasterBand(1)
-            overview_count = band1.GetOverviewCount()
-            width = ds.RasterXSize
-            height = ds.RasterYSize
-            ds = None
-            
-            # 检查图像是否足够大需要金字塔
-            max_dim = max(width, height)
-            if max_dim <= 4096:  # 小于4096像素不需要金字塔
-                return True
-            
-            if overview_count > 0:
+            if not needs_overview:
                 return True
             
             # 询问用户是否创建金字塔
@@ -1248,7 +1043,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             )
             
             if reply == QMessageBox.Yes:
-                return self._build_overviews(file_path)
+                return self._build_overviews_local(file_path)
             
             return False
             
@@ -1256,9 +1051,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             print(f"检查金字塔失败 {file_path}: {e}")
             return False
     
-    def _build_overviews(self, file_path):
+    def _build_overviews_local(self, file_path):
         """
-        为TIFF文件创建金字塔
+        使用image_io模块为TIFF文件创建金字塔
         
         Args:
             file_path: TIFF文件路径
@@ -1266,46 +1061,21 @@ class PixelTimeSeriesViewerDialog(QDialog):
         Returns:
             bool: 是否成功创建
         """
-        try:
-            # 以更新模式打开
-            ds = gdal.Open(file_path, gdal.GA_Update)
-            if ds is None:
-                QMessageBox.warning(self, "警告", "无法以写入模式打开文件，可能是只读文件。")
-                return False
-            
-            # 获取图像尺寸
-            width = ds.RasterXSize
-            height = ds.RasterYSize
-            
-            # 计算金字塔级别（2, 4, 8, 16, ...直到最小边小于256）
-            overview_levels = []
-            level = 2
-            min_dim = min(width, height)
-            while min_dim / level > 256:
-                overview_levels.append(level)
-                level *= 2
-            overview_levels.append(level)  # 添加最后一级
-            
-            # 显示进度提示
-            QMessageBox.information(
-                self, 
-                "正在创建金字塔",
-                f"正在为图像创建金字塔...\n级别: {overview_levels}\n\n请稍候，这可能需要几分钟。"
-            )
-            
-            # 创建金字塔
-            # 使用NEAREST重采样方法（速度快，适合分类数据）
-            # 可以改为AVERAGE（适合连续数据）或CUBIC（更平滑）
-            ds.BuildOverviews("NEAREST", overview_levels)
-            
-            ds = None
-            
-            QMessageBox.information(self, "完成", "金字塔创建成功！")
+        # 显示进度提示
+        QMessageBox.information(
+            self, 
+            "正在创建金字塔",
+            "正在为图像创建金字塔...\n请稍候，这可能需要几分钟。"
+        )
+        
+        # 使用image_io模块创建金字塔
+        success, levels = build_tiff_overviews(file_path, "NEAREST")
+        
+        if success:
+            QMessageBox.information(self, "完成", f"金字塔创建成功！级别: {levels}")
             return True
-            
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"创建金字塔失败: {str(e)}")
-            traceback.print_exc()
+        else:
+            QMessageBox.warning(self, "警告", "创建金字塔失败，可能是只读文件。")
             return False
     
     def sort_images(self):
@@ -1365,50 +1135,33 @@ class PixelTimeSeriesViewerDialog(QDialog):
             像素值（标量或数组）
         """
         if self.data_source_type == 'h5':
-            # 从h5文件按需读取单个像素
+            # 使用image_io模块从h5文件按需读取单个像素（获取整个时序）
             try:
-                with h5py.File(self.h5_file_path, 'r') as h5f:
-                    actual_index = index + self.h5_start_index
-                    pixel_value = h5f['timeseries'][actual_index, y, x]
-                    return pixel_value
+                actual_index = index + self.h5_start_index
+                # 直接读取单个像素的所有时序值
+                all_values = read_h5_timeseries_pixel(
+                    self.h5_file_path, x, y, self.h5_start_index
+                )
+                if all_values is not None and index < len(all_values):
+                    return all_values[index]
+                return np.nan
             except Exception as e:
                 print(f"读取h5像素值失败 (索引 {index}, 位置 ({x}, {y})): {e}")
                 return np.nan
+        elif self.data_source_type == 'gamma':
+            # 从GAMMA文件读取
+            if index < len(self.image_files):
+                return self._read_gamma_pixel_value(self.image_files[index], x, y)
+            return np.nan
         else:
             # 从文件按需读取像素值
             if index < len(self.image_files):
                 try:
                     file_path = self.image_files[index]
-                    ext = os.path.splitext(file_path)[1].lower()
-                    
-                    if ext in ['.tif', '.tiff']:
-                        # 使用GDAL读取单个像素
-                        ds = gdal.Open(file_path)
-                        if ds is None:
-                            return np.nan
-                        
-                        band_count = ds.RasterCount
-                        if band_count == 1:
-                            band = ds.GetRasterBand(1)
-                            # 读取单个像素 (x_offset, y_offset, x_size, y_size)
-                            pixel_value = band.ReadAsArray(x, y, 1, 1)[0, 0]
-                        else:
-                            pixel_values = []
-                            for i in range(1, band_count + 1):
-                                band = ds.GetRasterBand(i)
-                                val = band.ReadAsArray(x, y, 1, 1)[0, 0]
-                                pixel_values.append(val)
-                            pixel_value = np.array(pixel_values)
-                        ds = None
-                        return pixel_value
-                    else:
-                        # 使用PIL读取，需要加载整张图像
-                        img = Image.open(file_path)
-                        data = np.array(img)
-                        if data.ndim == 2:
-                            return data[y, x]
-                        else:
-                            return data[y, x]
+                    value = read_tiff_pixel(file_path, x, y)
+                    if value is not None:
+                        return value
+                    return np.nan
                 except Exception as e:
                     print(f"读取像素值失败 (文件 {file_path}, 位置 ({x}, {y})): {e}")
                     return np.nan
@@ -1427,12 +1180,15 @@ class PixelTimeSeriesViewerDialog(QDialog):
         if self.data_source_type == 'h5':
             # 从h5文件批量读取整列像素（更高效）
             try:
-                with h5py.File(self.h5_file_path, 'r') as h5f:
-                    # 读取所有时间步在指定像素位置的值
-                    start_idx = self.h5_start_index
-                    end_idx = start_idx + self.image_count
-                    pixel_values = h5f['timeseries'][start_idx:end_idx, y, x]
-                    return list(pixel_values)
+                # 直接获取所有时序值（read_h5_timeseries_pixel返回完整时序）
+                all_values = read_h5_timeseries_pixel(
+                    self.h5_file_path,
+                    x, y,
+                    start_index=self.h5_start_index
+                )
+                if all_values is not None:
+                    return list(all_values[:self.image_count])
+                return [np.nan] * self.image_count
             except Exception as e:
                 print(f"批量读取h5像素值失败 (位置 ({x}, {y})): {e}")
                 return [np.nan] * self.image_count
@@ -1811,192 +1567,4 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 other_pixel_label.setText("像素值: -")  # 坐标超出范围
         else:
             other_pixel_label.setText("像素值: -")
-
-
-class GammaTimeSeriesFormatDialog(QDialog):
-    """GAMMA时序文件格式选择对话框"""
-    
-    def __init__(self, parent=None, default_format="float32", file_list=None):
-        super().__init__(parent)
-        self.file_list = file_list or []
-        self.valid_files = []
-        self.width = None
-        self.height = None
-        
-        self.setWindowTitle("GAMMA时序设置")
-        self.resize(600, 400)
-        
-        layout = QVBoxLayout(self)
-        
-        # 格式选择
-        format_group = QGroupBox("数据格式")
-        format_layout = QVBoxLayout(format_group)
-        
-        format_row = QHBoxLayout()
-        format_row.addWidget(QLabel("数据类型:"))
-        self.format_combo = QComboBox()
-        for fmt, desc in GAMMA_FORMATS.items():
-            self.format_combo.addItem(f"{fmt} - {desc}", fmt)
-        # 设置默认值
-        for i in range(self.format_combo.count()):
-            if self.format_combo.itemData(i) == default_format:
-                self.format_combo.setCurrentIndex(i)
-                break
-        format_row.addWidget(self.format_combo)
-        format_layout.addLayout(format_row)
-        
-        layout.addWidget(format_group)
-        
-        # 尺寸检测
-        size_group = QGroupBox("图像尺寸")
-        size_layout = QVBoxLayout(size_group)
-        
-        self.status_label = QLabel("点击'检测尺寸'按钮自动检测...")
-        size_layout.addWidget(self.status_label)
-        
-        size_row = QHBoxLayout()
-        self.detect_btn = QPushButton("检测尺寸")
-        self.detect_btn.clicked.connect(self._detect_dimensions)
-        size_row.addWidget(self.detect_btn)
-        
-        self.manual_btn = QPushButton("手动输入尺寸")
-        self.manual_btn.clicked.connect(self._manual_input)
-        size_row.addWidget(self.manual_btn)
-        
-        size_row.addStretch()
-        size_layout.addLayout(size_row)
-        
-        # 显示检测到的尺寸
-        dim_row = QHBoxLayout()
-        dim_row.addWidget(QLabel("宽度:"))
-        self.width_label = QLabel("-")
-        dim_row.addWidget(self.width_label)
-        dim_row.addWidget(QLabel("高度:"))
-        self.height_label = QLabel("-")
-        dim_row.addWidget(self.height_label)
-        dim_row.addStretch()
-        size_layout.addLayout(dim_row)
-        
-        layout.addWidget(size_group)
-        
-        # 文件列表
-        files_group = QGroupBox(f"检测到的文件 ({len(self.file_list)} 个)")
-        files_layout = QVBoxLayout(files_group)
-        
-        self.files_status_label = QLabel("尚未验证文件")
-        files_layout.addWidget(self.files_status_label)
-        
-        layout.addWidget(files_group)
-        
-        # 按钮
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(self._validate_and_accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-        # 格式变化时重置检测结果
-        self.format_combo.currentIndexChanged.connect(self._reset_detection)
-    
-    def _reset_detection(self):
-        """重置检测结果"""
-        self.valid_files = []
-        self.width = None
-        self.height = None
-        self.width_label.setText("-")
-        self.height_label.setText("-")
-        self.status_label.setText("格式已更改，请重新检测尺寸...")
-        self.files_status_label.setText("尚未验证文件")
-    
-    def _detect_dimensions(self):
-        """自动检测尺寸"""
-        if not self.file_list:
-            self.status_label.setText("没有文件可检测！")
-            return
-        
-        fmt = self.format_combo.currentData()
-        self.status_label.setText("正在检测...")
-        
-        # 尝试从第一个文件的par文件获取尺寸
-        first_file = self.file_list[0]
-        par_file, dims = find_valid_par_for_binary(first_file, fmt)
-        
-        if par_file and dims:
-            self.width, self.height = dims
-            self.width_label.setText(str(self.width))
-            self.height_label.setText(str(self.height))
-            self.status_label.setText(
-                f"✓ 从PAR文件检测到尺寸: {self.width} x {self.height}"
-            )
-            self.status_label.setStyleSheet("color: green;")
-            
-            # 验证所有文件
-            self._validate_files()
-        else:
-            self.status_label.setText(
-                "✗ 未找到PAR文件，请手动输入尺寸"
-            )
-            self.status_label.setStyleSheet("color: red;")
-    
-    def _manual_input(self):
-        """手动输入尺寸"""
-        width, ok1 = QInputDialog.getInt(self, "输入宽度", "请输入图像宽度（列数）:", 0, 1, 100000)
-        if not ok1:
-            return
-        
-        height, ok2 = QInputDialog.getInt(self, "输入高度", "请输入图像高度（行数）:", 0, 1, 100000)
-        if not ok2:
-            return
-        
-        self.width = width
-        self.height = height
-        self.width_label.setText(str(width))
-        self.height_label.setText(str(height))
-        
-        # 验证文件
-        self._validate_files()
-    
-    def _validate_files(self):
-        """验证所有文件是否符合当前尺寸"""
-        if self.width is None or self.height is None:
-            return
-        
-        fmt = self.format_combo.currentData()
-        self.valid_files = []
-        invalid_count = 0
-        
-        for file_path in self.file_list:
-            if validate_dimensions(file_path, self.width, self.height, fmt):
-                self.valid_files.append(file_path)
-            else:
-                invalid_count += 1
-        
-        if self.valid_files:
-            self.files_status_label.setText(
-                f"✓ 有效文件: {len(self.valid_files)} 个" + 
-                (f"，无效: {invalid_count} 个" if invalid_count > 0 else "")
-            )
-            self.files_status_label.setStyleSheet("color: green;")
-        else:
-            self.files_status_label.setText("✗ 没有找到有效文件")
-            self.files_status_label.setStyleSheet("color: red;")
-    
-    def _validate_and_accept(self):
-        """验证并接受"""
-        if not self.valid_files:
-            QMessageBox.warning(self, "警告", "没有有效的文件可加载！请检测或输入正确的尺寸。")
-            return
-        
-        self.accept()
-    
-    def get_selected_format(self):
-        return self.format_combo.currentData()
-    
-    def get_valid_files(self):
-        return self.valid_files
-    
-    def get_width(self):
-        return self.width
-    
-    def get_height(self):
-        return self.height
 

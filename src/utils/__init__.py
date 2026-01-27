@@ -54,6 +54,36 @@ from .gamma_file_process import (
     GAMMA_FORMATS,
 )
 
+# 图像读取工具
+from .image_io import (
+    # TIFF读取
+    read_tiff,
+    read_tiff_downsampled,
+    read_tiff_region,
+    read_tiff_pixel,
+    get_tiff_info,
+    find_best_overview,
+    find_best_overview_by_factor,
+    check_tiff_needs_overview,
+    build_tiff_overviews,
+    # 普通图像读取
+    read_image,
+    read_image_downsampled,
+    read_image_region,
+    get_image_info,
+    # 通用图像读取
+    read_any_image,
+    read_any_image_downsampled,
+    read_any_image_region,
+    read_any_image_pixel,
+    # HDF5读取
+    list_h5_datasets,
+    read_h5_dataset,
+    read_h5_timeseries_metadata,
+    read_h5_timeseries_frame,
+    read_h5_timeseries_pixel,
+)
+
 __all__ = [
     'LocalDEMProcessor',
     'calculate_area_km2',
@@ -89,4 +119,27 @@ __all__ = [
     'is_gamma_binary_file',
     'get_gamma_file_info',
     'GAMMA_FORMATS',
+    # 图像读取工具
+    'read_tiff',
+    'read_tiff_downsampled',
+    'read_tiff_region',
+    'read_tiff_pixel',
+    'get_tiff_info',
+    'find_best_overview',
+    'find_best_overview_by_factor',
+    'check_tiff_needs_overview',
+    'build_tiff_overviews',
+    'read_image',
+    'read_image_downsampled',
+    'read_image_region',
+    'get_image_info',
+    'read_any_image',
+    'read_any_image_downsampled',
+    'read_any_image_region',
+    'read_any_image_pixel',
+    'list_h5_datasets',
+    'read_h5_dataset',
+    'read_h5_timeseries_metadata',
+    'read_h5_timeseries_frame',
+    'read_h5_timeseries_pixel',
 ]

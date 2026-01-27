@@ -24,24 +24,29 @@ def get_settings():
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-from PIL import Image
-from osgeo import gdal
 import traceback
-import h5py
 
 from src.widgets import InteractiveImageViewer, ColormapComboBox
 from src.utils.gamma_file_process import (
     GAMMA_FORMATS,
-    read_gamma_binary,
     read_gamma_downsampled,
     read_gamma_region,
     read_gamma_pixel,
     find_valid_par_for_binary,
     validate_dimensions,
     complex_to_phase,
-    complex_to_amplitude,
     is_gamma_binary_file,
 )
+from src.utils.image_io import (
+    read_tiff_downsampled,
+    read_tiff_region,
+    read_tiff_pixel,
+    read_image_downsampled,
+    read_image_region,
+    list_h5_datasets,
+    read_h5_dataset,
+)
+from src.dialogs.gamma_dialogs import GammaSingleFileDialog
 
 
 class LocalImageViewerDialog(QDialog):
@@ -206,13 +211,13 @@ class LocalImageViewerDialog(QDialog):
             self.is_tiff = ext in ['.tif', '.tiff']
             
             if self.is_tiff:
-                # 使用GDAL读取TIFF（支持降采样）
+                # 使用image_io模块读取TIFF（支持降采样和金字塔）
                 self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
-                    self._read_tiff_downsampled(file_path)
+                    self._read_tiff_downsampled_local(file_path)
             else:
-                # 使用PIL读取普通图像（支持降采样）
+                # 使用image_io模块读取普通图像（支持降采样）
                 self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
-                    self._read_image_downsampled(file_path)
+                    self._read_image_downsampled_local(file_path)
             
             # 显示图像
             original_size = (self.original_width, self.original_height) if self.downsample_factor > 1 else None
@@ -246,135 +251,27 @@ class LocalImageViewerDialog(QDialog):
             QMessageBox.critical(self, "错误", f"打开图像失败: {str(e)}")
             traceback.print_exc()
     
-    def _read_tiff_downsampled(self, file_path):
+    def _read_tiff_downsampled_local(self, file_path):
         """
-        使用GDAL读取TIFF图像，支持降采样和金字塔
+        使用image_io模块读取TIFF图像，支持降采样和金字塔
         返回: (image_data, (original_width, original_height), downsample_factor)
         """
-        ds = gdal.Open(file_path)
-        if ds is None:
+        data, nodata, original_size, factor = read_tiff_downsampled(file_path, self.MAX_DISPLAY_SIZE)
+        if data is None:
             raise IOError(f"无法打开TIFF文件: {file_path}")
-        
-        original_width = ds.RasterXSize
-        original_height = ds.RasterYSize
-        band_count = ds.RasterCount
-        
-        # 获取Nodata值
-        band1 = ds.GetRasterBand(1)
-        self.nodata_value = band1.GetNoDataValue()
-        
-        # 计算降采样因子
-        max_dim = max(original_width, original_height)
-        if max_dim > self.MAX_DISPLAY_SIZE:
-            downsample_factor = int(np.ceil(max_dim / self.MAX_DISPLAY_SIZE))
-        else:
-            downsample_factor = 1
-        
-        if downsample_factor > 1:
-            # 计算目标尺寸
-            target_width = original_width // downsample_factor
-            target_height = original_height // downsample_factor
-            
-            # 尝试使用金字塔（overview）
-            overview_level = self._find_best_overview(band1, downsample_factor)
-            
-            if overview_level is not None:
-                # 使用金字塔读取
-                if band_count == 1:
-                    overview = band1.GetOverview(overview_level)
-                    image_data = overview.ReadAsArray()
-                else:
-                    data = []
-                    for i in range(1, band_count + 1):
-                        band = ds.GetRasterBand(i)
-                        overview = band.GetOverview(overview_level)
-                        data.append(overview.ReadAsArray())
-                    image_data = np.stack(data, axis=-1)
-            else:
-                # 使用GDAL直接降采样
-                if band_count == 1:
-                    image_data = band1.ReadAsArray(
-                        buf_xsize=target_width, 
-                        buf_ysize=target_height
-                    )
-                else:
-                    data = []
-                    for i in range(1, band_count + 1):
-                        band = ds.GetRasterBand(i)
-                        data.append(band.ReadAsArray(
-                            buf_xsize=target_width, 
-                            buf_ysize=target_height
-                        ))
-                    image_data = np.stack(data, axis=-1)
-        else:
-            # 无需降采样，直接读取
-            if band_count == 1:
-                image_data = band1.ReadAsArray()
-            else:
-                data = []
-                for i in range(1, band_count + 1):
-                    band = ds.GetRasterBand(i)
-                    data.append(band.ReadAsArray())
-                image_data = np.stack(data, axis=-1)
-        
-        ds = None
-        return image_data, (original_width, original_height), downsample_factor
+        self.nodata_value = nodata
+        return data, original_size, factor
     
-    def _read_image_downsampled(self, file_path):
+    def _read_image_downsampled_local(self, file_path):
         """
-        使用PIL读取普通图像，支持降采样
+        使用image_io模块读取普通图像，支持降采样
         返回: (image_data, (original_width, original_height), downsample_factor)
         """
-        img = Image.open(file_path)
-        original_width, original_height = img.size
+        data, original_size, factor = read_image_downsampled(file_path, self.MAX_DISPLAY_SIZE)
+        if data is None:
+            raise IOError(f"无法打开图像文件: {file_path}")
         self.nodata_value = None
-        
-        # 计算降采样因子
-        max_dim = max(original_width, original_height)
-        if max_dim > self.MAX_DISPLAY_SIZE:
-            downsample_factor = int(np.ceil(max_dim / self.MAX_DISPLAY_SIZE))
-            # 计算目标尺寸
-            target_width = original_width // downsample_factor
-            target_height = original_height // downsample_factor
-            # 使用LANCZOS进行高质量降采样
-            img = img.resize((target_width, target_height), Image.LANCZOS)
-        else:
-            downsample_factor = 1
-        
-        image_data = np.array(img)
-        
-        # 如果有alpha通道，去掉
-        if image_data.ndim == 3 and image_data.shape[2] == 4:
-            image_data = image_data[:, :, :3]
-        
-        return image_data, (original_width, original_height), downsample_factor
-    
-    def _find_best_overview(self, band, target_factor):
-        """
-        查找最适合目标降采样因子的金字塔层级
-        返回: overview索引（0-based），如果没有合适的则返回None
-        """
-        overview_count = band.GetOverviewCount()
-        if overview_count == 0:
-            return None
-        
-        original_width = band.XSize
-        best_level = None
-        best_ratio = float('inf')
-        
-        for i in range(overview_count):
-            overview = band.GetOverview(i)
-            overview_width = overview.XSize
-            factor = original_width / overview_width
-            
-            # 选择最接近但不超过目标因子的层级
-            if factor <= target_factor * 1.5:
-                ratio_diff = abs(factor - target_factor)
-                if ratio_diff < best_ratio:
-                    best_ratio = ratio_diff
-                    best_level = i
-        
-        return best_level
+        return data, original_size, factor
     
     def _read_original_region(self, x1, y1, x2, y2):
         """
@@ -401,32 +298,9 @@ class LocalImageViewerDialog(QDialog):
             if self.is_gamma:
                 return self._read_gamma_original_region(x1, y1, x2, y2)
             elif self.is_tiff:
-                ds = gdal.Open(self.image_file)
-                if ds is None:
-                    return None
-                
-                band_count = ds.RasterCount
-                if band_count == 1:
-                    band = ds.GetRasterBand(1)
-                    region_data = band.ReadAsArray(x1, y1, width, height)
-                else:
-                    data = []
-                    for i in range(1, band_count + 1):
-                        band = ds.GetRasterBand(i)
-                        data.append(band.ReadAsArray(x1, y1, width, height))
-                    region_data = np.stack(data, axis=-1)
-                
-                ds = None
-                return region_data
+                return read_tiff_region(self.image_file, x1, y1, x2, y2)
             else:
-                # 对于非TIFF图像，需要加载整个图像
-                # 这里可以使用PIL的crop功能，但PIL会加载整个图像到内存
-                img = Image.open(self.image_file)
-                img = img.crop((x1, y1, x2, y2))
-                region_data = np.array(img)
-                if region_data.ndim == 3 and region_data.shape[2] == 4:
-                    region_data = region_data[:, :, :3]
-                return region_data
+                return read_image_region(self.image_file, x1, y1, x2, y2)
         except Exception as e:
             traceback.print_exc()
             return None
@@ -448,26 +322,10 @@ class LocalImageViewerDialog(QDialog):
             if self.is_gamma:
                 return self._read_gamma_original_pixel(x, y)
             elif self.is_tiff:
-                ds = gdal.Open(self.image_file)
-                if ds is None:
-                    return None
-                
-                band_count = ds.RasterCount
-                if band_count == 1:
-                    band = ds.GetRasterBand(1)
-                    value = band.ReadAsArray(x, y, 1, 1)[0, 0]
-                else:
-                    values = []
-                    for i in range(1, band_count + 1):
-                        band = ds.GetRasterBand(i)
-                        values.append(band.ReadAsArray(x, y, 1, 1)[0, 0])
-                    value = np.array(values)
-                
-                ds = None
-                return value
+                return read_tiff_pixel(self.image_file, x, y)
             else:
                 # 对于非TIFF图像，读取单个像素区域
-                region = self._read_original_region(x, y, x+1, y+1)
+                region = read_image_region(self.image_file, x, y, x+1, y+1)
                 if region is not None:
                     if region.ndim == 2:
                         return region[0, 0]
@@ -882,86 +740,77 @@ class LocalImageViewerDialog(QDialog):
         settings.setValue("last_h5_path", os.path.dirname(file_path))
         
         try:
-            # 打开h5文件并列出所有数据集
-            with h5py.File(file_path, 'r') as h5f:
-                # 递归获取所有数据集
-                datasets = []
-                
-                def find_datasets(name, obj):
-                    if isinstance(obj, h5py.Dataset):
-                        # 只显示2D或3D数据集
-                        if obj.ndim >= 2:
-                            shape_str = f"({', '.join(map(str, obj.shape))})"
-                            datasets.append((name, shape_str, obj.shape))
-                
-                h5f.visititems(find_datasets)
-                
-                if not datasets:
-                    QMessageBox.warning(self, "警告", "h5文件中没有找到合适的图像数据集！")
+            # 使用image_io模块列出所有数据集
+            datasets = list_h5_datasets(file_path, min_ndim=2)
+            
+            if not datasets:
+                QMessageBox.warning(self, "警告", "h5文件中没有找到合适的图像数据集！")
+                return
+            
+            # 如果只有一个数据集，直接加载
+            if len(datasets) == 1:
+                selected_dataset = datasets[0][0]
+            else:
+                # 弹出对话框让用户选择数据集
+                selected_dataset = self._show_dataset_selection_dialog(datasets)
+                if not selected_dataset:
                     return
-                
-                # 如果只有一个数据集，直接加载
-                if len(datasets) == 1:
-                    selected_dataset = datasets[0][0]
-                else:
-                    # 弹出对话框让用户选择数据集
-                    selected_dataset = self._show_dataset_selection_dialog(datasets)
-                    if not selected_dataset:
-                        return
-                
-                # 加载选中的数据集
-                data = h5f[selected_dataset][:]
-                
-                # 处理数据维度
-                if data.ndim == 2:
-                    # 2D数据，直接使用
-                    self.image_data = data.astype(np.float32)
-                elif data.ndim == 3:
-                    # 3D数据，如果是时序数据，选择第一帧；如果是多波段，直接使用
-                    if data.shape[0] < data.shape[1] and data.shape[0] < data.shape[2]:
-                        # 可能是多波段图像 (bands, height, width)
-                        self.image_data = np.moveaxis(data, 0, -1).astype(np.float32)  # 转换为 (height, width, bands)
+            
+            # 检查数据形状决定是否需要选择帧
+            dataset_shape = None
+            for name, _, shape in datasets:
+                if name == selected_dataset:
+                    dataset_shape = shape
+                    break
+            
+            frame_index = None
+            if dataset_shape and len(dataset_shape) == 3:
+                # 3D数据，判断是多波段还是时序
+                if not (dataset_shape[0] < dataset_shape[1] and dataset_shape[0] < dataset_shape[2]):
+                    # 可能是时序数据，让用户选择帧
+                    frame_idx, ok = QInputDialog.getInt(
+                        self, "选择帧", 
+                        f"数据包含 {dataset_shape[0]} 帧，请选择要显示的帧（0-{dataset_shape[0]-1}）:",
+                        0, 0, dataset_shape[0]-1)
+                    if ok:
+                        frame_index = frame_idx
                     else:
-                        # 可能是时序数据，让用户选择帧
-                        frame_idx, ok = QInputDialog.getInt(
-                            self, "选择帧", 
-                            f"数据包含 {data.shape[0]} 帧，请选择要显示的帧（0-{data.shape[0]-1}）:",
-                            0, 0, data.shape[0]-1)
-                        
-                        if ok:
-                            self.image_data = data[frame_idx, :, :].astype(np.float32)
-                        else:
-                            return
-                else:
-                    QMessageBox.critical(self, "错误", f"不支持的数据维度: {data.ndim}D")
-                    return
-                
-                self.image_file = file_path
-                self.nodata_value = None  # h5文件默认没有Nodata值
-                
-                # 显示图像
-                self.image_viewer.set_image_from_array(self.image_data)
-                
-                # 设置Nodata值到图像查看器
-                self.image_viewer.set_nodata_value(self.nodata_value)
-                
-                # 设置默认colormap为jet（h5数据）
-                self.colormap_combo.setCurrentText('jet')
-                
-                # 更新信息
-                shape = self.image_data.shape
-                if self.image_data.ndim == 2:
-                    info = f"{os.path.basename(file_path)} [{selected_dataset}] | 尺寸: {shape[1]}x{shape[0]} | 单波段"
-                elif self.image_data.ndim == 3:
-                    info = f"{os.path.basename(file_path)} [{selected_dataset}] | 尺寸: {shape[1]}x{shape[0]} | {shape[2]}波段"
-                else:
-                    info = f"{os.path.basename(file_path)} [{selected_dataset}] | 尺寸: {shape}"
-                
-                self.image_info_label.setText(info)
-                
-                # 自动显示整个图像的直方图
-                self.show_image_histogram()
-                
+                        return
+            
+            # 使用image_io模块读取数据集
+            data, original_shape = read_h5_dataset(file_path, selected_dataset, frame_index)
+            
+            if data is None:
+                QMessageBox.critical(self, "错误", "无法读取数据集")
+                return
+            
+            self.image_data = data
+            self.image_file = file_path
+            self.nodata_value = None  # h5文件默认没有Nodata值
+            
+            # 显示图像
+            self.image_viewer.set_image_from_array(self.image_data)
+            
+            # 设置Nodata值到图像查看器
+            self.image_viewer.set_nodata_value(self.nodata_value)
+            
+            # 设置默认colormap为jet（h5数据）
+            self.colormap_combo.setCurrentText('jet')
+            
+            # 更新信息
+            shape = self.image_data.shape
+            if self.image_data.ndim == 2:
+                info = f"{os.path.basename(file_path)} [{selected_dataset}] | 尺寸: {shape[1]}x{shape[0]} | 单波段"
+            elif self.image_data.ndim == 3:
+                info = f"{os.path.basename(file_path)} [{selected_dataset}] | 尺寸: {shape[1]}x{shape[0]} | {shape[2]}波段"
+            else:
+                info = f"{os.path.basename(file_path)} [{selected_dataset}] | 尺寸: {shape}"
+            
+            self.image_info_label.setText(info)
+            
+            # 自动显示整个图像的直方图
+            self.show_image_histogram()
+            
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开h5文件失败: {str(e)}")
             traceback.print_exc()
@@ -1076,7 +925,7 @@ class LocalImageViewerDialog(QDialog):
         
         try:
             # 弹出格式选择对话框
-            format_dialog = GammaFormatDialog(self, last_format, file_path)
+            format_dialog = GammaSingleFileDialog(self, last_format, file_path)
             if format_dialog.exec() != QDialog.Accepted:
                 return
             
@@ -1218,159 +1067,3 @@ class LocalImageViewerDialog(QDialog):
         except Exception as e:
             traceback.print_exc()
             return None
-
-
-class GammaFormatDialog(QDialog):
-    """GAMMA文件格式选择对话框"""
-    
-    def __init__(self, parent=None, default_format="float32", binary_file=None):
-        super().__init__(parent)
-        self.binary_file = binary_file
-        self.setWindowTitle("GAMMA文件设置")
-        self.resize(500, 350)
-        
-        layout = QVBoxLayout(self)
-        
-        # 格式选择
-        format_group = QGroupBox("数据格式")
-        format_layout = QVBoxLayout(format_group)
-        
-        format_row = QHBoxLayout()
-        format_row.addWidget(QLabel("数据类型:"))
-        self.format_combo = QComboBox()
-        for fmt, desc in GAMMA_FORMATS.items():
-            self.format_combo.addItem(f"{fmt} - {desc}", fmt)
-        # 设置默认值
-        for i in range(self.format_combo.count()):
-            if self.format_combo.itemData(i) == default_format:
-                self.format_combo.setCurrentIndex(i)
-                break
-        format_row.addWidget(self.format_combo)
-        format_layout.addLayout(format_row)
-        
-        layout.addWidget(format_group)
-        
-        # 尺寸设置
-        size_group = QGroupBox("图像尺寸")
-        size_layout = QVBoxLayout(size_group)
-        
-        # 自动查找状态
-        self.auto_status_label = QLabel("正在检测...")
-        size_layout.addWidget(self.auto_status_label)
-        
-        # PAR文件选择
-        par_row = QHBoxLayout()
-        par_row.addWidget(QLabel("PAR文件:"))
-        self.par_combo = QComboBox()
-        self.par_combo.addItem("（自动检测）", None)
-        par_row.addWidget(self.par_combo)
-        self.browse_par_btn = QPushButton("浏览...")
-        self.browse_par_btn.clicked.connect(self._browse_par_file)
-        par_row.addWidget(self.browse_par_btn)
-        size_layout.addLayout(par_row)
-        
-        # 手动输入尺寸
-        manual_row = QHBoxLayout()
-        manual_row.addWidget(QLabel("或手动输入:"))
-        manual_row.addWidget(QLabel("宽度:"))
-        self.width_edit = QLabel("-")
-        manual_row.addWidget(self.width_edit)
-        manual_row.addWidget(QLabel("高度:"))
-        self.height_edit = QLabel("-")
-        manual_row.addWidget(self.height_edit)
-        self.manual_input_btn = QPushButton("手动输入尺寸")
-        self.manual_input_btn.clicked.connect(self._manual_input_size)
-        manual_row.addWidget(self.manual_input_btn)
-        size_layout.addLayout(manual_row)
-        
-        layout.addWidget(size_group)
-        
-        # 手动输入的值存储
-        self.manual_width = None
-        self.manual_height = None
-        
-        # 按钮
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-        # 格式变化时重新检测
-        self.format_combo.currentIndexChanged.connect(self._update_detection)
-        
-        # 初始检测
-        self._update_detection()
-    
-    def _update_detection(self):
-        """更新自动检测结果"""
-        if not self.binary_file:
-            self.auto_status_label.setText("未指定二进制文件")
-            return
-        
-        fmt = self.format_combo.currentData()
-        par_file, dims = find_valid_par_for_binary(self.binary_file, fmt)
-        
-        # 更新PAR文件列表
-        self.par_combo.clear()
-        self.par_combo.addItem("（自动检测）", None)
-        
-        if par_file:
-            self.par_combo.addItem(os.path.basename(par_file), par_file)
-            self.par_combo.setCurrentIndex(1)
-            width, height = dims
-            self.auto_status_label.setText(
-                f"✓ 找到匹配的PAR文件: {os.path.basename(par_file)} ({width}x{height})"
-            )
-            self.auto_status_label.setStyleSheet("color: green;")
-        else:
-            self.auto_status_label.setText(
-                "✗ 未找到匹配的PAR文件，请手动指定尺寸或选择PAR文件"
-            )
-            self.auto_status_label.setStyleSheet("color: red;")
-    
-    def _browse_par_file(self):
-        """浏览PAR文件"""
-        start_dir = os.path.dirname(self.binary_file) if self.binary_file else ""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择PAR文件", start_dir, "PAR文件 (*.par);;所有文件 (*.*)"
-        )
-        if file_path:
-            # 添加到下拉框
-            self.par_combo.addItem(os.path.basename(file_path), file_path)
-            self.par_combo.setCurrentIndex(self.par_combo.count() - 1)
-    
-    def _manual_input_size(self):
-        """手动输入尺寸"""
-        width, ok1 = QInputDialog.getInt(self, "输入宽度", "请输入图像宽度（列数）:", 0, 1, 100000)
-        if not ok1:
-            return
-        
-        height, ok2 = QInputDialog.getInt(self, "输入高度", "请输入图像高度（行数）:", 0, 1, 100000)
-        if not ok2:
-            return
-        
-        self.manual_width = width
-        self.manual_height = height
-        self.width_edit.setText(str(width))
-        self.height_edit.setText(str(height))
-        
-        # 验证尺寸
-        fmt = self.format_combo.currentData()
-        if validate_dimensions(self.binary_file, width, height, fmt):
-            self.auto_status_label.setText(f"✓ 尺寸 {width}x{height} 验证通过")
-            self.auto_status_label.setStyleSheet("color: green;")
-        else:
-            self.auto_status_label.setText(f"✗ 尺寸 {width}x{height} 与文件大小不匹配")
-            self.auto_status_label.setStyleSheet("color: red;")
-    
-    def get_selected_format(self):
-        return self.format_combo.currentData()
-    
-    def get_manual_width(self):
-        return self.manual_width
-    
-    def get_manual_height(self):
-        return self.manual_height
-    
-    def get_selected_par(self):
-        return self.par_combo.currentData()
