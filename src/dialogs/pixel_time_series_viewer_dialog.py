@@ -108,6 +108,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._plot_annotation = None  # matplotlib annotation对象
         self._plot_ax = None  # 当前axes对象
         
+        # dB转换标志
+        self._converted_to_db = False  # 是否已转换为dB
+        
         # 创建UI
         self._create_ui()
         
@@ -125,7 +128,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.open_folder_btn.clicked.connect(self.open_folder)
         control_layout.addWidget(self.open_folder_btn)
         
-        self.open_gamma_folder_btn = QPushButton("打开GAMMA时序")
+        self.open_gamma_folder_btn = QPushButton("打开GAMMA时序数据")
         self.open_gamma_folder_btn.clicked.connect(self.open_gamma_folder)
         control_layout.addWidget(self.open_gamma_folder_btn)
         
@@ -154,6 +157,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.set_nodata_btn = QPushButton("设置Nodata值")
         self.set_nodata_btn.clicked.connect(self.set_nodata_value)
         control_layout.addWidget(self.set_nodata_btn)
+        
+        # 转为dB按钮
+        self.to_db_btn = QPushButton("转为dB")
+        self.to_db_btn.clicked.connect(self.convert_to_db)
+        self.to_db_btn.setEnabled(False)
+        control_layout.addWidget(self.to_db_btn)
         
         main_layout.addLayout(control_layout)
         
@@ -374,7 +383,6 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 actual_index, 
                 max_size=max_display_size
             )
-            return image_data, original_size
         elif self.data_source_type == 'gamma':
             # 从GAMMA二进制文件读取
             if index < len(self.image_files):
@@ -382,8 +390,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     self.image_files[index],
                     max_size=max_display_size
                 )
-                return image_data, original_size
-            return None, None
+            else:
+                return None, None
         else:
             # 从文件夹按需读取（使用降采样读取）
             if index < len(self.image_files):
@@ -391,8 +399,31 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     self.image_files[index], 
                     max_size=max_display_size
                 )
-                return image_data, original_size
-            return None, None
+            else:
+                return None, None
+        
+        # 如果已标记转换为dB，则应用转换
+        if self._converted_to_db and image_data is not None:
+            # 转换为dB
+            data_copy = image_data.copy()
+            
+            # 处理nodata值：如果是GAMMA数据，保持nodata（0）不变
+            if self.is_gamma_timeseries or self.nodata_value == 0:
+                # 创建mask：标记nodata像素
+                nodata_mask = (data_copy == 0)
+                # 将<=0且不是nodata的值设为一个很小的正数
+                min_positive = np.min(data_copy[data_copy > 0]) if np.any(data_copy > 0) else 1e-10
+                data_copy[(data_copy <= 0) & ~nodata_mask] = min_positive
+                # 转换为dB
+                db_data = np.where(nodata_mask, 0, 10 * np.log10(data_copy))
+                image_data = db_data.astype(np.float32)
+            else:
+                # 非GAMMA数据，正常转换
+                min_positive = np.min(data_copy[data_copy > 0]) if np.any(data_copy > 0) else 1e-10
+                data_copy[data_copy <= 0] = min_positive
+                image_data = 10 * np.log10(data_copy).astype(np.float32)
+        
+        return image_data, original_size
     
     def _get_cached_image(self, viewer_id, index):
         """获取缓存的图像数据，如果未缓存则加载
@@ -573,6 +604,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.image_shape = (height, width)
             self.image_count = num_dates - start_index
             
+            # 重置转换标志
+            self._converted_to_db = False
+            
             # 清空缓存
             self._cached_image_1 = None
             self._cached_index_1 = -1
@@ -618,6 +652,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.show_image(1)
             self.show_image(2)
             
+            # 启用转dB按钮
+            self.to_db_btn.setEnabled(True)
+            
             QMessageBox.information(self, "成功", 
                                   f"成功加载h5时序数据！\n" +
                                   f"影像数量: {self.image_count}\n" +
@@ -639,6 +676,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.date_list = []
             self.selected_pixel = None
             self.nodata_value = None
+            
+            # 重置转换标志
+            self._converted_to_db = False
             
             # 清空缓存
             self._cached_image_1 = None
@@ -766,6 +806,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.show_image(1)
             self.show_image(2)
             
+            # 启用转dB按钮
+            self.to_db_btn.setEnabled(True)
+            
             # 应用排序
             self.sort_images()
             
@@ -787,31 +830,93 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         try:
             # 查找目录中的二进制文件（排除.par文件）
-            all_files = []
+            # 使用文件大小>10M且大小一致来判断
+            MIN_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+            
+            all_files_with_size = []
             for filename in os.listdir(folder):
                 file_path = os.path.join(folder, filename)
-                if os.path.isfile(file_path) and not filename.endswith('.par'):
-                    # 检查是否可能是GAMMA二进制文件
-                    if is_gamma_binary_file(file_path):
-                        all_files.append(file_path)
+                if os.path.isfile(file_path) and not 'par' in filename.lower():
+                    file_size = os.path.getsize(file_path)
+                    if file_size >= MIN_FILE_SIZE:
+                        all_files_with_size.append((file_path, file_size))
             
-            if not all_files:
-                QMessageBox.warning(self, "警告", "文件夹中没有找到GAMMA二进制文件！")
+            if not all_files_with_size:
+                QMessageBox.warning(self, "警告", "文件夹中没有找到大于10MB的二进制文件！")
                 return
             
-            # 弹出格式选择对话框
-            format_dialog = GammaTimeSeriesDialog(self, last_format, all_files)
-            if format_dialog.exec() != QDialog.Accepted:
+            # 按文件大小分组，允许小误差（1%）
+            SIZE_TOLERANCE = 0.01  # 1%误差
+            size_groups = {}
+            
+            for file_path, file_size in all_files_with_size:
+                # 查找是否有相近大小的组
+                found_group = False
+                for group_size in size_groups:
+                    if abs(file_size - group_size) / group_size < SIZE_TOLERANCE:
+                        size_groups[group_size].append(file_path)
+                        found_group = True
+                        break
+                
+                if not found_group:
+                    size_groups[file_size] = [file_path]
+            
+            # 找到文件数最多的组
+            largest_group = max(size_groups.values(), key=len)
+            
+            if len(largest_group) < 2:
+                QMessageBox.warning(self, "警告", 
+                    f"文件夹中没有找到大小一致的GAMMA二进制文件！\n"
+                    f"找到{len(all_files_with_size)}个大于10MB的文件，但它们的大小不一致。")
                 return
             
-            gamma_format = format_dialog.get_selected_format()
-            valid_files = format_dialog.get_valid_files()
-            width = format_dialog.get_width()
-            height = format_dialog.get_height()
+            all_files = largest_group
             
-            if not valid_files:
-                QMessageBox.warning(self, "警告", "没有找到有效的GAMMA二进制文件！")
-                return
+            # 先尝试以float32格式自动检测第一个文件的PAR文件
+            first_file = all_files[0]
+            auto_par_file, auto_dims = find_valid_par_for_binary(first_file, "float32")
+            auto_format = "float32"
+            
+            # 如果没找到，再尝试cpxfloat32
+            if auto_par_file is None:
+                auto_par_file, auto_dims = find_valid_par_for_binary(first_file, "cpxfloat32")
+                auto_format = "cpxfloat32"
+            
+            # 如果找到了有效的PAR文件，直接使用；否则弹出对话框
+            if auto_par_file and auto_dims:
+                gamma_format = auto_format
+                width, height = auto_dims
+                
+                # 验证所有文件
+                valid_files = []
+                for file_path in all_files:
+                    if validate_dimensions(file_path, width, height, gamma_format):
+                        valid_files.append(file_path)
+                
+                if not valid_files:
+                    QMessageBox.warning(self, "警告", "没有找到有效的GAMMA二进制文件！")
+                    return
+                    
+                # 显示信息，但不需要用户确认
+                info_msg = (f"自动检测到PAR文件: {os.path.basename(auto_par_file)}\n"
+                           f"尺寸: {width} x {height}\n"
+                           f"格式: {gamma_format}\n"
+                           f"有效文件数: {len(valid_files)}")
+                QMessageBox.information(self, "自动检测成功", info_msg)
+            else:
+                # 未找到，弹出对话框让用户选择
+                format_dialog = GammaTimeSeriesDialog(self, last_format, all_files)
+                if format_dialog.exec() != QDialog.Accepted:
+                    return
+                
+                gamma_format = format_dialog.get_selected_format()
+                valid_files = format_dialog.get_valid_files()
+                width = format_dialog.get_width()
+                height = format_dialog.get_height()
+                
+                if not valid_files:
+                    QMessageBox.warning(self, "警告", "没有找到有效的GAMMA二进制文件！")
+                    return
             
             # 保存设置
             settings.setValue("last_gamma_format", gamma_format)
@@ -827,6 +932,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.h5_file_path = None
             self.h5_start_index = 0
             self.image_shape = (height, width)
+            
+            # 重置转换标志
+            self._converted_to_db = False
             
             # 清空缓存
             self._cached_image_1 = None
@@ -874,6 +982,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.current_image_index_2 = min(1, self.image_count - 1)
             self.show_image(1)
             self.show_image(2)
+            
+            # 启用转dB按钮
+            self.to_db_btn.setEnabled(True)
             
             QMessageBox.information(self, "成功", 
                 f"成功加载GAMMA时序数据！\n" +
@@ -1187,11 +1298,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     start_index=self.h5_start_index
                 )
                 if all_values is not None:
-                    return list(all_values[:self.image_count])
-                return [np.nan] * self.image_count
+                    values = list(all_values[:self.image_count])
+                else:
+                    values = [np.nan] * self.image_count
             except Exception as e:
                 print(f"批量读取h5像素值失败 (位置 ({x}, {y})): {e}")
-                return [np.nan] * self.image_count
+                values = [np.nan] * self.image_count
         elif self.data_source_type == 'gamma':
             # 从GAMMA二进制文件逐个读取
             values = []
@@ -1201,14 +1313,58 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     values.append(val if val is not None else np.nan)
                 else:
                     values.append(np.nan)
-            return values
         else:
             # 从文件夹逐个读取
             values = []
             for i in range(self.image_count):
                 val = self._get_pixel_value_at(i, x, y)
                 values.append(val)
-            return values
+        
+        # 如果已转换为dB，对像素值也应用dB转换
+        if self._converted_to_db:
+            converted_values = []
+            for val in values:
+                if isinstance(val, np.ndarray):
+                    # 多波段
+                    converted_val = val.copy()
+                    for i in range(len(converted_val)):
+                        v = converted_val[i]
+                        if self.is_gamma_timeseries or self.nodata_value == 0:
+                            # GAMMA数据，保持nodata(0)不变
+                            if v == 0:
+                                converted_val[i] = 0
+                            elif v > 0:
+                                converted_val[i] = 10 * np.log10(v)
+                            else:
+                                converted_val[i] = 10 * np.log10(1e-10)
+                        else:
+                            # 非-GAMMA数据
+                            if v > 0:
+                                converted_val[i] = 10 * np.log10(v)
+                            else:
+                                converted_val[i] = 10 * np.log10(1e-10)
+                    converted_values.append(converted_val)
+                else:
+                    # 单波段
+                    if np.isnan(val):
+                        converted_values.append(val)
+                    elif self.is_gamma_timeseries or self.nodata_value == 0:
+                        # GAMMA数据，保持nodata(0)不变
+                        if val == 0:
+                            converted_values.append(0)
+                        elif val > 0:
+                            converted_values.append(10 * np.log10(val))
+                        else:
+                            converted_values.append(10 * np.log10(1e-10))
+                    else:
+                        # 非-GAMMA数据
+                        if val > 0:
+                            converted_values.append(10 * np.log10(val))
+                        else:
+                            converted_values.append(10 * np.log10(1e-10))
+            return converted_values
+        
+        return values
     
     def update_time_series_plot(self):
         """更新时序曲线图（按需读取像素值）"""
@@ -1567,4 +1723,52 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 other_pixel_label.setText("像素值: -")  # 坐标超出范围
         else:
             other_pixel_label.setText("像素值: -")
+    
+    def convert_to_db(self):
+        """将显示的图像转换为dB (10*log10)"""
+        if self.image_count == 0:
+            return
+        
+        try:
+            # 确认操作
+            reply = QMessageBox.question(
+                self, "确认", 
+                "将所有图像转换为dB (10*log10)？\n注意：此操作会修改缓存的图像数据。",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # 清空缓存，强制重新加载
+            self._cached_image_1 = None
+            self._cached_index_1 = -1
+            self._cached_original_size_1 = None
+            self._cached_image_2 = None
+            self._cached_index_2 = -1
+            self._cached_original_size_2 = None
+            
+            # 标记为已转换为dB
+            self._converted_to_db = True
+            
+            # 如果是GAMMA时序数据，保持nodata为0
+            if self.is_gamma_timeseries:
+                self.nodata_value = 0
+                self.image_viewer_1.set_nodata_value(0)
+                self.image_viewer_2.set_nodata_value(0)
+            
+            # 重新显示当前图像
+            self.show_image(1)
+            self.show_image(2)
+            
+            # 如果有选中的像素，更新曲线
+            if self.selected_pixel:
+                self.update_time_series_plot()
+            
+            QMessageBox.information(self, "成功", "已转换为dB (10*log10)")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"转换为dB失败: {str(e)}")
+            traceback.print_exc()
 

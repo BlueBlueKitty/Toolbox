@@ -334,8 +334,11 @@ def find_valid_par_for_binary(
     if os.path.exists(par_without_ext) and par_without_ext not in candidates:
         candidates.append(par_without_ext)
     
-    # 3. 目录中的其他.par文件
-    par_files = glob.glob(os.path.join(directory, "*.par"))
+    # 3. 目录中的其他包含'par'的文件
+    # 支持 .par, .dem_par, .lt_par, .geo_par 等各种PAR文件命名
+    par_files = glob.glob(os.path.join(directory, "*par*"))
+    # 过滤掉目录，只保留文件
+    par_files = [pf for pf in par_files if os.path.isfile(pf)]
     for pf in par_files:
         if pf not in candidates:
             candidates.append(pf)
@@ -659,21 +662,36 @@ def is_gamma_binary_file(file_path: str) -> bool:
     bool
         如果可能是GAMMA二进制文件返回True
     """
-    # 常见的GAMMA二进制文件扩展名
+    # 排除明显的文本文件和参数文件
+    filename = os.path.basename(file_path).lower()
+    if 'par' in filename or filename.endswith(('.txt', '.xml', '.json', '.log')):
+        return False
+    
+    # 常见的GAMMA二进制文件扩展名和关键字
     gamma_extensions = {
         '.slc', '.mli', '.int', '.unw', '.cc', '.dem', '.sim', 
         '.hgt', '.flt', '.ramp', '.diff', '.lt', '.geo', '.ras',
-        '.unw1', '.unw2', '.off'
+        '.unw1', '.unw2', '.off', '.rmli'
     }
+    
+    gamma_keywords = ['slc', 'mli', 'rmli', 'int', 'unw', 'diff', 'geo', 'filt', 'enhanced']
     
     # 检查扩展名
     ext = os.path.splitext(file_path)[1].lower()
     if ext in gamma_extensions:
         return True
     
-    # 检查是否存在对应的.par文件
-    if os.path.exists(file_path + ".par"):
-        return True
+    # 检查文件名中是否包含GAMMA关键字
+    for keyword in gamma_keywords:
+        if keyword in filename:
+            return True
+    
+    # 检查是否存在对应的包含'par'的文件
+    directory = os.path.dirname(file_path)
+    if directory:
+        par_files = glob.glob(os.path.join(directory, "*par*"))
+        if par_files:
+            return True
     
     return False
 

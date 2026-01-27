@@ -145,7 +145,8 @@ class GammaSingleFileDialog(QDialog):
         """浏览PAR文件"""
         start_dir = os.path.dirname(self.binary_file) if self.binary_file else ""
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择PAR文件", start_dir, "PAR文件 (*.par);;所有文件 (*.*)"
+            self, "选择PAR文件", start_dir, 
+            "PAR文件 (*.par *par* *.PAR *PAR*);;所有文件 (*.*)"
         )
         if file_path:
             # 添加到下拉框
@@ -212,13 +213,22 @@ class GammaTimeSeriesDialog(QDialog):
         size_group = QGroupBox("图像尺寸")
         size_layout = QVBoxLayout(size_group)
         
-        self.status_label = QLabel("点击'检测尺寸'按钮自动检测...")
+        self.status_label = QLabel("选择PAR文件或手动输入尺寸...")
         size_layout.addWidget(self.status_label)
         
+        # PAR文件选择
+        par_row = QHBoxLayout()
+        par_row.addWidget(QLabel("PAR文件:"))
+        self.par_file_label = QLabel("（未选择）")
+        par_row.addWidget(self.par_file_label)
+        self.browse_par_btn = QPushButton("浏览PAR文件...")
+        self.browse_par_btn.clicked.connect(self._browse_par_file)
+        par_row.addWidget(self.browse_par_btn)
+        par_row.addStretch()
+        size_layout.addLayout(par_row)
+        
+        # 手动输入和自动检测按钮
         size_row = QHBoxLayout()
-        self.detect_btn = QPushButton("检测尺寸")
-        self.detect_btn.clicked.connect(self._detect_dimensions)
-        size_row.addWidget(self.detect_btn)
         
         self.manual_btn = QPushButton("手动输入尺寸")
         self.manual_btn.clicked.connect(self._manual_input)
@@ -256,20 +266,66 @@ class GammaTimeSeriesDialog(QDialog):
         layout.addWidget(button_box)
         
         # 格式变化时重置检测结果
-        self.format_selector.connect_format_changed(self._reset_detection)
+        self.format_selector.connect_format_changed(self._on_format_changed)
+        
+        # 存储选择的PAR文件
+        self.selected_par_file = None
+        
+        # 初始化时尝试自动检测PAR文件
+        self._auto_detect_par()
     
-    def _reset_detection(self):
-        """重置检测结果"""
+    def _browse_par_file(self):
+        """浏览并选择PAR文件"""
+        # 从文件列表获取起始目录
+        start_dir = os.path.dirname(self.file_list[0]) if self.file_list else ""
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择PAR文件", start_dir,
+            "PAR文件 (*.par *par* *.PAR *PAR*);;所有文件 (*.*)"
+        )
+        
+        if file_path:
+            self.selected_par_file = file_path
+            self.par_file_label.setText(os.path.basename(file_path))
+            
+            # 尝试从PAR文件读取尺寸
+            try:
+                from src.utils.gamma_file_process import get_dimensions_from_par
+                width, height = get_dimensions_from_par(file_path)
+                self.width = width
+                self.height = height
+                self.width_label.setText(str(width))
+                self.height_label.setText(str(height))
+                
+                self.status_label.setText(
+                    f"✓ 从PAR文件读取到尺寸: {width} x {height}"
+                )
+                self.status_label.setStyleSheet("color: green;")
+                
+                # 验证文件
+                self._validate_files()
+                
+            except Exception as e:
+                self.status_label.setText(f"✗ 读取PAR文件失败: {str(e)}")
+                self.status_label.setStyleSheet("color: red;")
+    
+    def _on_format_changed(self):
+        """格式变化时的处理：重置并自动检测PAR"""
+        # 重置检测结果
         self.valid_files = []
         self.width = None
         self.height = None
         self.width_label.setText("-")
         self.height_label.setText("-")
-        self.status_label.setText("格式已更改，请重新检测尺寸...")
         self.files_status_label.setText("尚未验证文件")
+        self.selected_par_file = None
+        self.par_file_label.setText("（未选择）")
+        
+        # 自动检测PAR文件
+        self._auto_detect_par()
     
-    def _detect_dimensions(self):
-        """自动检测尺寸"""
+    def _auto_detect_par(self):
+        """自动检测PAR文件"""
         if not self.file_list:
             self.status_label.setText("没有文件可检测！")
             return
@@ -282,6 +338,8 @@ class GammaTimeSeriesDialog(QDialog):
         par_file, dims = find_valid_par_for_binary(first_file, fmt)
         
         if par_file and dims:
+            self.selected_par_file = par_file
+            self.par_file_label.setText(os.path.basename(par_file))
             self.width, self.height = dims
             self.width_label.setText(str(self.width))
             self.height_label.setText(str(self.height))
@@ -294,9 +352,9 @@ class GammaTimeSeriesDialog(QDialog):
             self._validate_files()
         else:
             self.status_label.setText(
-                "✗ 未找到PAR文件，请手动输入尺寸"
+                "✗ 未找到PAR文件，请手动选择PAR文件或输入尺寸"
             )
-            self.status_label.setStyleSheet("color: red;")
+            self.status_label.setStyleSheet("color: orange;")
     
     def _manual_input(self):
         """手动输入尺寸"""

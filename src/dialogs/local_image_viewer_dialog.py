@@ -78,6 +78,9 @@ class LocalImageViewerDialog(QDialog):
         self.gamma_format = "float32"   # GAMMA数据格式
         self.gamma_par_file = None      # PAR文件路径
         
+        # dB转换标志
+        self._converted_to_db = False   # 是否已转换为dB
+        
         # 创建UI
         self._create_ui()
         
@@ -108,6 +111,11 @@ class LocalImageViewerDialog(QDialog):
         self.set_nodata_btn = QPushButton("设置Nodata值")
         self.set_nodata_btn.clicked.connect(self.set_nodata_value)
         control_layout.addWidget(self.set_nodata_btn)
+        
+        self.to_db_btn = QPushButton("转为dB")
+        self.to_db_btn.clicked.connect(self.convert_to_db)
+        self.to_db_btn.setEnabled(False)
+        control_layout.addWidget(self.to_db_btn)
         
         # 绘制模式选择
         control_layout.addWidget(QLabel("绘制模式:"))
@@ -246,6 +254,9 @@ class LocalImageViewerDialog(QDialog):
             
             # 自动显示整个图像的直方图
             self.show_image_histogram()
+            
+            # 启用转dB按钮
+            self.to_db_btn.setEnabled(True)
             
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开图像失败: {str(e)}")
@@ -811,6 +822,9 @@ class LocalImageViewerDialog(QDialog):
             # 自动显示整个图像的直方图
             self.show_image_histogram()
             
+            # 启用转dB按钮
+            self.to_db_btn.setEnabled(True)
+            
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开h5文件失败: {str(e)}")
             traceback.print_exc()
@@ -924,45 +938,66 @@ class LocalImageViewerDialog(QDialog):
         settings.setValue("last_gamma_path", os.path.dirname(file_path))
         
         try:
-            # 弹出格式选择对话框
-            format_dialog = GammaSingleFileDialog(self, last_format, file_path)
-            if format_dialog.exec() != QDialog.Accepted:
-                return
+            # 先尝试以float32格式查找PAR文件
+            auto_par_file, auto_dims = find_valid_par_for_binary(file_path, "float32")
+            auto_format = "float32"
             
-            gamma_format = format_dialog.get_selected_format()
-            manual_width = format_dialog.get_manual_width()
-            manual_height = format_dialog.get_manual_height()
-            selected_par = format_dialog.get_selected_par()
+            # 如果没找到，再尝试cpxfloat32
+            if auto_par_file is None:
+                auto_par_file, auto_dims = find_valid_par_for_binary(file_path, "cpxfloat32")
+                auto_format = "cpxfloat32"
+            
+            # 如果自动找到了PAR文件，直接使用
+            if auto_par_file is not None and auto_dims is not None:
+                gamma_format = auto_format
+                width, height = auto_dims
+                par_file_used = auto_par_file
+                
+                # 显示自动检测信息
+                QMessageBox.information(self, "自动检测成功", 
+                    f"自动检测到PAR文件: {os.path.basename(auto_par_file)}\n"
+                    f"尺寸: {width} x {height}\n"
+                    f"格式: {gamma_format}")
+            else:
+                # 没找到，弹出对话框让用户选择
+                format_dialog = GammaSingleFileDialog(self, last_format, file_path)
+                if format_dialog.exec() != QDialog.Accepted:
+                    return
+                
+                gamma_format = format_dialog.get_selected_format()
+                manual_width = format_dialog.get_manual_width()
+                manual_height = format_dialog.get_manual_height()
+                selected_par = format_dialog.get_selected_par()
+                
+                # 确定尺寸
+                if manual_width is not None and manual_height is not None:
+                    # 使用手动输入的尺寸
+                    if not validate_dimensions(file_path, manual_width, manual_height, gamma_format):
+                        QMessageBox.critical(self, "错误", 
+                            f"输入的尺寸 {manual_width}x{manual_height} 与文件大小不匹配！")
+                        return
+                    width, height = manual_width, manual_height
+                    par_file_used = None
+                elif selected_par:
+                    # 使用选择的PAR文件
+                    from src.utils.gamma_file_process import get_dimensions_from_par
+                    width, height = get_dimensions_from_par(selected_par)
+                    if not validate_dimensions(file_path, width, height, gamma_format):
+                        QMessageBox.critical(self, "错误", 
+                            f"PAR文件中的尺寸 {width}x{height} 与二进制文件不匹配！")
+                        return
+                    par_file_used = selected_par
+                else:
+                    # 自动查找PAR文件
+                    par_file_used, dims = find_valid_par_for_binary(file_path, gamma_format)
+                    if par_file_used is None or dims is None:
+                        QMessageBox.critical(self, "错误", 
+                            "无法自动找到匹配的PAR文件！请手动指定尺寸或PAR文件。")
+                        return
+                    width, height = dims
             
             # 保存用户选择的格式
             settings.setValue("last_gamma_format", gamma_format)
-            
-            # 确定尺寸
-            if manual_width is not None and manual_height is not None:
-                # 使用手动输入的尺寸
-                if not validate_dimensions(file_path, manual_width, manual_height, gamma_format):
-                    QMessageBox.critical(self, "错误", 
-                        f"输入的尺寸 {manual_width}x{manual_height} 与文件大小不匹配！")
-                    return
-                width, height = manual_width, manual_height
-                par_file_used = None
-            elif selected_par:
-                # 使用选择的PAR文件
-                from src.utils.gamma_file_process import get_dimensions_from_par
-                width, height = get_dimensions_from_par(selected_par)
-                if not validate_dimensions(file_path, width, height, gamma_format):
-                    QMessageBox.critical(self, "错误", 
-                        f"PAR文件中的尺寸 {width}x{height} 与二进制文件不匹配！")
-                    return
-                par_file_used = selected_par
-            else:
-                # 自动查找PAR文件
-                par_file_used, dims = find_valid_par_for_binary(file_path, gamma_format)
-                if par_file_used is None or dims is None:
-                    QMessageBox.critical(self, "错误", 
-                        "无法自动找到匹配的PAR文件！请手动指定尺寸或PAR文件。")
-                    return
-                width, height = dims
             
             # 设置GAMMA相关属性
             self.is_gamma = True
@@ -990,11 +1025,15 @@ class LocalImageViewerDialog(QDialog):
                 self.image_data = data.astype(np.float32) if data.dtype != np.float32 else data
                 data_type_str = "幅度"
             
-            self.nodata_value = None
+            # GAMMA文件默认nodata为0
+            self.nodata_value = 0
             
             # 显示图像
             original_size = (width, height) if downsample_factor > 1 else None
             self.image_viewer.set_image_from_array(self.image_data, original_size=original_size)
+            
+            # 设置Nodata值到图像查看器
+            self.image_viewer.set_nodata_value(self.nodata_value)
             
             # 设置默认colormap
             if is_complex:
@@ -1018,6 +1057,9 @@ class LocalImageViewerDialog(QDialog):
             # 显示直方图
             self.show_image_histogram()
             
+            # 启用转dB按钮
+            self.to_db_btn.setEnabled(True)
+            
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开GAMMA文件失败: {str(e)}")
             traceback.print_exc()
@@ -1040,7 +1082,19 @@ class LocalImageViewerDialog(QDialog):
             if self.gamma_format.startswith('cpx'):
                 data = complex_to_phase(data)
             
-            return data.astype(np.float32)
+            data = data.astype(np.float32)
+            
+            # 如果已转换为dB，应用转换
+            if self._converted_to_db:
+                # 创建nodata mask
+                nodata_mask = (data == 0)
+                # 将<=0且不是nodata的值设为一个很小的正数
+                min_positive = np.min(data[data > 0]) if np.any(data > 0) else 1e-10
+                data[(data <= 0) & ~nodata_mask] = min_positive
+                # 转换为dB，但保持nodata为0
+                data = np.where(nodata_mask, 0, 10 * np.log10(data))
+            
+            return data
         except Exception as e:
             traceback.print_exc()
             return None
@@ -1063,7 +1117,75 @@ class LocalImageViewerDialog(QDialog):
             if self.gamma_format.startswith('cpx'):
                 value = np.angle(value)
             
+            # 如果已转换为dB，应用转换
+            if self._converted_to_db:
+                if value == 0:
+                    # 保持nodata为0
+                    pass
+                elif value > 0:
+                    value = 10 * np.log10(value)
+                else:
+                    value = 10 * np.log10(1e-10)
+            
             return value
         except Exception as e:
             traceback.print_exc()
             return None
+    
+    def convert_to_db(self):
+        """将显示的图像转换为dB (10*log10)"""
+        if self.image_data is None:
+            return
+        
+        try:
+            # 转换为dB
+            # 避免log10(0)或负数，先做处理
+            data_copy = self.image_data.copy()
+            
+            # 如果是GAMMA文件，特殊处理nodata值（0）
+            if self.is_gamma:
+                # 创建mask：标记nodata像素
+                nodata_mask = (data_copy == 0)
+                # 将<=0且不是nodata的值设为一个很小的正数
+                min_positive = np.min(data_copy[data_copy > 0]) if np.any(data_copy > 0) else 1e-10
+                data_copy[(data_copy <= 0) & ~nodata_mask] = min_positive
+                # 转换为dB，但保持nodata为0
+                db_data = np.where(nodata_mask, 0, 10 * np.log10(data_copy))
+            else:
+                # 非GAMMA数据，正常转换
+                # 将<=0的值设为一个很小的正数
+                min_positive = np.min(data_copy[data_copy > 0]) if np.any(data_copy > 0) else 1e-10
+                data_copy[data_copy <= 0] = min_positive
+                # 转换为dB
+                db_data = 10 * np.log10(data_copy)
+            
+            # 更新图像数据
+            self.image_data = db_data.astype(np.float32)
+            
+            # 如果是GAMMA文件，保持nodata为0
+            if self.is_gamma:
+                self.nodata_value = 0
+            
+            # 设置转换标志
+            self._converted_to_db = True
+            
+            # 重新显示图像
+            original_size = (self.original_width, self.original_height) if self.downsample_factor > 1 else None
+            self.image_viewer.set_image_from_array(self.image_data, original_size=original_size)
+            
+            # 设置Nodata值到图像查看器
+            self.image_viewer.set_nodata_value(self.nodata_value)
+            
+            # 更新信息标签（添加dB标记）
+            current_info = self.image_info_label.text()
+            if " | dB" not in current_info:
+                self.image_info_label.setText(current_info + " | dB")
+            
+            # 重新显示直方图
+            self.show_image_histogram()
+            
+            QMessageBox.information(self, "成功", "已转换为dB (10*log10)")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"转换为dB失败: {str(e)}")
+            traceback.print_exc()
