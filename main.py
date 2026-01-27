@@ -8,6 +8,12 @@ Copyright (c) 2025 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 '''
 import os
 import sys
+
+# 【重要】设置 QtWebEngine 标志必须在任何 Qt 相关模块导入之前
+# --ignore-certificate-errors 用于解决地图瓦片加载时的 SSL 握手失败问题
+# --single-process 解决渲染进程崩溃问题
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--single-process --ignore-certificate-errors --ignore-ssl-errors"
+
 # 以下导入虽然没用到，但是打包时需要用到
 from osgeo import gdal, ogr, osr
 import numpy as np
