@@ -210,6 +210,9 @@ class InteractiveImageViewer(ImageViewer):
                         self._hide_hover_marker()
                 else:
                     self._hide_hover_marker()
+            else:
+                # 鼠标不在图像上，隐藏悬停标记
+                self._hide_hover_marker()
         
         # 调用父类方法以保持其他功能
         super().mouseMoveEvent(event)
@@ -320,15 +323,16 @@ class InteractiveImageViewer(ImageViewer):
             # 将预览线添加到markers列表，以便下次更新时清除
             self.polyline_markers.append(preview_item)
         
-        # 添加点标记（只标记已确定的点）
-        for x, y in self.polyline_points:
-            marker = QGraphicsEllipseItem(x - 3, y - 3, 6, 6)
-            marker.setBrush(self.marker_brush)
-            marker.setPen(QPen(Qt.NoPen))
-            # 设置标记不随视图缩放而变化
-            marker.setFlag(QGraphicsEllipseItem.ItemIgnoresTransformations, True)
-            marker.setParentItem(self.image_item)  # 设置父项会自动添加到场景
-            self.polyline_markers.append(marker)
+        # 只在折线绘制完成后添加点标记，绘制中不显示标记避免重复
+        if self.polyline_completed:
+            for x, y in self.polyline_points:
+                marker = QGraphicsEllipseItem(x - 3, y - 3, 6, 6)
+                marker.setBrush(self.marker_brush)
+                marker.setPen(QPen(Qt.NoPen))
+                # 设置标记不随视图缩放而变化
+                marker.setFlag(QGraphicsEllipseItem.ItemIgnoresTransformations, True)
+                marker.setParentItem(self.image_item)  # 设置父项会自动添加到场景
+                self.polyline_markers.append(marker)
     
     def _update_polyline_preview(self, x, y):
         """更新折线预览（绘制中）"""

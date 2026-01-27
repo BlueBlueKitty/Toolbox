@@ -550,6 +550,11 @@ class LocalImageViewerDialog(QDialog):
     def on_chart_mouse_move(self, event):
         """图表鼠标移动事件（从图表传来）"""
         if event.inaxes is None:
+            # 鼠标不在图表坐标轴内，隐藏悬停标记
+            self.image_viewer._hide_hover_marker()
+            if hasattr(self, 'hover_line') and self.hover_line:
+                self.hover_line.set_visible(False)
+                self.canvas.draw_idle()
             return
         
         # 获取鼠标位置的x坐标（索引）
@@ -573,6 +578,18 @@ class LocalImageViewerDialog(QDialog):
                 except Exception as e:
                     # 忽略错误，避免弹窗
                     pass
+            else:
+                # 索引超出范围，隐藏悬停标记
+                self.image_viewer._hide_hover_marker()
+                if hasattr(self, 'hover_line') and self.hover_line:
+                    self.hover_line.set_visible(False)
+                    self.canvas.draw_idle()
+        else:
+            # 没有折线数据，隐藏悬停标记
+            self.image_viewer._hide_hover_marker()
+            if hasattr(self, 'hover_line') and self.hover_line:
+                self.hover_line.set_visible(False)
+                self.canvas.draw_idle()
     
     def plot_histogram(self, data_list):
         """绘制直方图（使用填充折线图）"""
@@ -808,6 +825,9 @@ class LocalImageViewerDialog(QDialog):
             # 设置默认colormap为jet（h5数据）
             self.colormap_combo.setCurrentText('jet')
             
+            # 确保图像居中显示
+            self.image_viewer.fit_in_view()
+            
             # 更新信息
             shape = self.image_data.shape
             if self.image_data.ndim == 2:
@@ -1040,6 +1060,12 @@ class LocalImageViewerDialog(QDialog):
                 self.colormap_combo.setCurrentText('hsv')  # 相位使用hsv
             else:
                 self.colormap_combo.setCurrentText('gray')
+            
+            # 确保图像居中显示
+            self.image_viewer.fit_in_view()
+            
+            # 确保图像居中显示
+            self.image_viewer.fit_in_view()
             
             # 更新信息
             info = f"{os.path.basename(file_path)} | GAMMA {gamma_format}"

@@ -478,6 +478,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 更新图像查看器（传递原始尺寸用于坐标映射）
         viewer.set_image_from_array(current_data, original_size=original_size)
         
+        # 确保图像居中显示
+        viewer.fit_in_view()
+        
         # 更新滑块
         slider.blockSignals(True)
         slider.setValue(current_index)
