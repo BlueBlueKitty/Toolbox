@@ -42,6 +42,7 @@ def tiff_boundary_to_vector(input_tiff_path, output_vector_path, to_wgs84=False,
         
         # 启用GDAL异常
         gdal.UseExceptions()
+        ogr.UseExceptions()
         
         # 打开TIFF文件
         ds = gdal.Open(input_tiff_path)
@@ -81,10 +82,18 @@ def tiff_boundary_to_vector(input_tiff_path, output_vector_path, to_wgs84=False,
             target_srs = src_srs
         
         # 准备坐标转换
+        transform = None
+        transform_failed = False
         if (to_wgs84 or output_format in ['kml', 'kmz']) and not src_srs.IsSame(target_srs):
-            transform = osr.CoordinateTransformation(src_srs, target_srs)
-        else:
-            transform = None
+            try:
+                transform = osr.CoordinateTransformation(src_srs, target_srs)
+                if transform is None:
+                    print("警告: 无法创建坐标转换对象，将使用原始坐标")
+                    transform_failed = True
+            except Exception as e:
+                print(f"警告: 创建坐标转换失败: {e}")
+                print("提示: 请确保 PROJ_LIB 环境变量已正确设置，且 proj.db 文件存在")
+                transform_failed = True
         
         # 创建输出驱动
         if output_format == 'shp':

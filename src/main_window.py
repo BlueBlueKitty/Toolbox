@@ -3,8 +3,6 @@ Author: Yibo Yuan 2633669459@qq.com
 Date: 2025-03-24 21:01:28
 LastEditors: Yibo Yuan 2633669459@qq.com
 LastEditTime: 2026-01-22
-FilePath: \Toolbox\src\main_window.py
-Description: 主窗口 - 使用纯Python代码创建UI
 
 Copyright (c) 2025 by Yibo Yuan 2633669459@qq.com, All Rights Reserved. 
 '''

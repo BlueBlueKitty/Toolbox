@@ -1079,10 +1079,12 @@ class DEMAcquisitionDialog(QDialog):
                     
                     self.log("✓ 行政区划数据加载成功")
                 else:
-                    self.log("✗ 行政区划数据库不可用")
+                    self.log("✗ 行政区划数据库不可用 (is_available返回False)")
                     
             except Exception as e:
+                import traceback
                 self.log(f"✗ 加载行政区划数据失败: {e}")
+                self.log(f"[调试] 异常详情: {traceback.format_exc()}")
         else:
             self.log("✗ 行政区划功能不可用")
         

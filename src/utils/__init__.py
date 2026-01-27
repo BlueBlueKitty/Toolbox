@@ -29,7 +29,8 @@ from .file_handler import (
 try:
     from .administrative_boundary import AdministrativeBoundarySelector
     ADMIN_BOUNDARY_AVAILABLE = True
-except Exception:
+except Exception as e:
+    print(f"[WARNING] 无法导入 AdministrativeBoundarySelector: {e}")
     ADMIN_BOUNDARY_AVAILABLE = False
     AdministrativeBoundarySelector = None
 

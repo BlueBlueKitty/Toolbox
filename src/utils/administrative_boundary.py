@@ -8,14 +8,36 @@ Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 '''
 
 import os
+import sys
 import sqlite3
 from typing import List, Optional, Tuple, Dict, Any
 
-# 数据库路径
-DEFAULT_DB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    'DEM_downloader', 'src', 'data', 'administrative_boundaries.db'
-)
+# 数据库路径，优先使用打包目录的 data，再使用项目内 resources
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+
+def _get_db_path():
+    """获取行政区划数据库路径，支持打包和开发环境"""
+    candidates = []
+    
+    if hasattr(sys, "_MEIPASS"):
+        base = sys._MEIPASS
+        # PyInstaller onedir 模式：资源在 _internal 目录下
+        candidates.extend([
+            os.path.join(base, 'resources', 'administrative_boundaries.db'),
+            os.path.join(base, 'data', 'administrative_boundaries.db'),
+        ])
+    
+    # 开发环境
+    candidates.append(os.path.join(_BASE_DIR, 'resources', 'administrative_boundaries.db'))
+    
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    
+    # 返回默认路径（可能不存在）
+    return candidates[-1] if candidates else None
+
+DEFAULT_DB_PATH = _get_db_path()
 
 
 class AdministrativeBoundarySelector:

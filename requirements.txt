@@ -1,7 +1,0 @@
-pyside6
-gdal
-pyinstaller
-matplotlib
-pillow
-numpy
-h5py

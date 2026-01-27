@@ -198,39 +198,29 @@ class ImageViewer(QGraphicsView):
         # 创建alpha通道，默认全不透明
         alpha_channel = np.full(arr.shape, 255, dtype=np.uint8)
         
-        # 标记Nodata像素
+        # 基础无效掩码：NaN和Inf
+        invalid_mask = ~np.isfinite(arr)
+        
+        # 如果有Nodata值，也加入无效掩码
         if self.nodata_value is not None:
-            # 标记Nodata像素、nan和inf为透明
             nodata_mask = (arr == self.nodata_value)
-            nan_mask = np.isnan(arr)
-            inf_mask = ~np.isfinite(arr)
-            combined_mask = nodata_mask | nan_mask | inf_mask
-            alpha_channel[combined_mask] = 0  # 这些像素设为完全透明
+            invalid_mask = invalid_mask | nodata_mask
+            
+        alpha_channel[invalid_mask] = 0  # 这些像素设为完全透明
         
         # 对非Nodata像素进行归一化
         valid_mask = alpha_channel > 0
+        normalized = np.zeros_like(arr, dtype=np.uint8)
+        
         if np.any(valid_mask):
             valid_data = arr[valid_mask]
-            # 进一步过滤NaN和inf值
-            finite_mask = np.isfinite(valid_data)
-            valid_data = valid_data[finite_mask]
             
             if len(valid_data) > 0:
                 arr_min = np.min(valid_data)
                 arr_max = np.max(valid_data)
                 
-                if arr_max - arr_min == 0:
-                    normalized = np.zeros_like(arr, dtype=np.uint8)
-                else:
-                    normalized = np.zeros_like(arr, dtype=np.uint8)
-                    # 只对真正有效的像素进行标准化
-                    valid_indices = np.where(valid_mask)[0]
-                    valid_indices = valid_indices[finite_mask]
-                    normalized.flat[valid_indices] = ((valid_data - arr_min) / (arr_max - arr_min) * 255).astype(np.uint8)
-            else:
-                normalized = np.zeros_like(arr, dtype=np.uint8)
-        else:
-            normalized = np.zeros_like(arr, dtype=np.uint8)
+                if arr_max > arr_min:
+                    normalized[valid_mask] = ((valid_data - arr_min) / (arr_max - arr_min) * 255).astype(np.uint8)
         
         if self.current_colormap == 'gray' or not MATPLOTLIB_AVAILABLE:
             return normalized, alpha_channel

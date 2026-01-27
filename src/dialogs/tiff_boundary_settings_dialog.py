@@ -3,7 +3,6 @@ Author: Yibo Yuan 2633669459@qq.com
 Date: 2025-03-24 21:50:23
 LastEditors: Yibo Yuan 2633669459@qq.com
 LastEditTime: 2025-03-25 01:23:14
-FilePath: \Toolbox\src\dialogs\tiff_boundary_seettings_dialog.py
 Description: 
 
 Copyright (c) 2025 by Yibo Yuan 2633669459@qq.com, All Rights Reserved. 

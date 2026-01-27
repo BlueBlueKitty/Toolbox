@@ -30,279 +30,6 @@ except ImportError:
         QWebEngineView = None
 
 
-# Leaflet 地图 HTML 模板
-LEAFLET_MAP_HTML = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Leaflet Map</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
-    <style>
-        html, body, #map { 
-            height: 100%; 
-            width: 100%;
-            margin: 0; 
-            padding: 0; 
-        }
-        .info-box {
-            padding: 6px 8px;
-            background: white;
-            background: rgba(255,255,255,0.9);
-            box-shadow: 0 0 15px rgba(0,0,0,0.2);
-            border-radius: 5px;
-            font-size: 12px;
-            max-width: 200px;
-        }
-    </style>
-</head>
-<body>
-    <div id="map"></div>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-    <script>
-        // QWebChannel 简化版内联实现
-        var QWebChannel = function(transport, initCallback) {
-            var channel = this;
-            this.transport = transport;
-            this.objects = {};
-            this.execId = 0;
-            this.execCallbacks = {};
-            
-            this.send = function(data) {
-                if (typeof data !== "string") data = JSON.stringify(data);
-                channel.transport.send(data);
-            };
-            
-            this.transport.onmessage = function(message) {
-                var data = message.data;
-                if (typeof data === "string") data = JSON.parse(data);
-                
-                if (data.id !== undefined && channel.execCallbacks[data.id]) {
-                    channel.execCallbacks[data.id](data.data);
-                    delete channel.execCallbacks[data.id];
-                } else if (data.object && data.signal) {
-                    var object = channel.objects[data.object];
-                    if (object) object[data.signal].forEach(function(cb) { cb.apply(cb, data.args); });
-                }
-            };
-            
-            this.exec = function(data, callback) {
-                data.id = channel.execId++;
-                if (callback) channel.execCallbacks[data.id] = callback;
-                channel.send(data);
-            };
-            
-            channel.exec({type: 6}, function(payload) {
-                for (var name in payload) {
-                    var obj = payload[name];
-                    channel.objects[name] = {};
-                    for (var method in obj.methods) {
-                        (function(methodName) {
-                            channel.objects[name][methodName] = function() {
-                                var args = Array.prototype.slice.call(arguments);
-                                channel.send({type: 2, object: name, method: methodName, args: args});
-                            };
-                        })(obj.methods[method]);
-                    }
-                    for (var signal in obj.signals) {
-                        channel.objects[name][obj.signals[signal]] = [];
-                    }
-                }
-                if (initCallback) initCallback(channel);
-            });
-        };
-    </script>
-    <script>
-        // 初始化地图
-        var map = L.map('map').setView([35, 105], 4);
-        
-        // 底图图层
-        var cartoLight = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            maxZoom: 19,
-            attribution: '© CARTO © OpenStreetMap'
-        });
-        
-        var cartoDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            maxZoom: 19,
-            attribution: '© CARTO'
-        });
-        
-        var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
-        });
-        
-        // 高德地图（国内访问更快）
-        var gdLayer = L.tileLayer('http://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
-            subdomains: ['1', '2', '3', '4'],
-            maxZoom: 18,
-            attribution: '© 高德地图'
-        });
-        
-        // 默认使用 CARTO Light
-        cartoLight.addTo(map);
-        
-        // 图层控制
-        var baseMaps = {
-            "CARTO Light": cartoLight,
-            "CARTO Dark": cartoDark,
-            "OpenStreetMap": osmLayer,
-            "高德地图": gdLayer
-        };
-        L.control.layers(baseMaps).addTo(map);
-        
-        // 绘制图层
-        var drawnItems = new L.FeatureGroup();
-        map.addLayer(drawnItems);
-        
-        // 绘制控件
-        var drawControl = new L.Control.Draw({
-            draw: {
-                polygon: false,
-                polyline: false,
-                circle: false,
-                circlemarker: false,
-                marker: false,
-                rectangle: {
-                    shapeOptions: {
-                        color: '#3388ff',
-                        weight: 2,
-                        fillOpacity: 0.2
-                    }
-                }
-            },
-            edit: {
-                featureGroup: drawnItems,
-                remove: true
-            }
-        });
-        map.addControl(drawControl);
-        
-        // 信息显示控件
-        var info = L.control({position: 'bottomleft'});
-        info.onAdd = function(map) {
-            this._div = L.DomUtil.create('div', 'info-box');
-            this.update();
-            return this._div;
-        };
-        info.update = function(bounds) {
-            if (bounds) {
-                this._div.innerHTML = '<b>选择区域</b><br>' +
-                    '南: ' + bounds.south.toFixed(6) + '°<br>' +
-                    '北: ' + bounds.north.toFixed(6) + '°<br>' +
-                    '西: ' + bounds.west.toFixed(6) + '°<br>' +
-                    '东: ' + bounds.east.toFixed(6) + '°';
-            } else {
-                this._div.innerHTML = '在地图上绘制矩形选择区域';
-            }
-        };
-        info.addTo(map);
-        
-        // Python 通信桥接
-        var pyBridge = null;
-        
-        new QWebChannel(qt.webChannelTransport, function(channel) {
-            pyBridge = channel.objects.bridge;
-            console.log('QWebChannel initialized');
-        });
-        
-        // 绘制完成事件
-        map.on(L.Draw.Event.CREATED, function(e) {
-            drawnItems.clearLayers();
-            drawnItems.addLayer(e.layer);
-            
-            var bounds = e.layer.getBounds();
-            var boundsData = {
-                south: bounds.getSouth(),
-                north: bounds.getNorth(),
-                west: bounds.getWest(),
-                east: bounds.getEast()
-            };
-            
-            info.update(boundsData);
-            
-            if (pyBridge) {
-                pyBridge.onBoundsDrawn(JSON.stringify(boundsData));
-            }
-        });
-        
-        // 删除事件
-        map.on(L.Draw.Event.DELETED, function(e) {
-            info.update();
-            if (pyBridge) {
-                pyBridge.onBoundsCleared();
-            }
-        });
-        
-        // 从 Python 调用的函数
-        function showBounds(south, north, west, east) {
-            drawnItems.clearLayers();
-            
-            if (south !== null && north !== null && west !== null && east !== null) {
-                var bounds = [[south, west], [north, east]];
-                var rect = L.rectangle(bounds, {
-                    color: '#e74c3c',
-                    weight: 2,
-                    fillOpacity: 0.2
-                });
-                drawnItems.addLayer(rect);
-                map.fitBounds(bounds, {padding: [50, 50]});
-                
-                info.update({south: south, north: north, west: west, east: east});
-            } else {
-                info.update();
-            }
-        }
-        
-        // 显示多个边界区域，用不同颜色区分
-        function showMultipleBounds(boundsArray) {
-            drawnItems.clearLayers();
-            
-            var allBounds = [];
-            for (var i = 0; i < boundsArray.length; i++) {
-                var item = boundsArray[i];
-                var bounds = [[item.south, item.west], [item.north, item.east]];
-                var rect = L.rectangle(bounds, {
-                    color: item.color || '#3388ff',
-                    weight: 2,
-                    fillOpacity: 0.2
-                });
-                
-                if (item.label) {
-                    rect.bindTooltip(item.label, {permanent: true, direction: 'center'});
-                }
-                
-                drawnItems.addLayer(rect);
-                allBounds.push(bounds);
-            }
-            
-            if (allBounds.length > 0) {
-                var group = L.featureGroup(allBounds.map(function(b) {
-                    return L.rectangle(b);
-                }));
-                map.fitBounds(group.getBounds(), {padding: [50, 50]});
-            }
-        }
-        
-        function clearBounds() {
-            drawnItems.clearLayers();
-            info.update();
-        }
-        
-        function setView(lat, lng, zoom) {
-            map.setView([lat, lng], zoom);
-        }
-        
-        console.log('Leaflet map initialized');
-    </script>
-</body>
-</html>
-'''
-
-
 class MapBridge(QObject):
     """Python 和 JavaScript 之间的通信桥接"""
     
@@ -409,17 +136,16 @@ class LeafletMapWidget(QWidget):
         self.map_bridge.boundsDrawn.connect(self._on_bounds_drawn)
         self.map_bridge.boundsCleared.connect(self._on_bounds_cleared)
         
-        # 加载 HTML（使用 setHtml 确保 WebChannel 正常工作）
+        # 仅使用外部 HTML（确保资源随打包复制）
         html_path = self._get_html_path()
-        if html_path and os.path.exists(html_path):
-            with open(html_path, 'r', encoding='utf-8') as f:
-                html_content = f.read()
-            # 使用 setHtml 并设置 baseUrl，这样 WebChannel 才能正常工作
-            base_url = QUrl.fromLocalFile(os.path.dirname(html_path) + '/')
-            self.web_view.setHtml(html_content, base_url)
-        else:
-            print("使用内嵌HTML")
-            self.web_view.setHtml(LEAFLET_MAP_HTML)
+        if not html_path or not os.path.exists(html_path):
+            raise FileNotFoundError("leaflet_map.html 未找到，请确认 resources 目录被正确打包")
+
+        with open(html_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        # 使用 setHtml 并设置 baseUrl，这样 WebChannel 才能正常工作
+        base_url = QUrl.fromLocalFile(os.path.dirname(html_path) + '/')
+        self.web_view.setHtml(html_content, base_url)
         
         layout.addWidget(self.web_view)
     
@@ -430,10 +156,14 @@ class LeafletMapWidget(QWidget):
     def _get_html_path(self) -> Optional[str]:
         """获取HTML文件路径"""
         # 尝试多个可能的路径
+        # 在打包模式下，PyInstaller 会将资源放到 _MEIPASS 临时目录
+        meipass_dir = getattr(__import__('sys'), '_MEIPASS', None)
         possible_paths = [
             os.path.join(os.path.dirname(__file__), '..', '..', 'resources', 'leaflet_map.html'),
             os.path.join(os.getcwd(), 'resources', 'leaflet_map.html'),
         ]
+        if meipass_dir:
+            possible_paths.insert(0, os.path.join(meipass_dir, 'resources', 'leaflet_map.html'))
         
         for path in possible_paths:
             abs_path = os.path.abspath(path)

@@ -1,5 +1,8 @@
-# 使用 spec 文件
-pyinstaller Toolbox.spec
+# 1. 清理旧构建
+Remove-Item -Recurse -Force dist, build
 
-# 或者直接使用命令行参数，排除PyQt5和PyQt6，以免和PySide6造成冲突
-pyinstaller --exclude PyQt5 --exclude PyQt6 --name="Toolbox" --windowed --add-data="src;src" --hidden-import=PySide6.QtUiTools --icon=resources/toolbox.ico main.py
+# 2. 设置临时纯净 PATH (仅包含系统和虚拟环境)
+$env:PATH = "C:\Windows\system32;C:\Windows;D:\实验\Toolbox\.venv\Scripts"
+
+# 3. 执行打包
+python -m PyInstaller Toolbox.spec --clean --noconfirm

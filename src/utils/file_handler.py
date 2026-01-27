@@ -7,23 +7,49 @@ def transform_corners_to_wgs84(spatial_ref, corners):
     Returns:
         (min_lon, min_lat, max_lon, max_lat)
     """
-    from osgeo import osr, ogr
+    from osgeo import osr, ogr, gdal
+    
+    # 启用 GDAL 异常，以便捕获错误
+    gdal.UseExceptions()
+    ogr.UseExceptions()
+    
     # 1. 定义标准 WGS84 (EPSG:4326)
     target_srs = osr.SpatialReference()
     target_srs.ImportFromEPSG(4326)
     target_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    
     if spatial_ref is not None:
         spatial_ref.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-        transform = osr.CoordinateTransformation(spatial_ref, target_srs)
-        lons = []
-        lats = []
-        for x, y in corners:
-            point = ogr.Geometry(ogr.wkbPoint)
-            point.AddPoint(x, y)
-            point.Transform(transform)
-            lons.append(point.GetX())
-            lats.append(point.GetY())
-        return (min(lons), min(lats), max(lons), max(lats))
+        
+        # 检查是否已经是 WGS84
+        if spatial_ref.IsSame(target_srs):
+            xs = [c[0] for c in corners]
+            ys = [c[1] for c in corners]
+            return (min(xs), min(ys), max(xs), max(ys))
+        
+        try:
+            transform = osr.CoordinateTransformation(spatial_ref, target_srs)
+            if transform is None:
+                raise RuntimeError("无法创建坐标转换对象")
+            
+            lons = []
+            lats = []
+            for x, y in corners:
+                point = ogr.Geometry(ogr.wkbPoint)
+                point.AddPoint(x, y)
+                err = point.Transform(transform)
+                if err != 0:
+                    raise RuntimeError(f"坐标转换失败，错误码: {err}")
+                lons.append(point.GetX())
+                lats.append(point.GetY())
+            return (min(lons), min(lats), max(lons), max(lats))
+        except Exception as e:
+            print(f"坐标转换错误: {e}")
+            print("提示: 请确保 PROJ_LIB 环境变量已正确设置，且 proj.db 文件存在")
+            # 如果转换失败，返回原始坐标（假设已经是 WGS84 或近似）
+            xs = [c[0] for c in corners]
+            ys = [c[1] for c in corners]
+            return (min(xs), min(ys), max(xs), max(ys))
     else:
         # 没有空间参考，直接返回原始坐标
         xs = [c[0] for c in corners]
