@@ -28,6 +28,7 @@ class ImageViewer(QGraphicsView):
     - 左键点击像素
     - 选择colormap
     - 鼠标移动时显示像素值
+    - 大图像降采样预览
     """
     
     # 自定义信号：当用户点击图像时发出，参数为(x, y)坐标
@@ -59,9 +60,16 @@ class ImageViewer(QGraphicsView):
         # 图像项
         self.image_item = None
         
-        # 存储原始图像数据
-        self.image_array = None  # numpy array
+        # 存储原始图像数据（可能是降采样后的）
+        self.image_array = None  # numpy array (用于显示)
         self.is_normalized = False  # 是否已归一化
+        
+        # 原始图像尺寸（未降采样的真实尺寸）
+        self.original_width = 0
+        self.original_height = 0
+        
+        # 降采样比例
+        self.downsample_factor = 1.0
         
         # 当前colormap
         self.current_colormap = 'gray'
@@ -101,8 +109,8 @@ class ImageViewer(QGraphicsView):
         
         # 设置鼠标样式为箭头
         self.viewport().setCursor(Qt.ArrowCursor)
-        
-    def set_image_from_array(self, image_array):
+    
+    def set_image_from_array(self, image_array, original_size=None):
         """
         从numpy数组设置图像
         
@@ -111,9 +119,19 @@ class ImageViewer(QGraphicsView):
                 - 2D数组 (H, W): 灰度图像
                 - 3D数组 (H, W, 3): RGB图像
                 - 3D数组 (H, W, C): 多波段图像
+            original_size: 原始图像尺寸 (width, height)，如果提供则表示image_array是降采样后的
         """
         self.image_array = image_array
         self.is_normalized = False
+        
+        # 设置原始尺寸和降采样比例
+        if original_size is not None:
+            self.original_width, self.original_height = original_size
+            self.downsample_factor = self.original_width / image_array.shape[1]
+        else:
+            self.original_height, self.original_width = image_array.shape[:2]
+            self.downsample_factor = 1.0
+        
         self._update_display()
         
     def _normalize_array(self, arr):
@@ -291,12 +309,13 @@ class ImageViewer(QGraphicsView):
             # 转换为图像坐标
             if self.image_item.contains(scene_pos):
                 item_pos = self.image_item.mapFromScene(scene_pos)
-                x = int(item_pos.x())
-                y = int(item_pos.y())
+                # 转换为原始图像坐标（考虑降采样）
+                x = int(item_pos.x() * self.downsample_factor)
+                y = int(item_pos.y() * self.downsample_factor)
                 
-                # 检查坐标是否在图像范围内
-                if (0 <= x < self.image_array.shape[1] and 
-                    0 <= y < self.image_array.shape[0]):
+                # 检查坐标是否在原始图像范围内
+                if (0 <= x < self.original_width and 
+                    0 <= y < self.original_height):
                     # 发送信号
                     self.pixel_clicked.emit(x, y)
         
@@ -335,13 +354,19 @@ class ImageViewer(QGraphicsView):
                 scene_pos = self.mapToScene(event.pos())
                 if self.image_item.contains(scene_pos):
                     item_pos = self.image_item.mapFromScene(scene_pos)
-                    x = int(item_pos.x())
-                    y = int(item_pos.y())
+                    # 转换为原始图像坐标（考虑降采样）
+                    x = int(item_pos.x() * self.downsample_factor)
+                    y = int(item_pos.y() * self.downsample_factor)
                     
-                    if (0 <= x < self.image_array.shape[1] and 
-                        0 <= y < self.image_array.shape[0]):
-                        value = self.get_pixel_value(x, y)
-                        self.mouse_moved.emit(x, y, value)
+                    if (0 <= x < self.original_width and 
+                        0 <= y < self.original_height):
+                        # 获取显示数组中的像素值（降采样后的位置）
+                        display_x = int(item_pos.x())
+                        display_y = int(item_pos.y())
+                        if (0 <= display_x < self.image_array.shape[1] and
+                            0 <= display_y < self.image_array.shape[0]):
+                            value = self.image_array[display_y, display_x]
+                            self.mouse_moved.emit(x, y, value)
             
             super().mouseMoveEvent(event)
     
@@ -378,17 +403,22 @@ class ImageViewer(QGraphicsView):
         self.is_syncing = False
     
     def get_image_size(self):
-        """获取图像尺寸"""
+        """获取原始图像尺寸"""
+        if self.original_width > 0 and self.original_height > 0:
+            return (self.original_height, self.original_width)  # (height, width)
         if self.image_array is not None:
             return self.image_array.shape[:2]  # (height, width)
         return None
     
     def get_pixel_value(self, x, y):
-        """获取指定位置的像素值"""
+        """获取指定位置的像素值（从显示数组中，考虑降采样）"""
         if self.image_array is not None:
-            if (0 <= x < self.image_array.shape[1] and 
-                0 <= y < self.image_array.shape[0]):
-                return self.image_array[y, x]
+            # 转换为显示数组坐标
+            display_x = int(x / self.downsample_factor)
+            display_y = int(y / self.downsample_factor)
+            if (0 <= display_x < self.image_array.shape[1] and 
+                0 <= display_y < self.image_array.shape[0]):
+                return self.image_array[display_y, display_x]
         return None
     
     def set_nodata_value(self, nodata_value):

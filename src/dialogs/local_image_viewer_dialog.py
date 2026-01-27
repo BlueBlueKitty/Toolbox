@@ -35,6 +35,9 @@ from src.widgets import InteractiveImageViewer, ColormapComboBox
 class LocalImageViewerDialog(QDialog):
     """图像局部查看器对话框"""
     
+    # 降采样配置
+    MAX_DISPLAY_SIZE = 2048  # 显示时的最大尺寸
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         
@@ -42,10 +45,16 @@ class LocalImageViewerDialog(QDialog):
         self.resize(1400, 800)
         
         # 图像数据
-        self.image_data = None
+        self.image_data = None  # 降采样后的显示数据
         self.image_file = None
         self.nodata_value = None
         self.polyline_path_points = None  # 存储折线路径上的所有点
+        
+        # 大图像降采样相关
+        self.original_width = None   # 原始图像宽度
+        self.original_height = None  # 原始图像高度
+        self.downsample_factor = 1   # 降采样因子
+        self.is_tiff = False         # 是否为TIFF格式
         
         # 创建UI
         self._create_ui()
@@ -173,52 +182,33 @@ class LocalImageViewerDialog(QDialog):
         try:
             self.image_file = file_path
             ext = os.path.splitext(file_path)[1].lower()
+            self.is_tiff = ext in ['.tif', '.tiff']
             
-            if ext in ['.tif', '.tiff']:
-                # 使用GDAL读取TIFF
-                ds = gdal.Open(file_path)
-                if ds is None:
-                    raise IOError(f"无法打开TIFF文件: {file_path}")
-                
-                band_count = ds.RasterCount
-                
-                # 获取Nodata值
-                band1 = ds.GetRasterBand(1)
-                self.nodata_value = band1.GetNoDataValue()
-                
-                if band_count == 1:
-                    # 单波段
-                    self.image_data = band1.ReadAsArray()
-                else:
-                    # 多波段
-                    data = []
-                    for i in range(1, band_count + 1):
-                        band = ds.GetRasterBand(i)
-                        data.append(band.ReadAsArray())
-                    self.image_data = np.stack(data, axis=-1)
-                
-                ds = None
+            if self.is_tiff:
+                # 使用GDAL读取TIFF（支持降采样）
+                self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
+                    self._read_tiff_downsampled(file_path)
             else:
-                # 使用PIL读取普通图像
-                img = Image.open(file_path)
-                self.image_data = np.array(img)
-                self.nodata_value = None
-                
-                # 如果有alpha通道，去掉
-                if self.image_data.ndim == 3 and self.image_data.shape[2] == 4:
-                    self.image_data = self.image_data[:, :, :3]
+                # 使用PIL读取普通图像（支持降采样）
+                self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
+                    self._read_image_downsampled(file_path)
             
             # 显示图像
-            self.image_viewer.set_image_from_array(self.image_data)
+            original_size = (self.original_width, self.original_height) if self.downsample_factor > 1 else None
+            self.image_viewer.set_image_from_array(self.image_data, original_size=original_size)
             
             # 更新信息
-            shape = self.image_data.shape
-            if self.image_data.ndim == 2:
-                info = f"{os.path.basename(file_path)} | 尺寸: {shape[1]}x{shape[0]} | 单波段"
-            elif self.image_data.ndim == 3:
-                info = f"{os.path.basename(file_path)} | 尺寸: {shape[1]}x{shape[0]} | {shape[2]}波段"
+            if self.downsample_factor > 1:
+                info = f"{os.path.basename(file_path)} | 原始尺寸: {self.original_width}x{self.original_height}"
+                info += f" | 显示: {self.image_data.shape[1]}x{self.image_data.shape[0]} (1/{self.downsample_factor})"
             else:
-                info = f"{os.path.basename(file_path)} | 尺寸: {shape}"
+                info = f"{os.path.basename(file_path)} | 尺寸: {self.original_width}x{self.original_height}"
+            
+            # 波段数
+            if self.image_data.ndim == 2:
+                info += " | 单波段"
+            elif self.image_data.ndim == 3:
+                info += f" | {self.image_data.shape[2]}波段"
             
             if self.nodata_value is not None:
                 info += f" | Nodata: {self.nodata_value}"
@@ -235,6 +225,232 @@ class LocalImageViewerDialog(QDialog):
             QMessageBox.critical(self, "错误", f"打开图像失败: {str(e)}")
             traceback.print_exc()
     
+    def _read_tiff_downsampled(self, file_path):
+        """
+        使用GDAL读取TIFF图像，支持降采样和金字塔
+        返回: (image_data, (original_width, original_height), downsample_factor)
+        """
+        ds = gdal.Open(file_path)
+        if ds is None:
+            raise IOError(f"无法打开TIFF文件: {file_path}")
+        
+        original_width = ds.RasterXSize
+        original_height = ds.RasterYSize
+        band_count = ds.RasterCount
+        
+        # 获取Nodata值
+        band1 = ds.GetRasterBand(1)
+        self.nodata_value = band1.GetNoDataValue()
+        
+        # 计算降采样因子
+        max_dim = max(original_width, original_height)
+        if max_dim > self.MAX_DISPLAY_SIZE:
+            downsample_factor = int(np.ceil(max_dim / self.MAX_DISPLAY_SIZE))
+        else:
+            downsample_factor = 1
+        
+        if downsample_factor > 1:
+            # 计算目标尺寸
+            target_width = original_width // downsample_factor
+            target_height = original_height // downsample_factor
+            
+            # 尝试使用金字塔（overview）
+            overview_level = self._find_best_overview(band1, downsample_factor)
+            
+            if overview_level is not None:
+                # 使用金字塔读取
+                if band_count == 1:
+                    overview = band1.GetOverview(overview_level)
+                    image_data = overview.ReadAsArray()
+                else:
+                    data = []
+                    for i in range(1, band_count + 1):
+                        band = ds.GetRasterBand(i)
+                        overview = band.GetOverview(overview_level)
+                        data.append(overview.ReadAsArray())
+                    image_data = np.stack(data, axis=-1)
+            else:
+                # 使用GDAL直接降采样
+                if band_count == 1:
+                    image_data = band1.ReadAsArray(
+                        buf_xsize=target_width, 
+                        buf_ysize=target_height
+                    )
+                else:
+                    data = []
+                    for i in range(1, band_count + 1):
+                        band = ds.GetRasterBand(i)
+                        data.append(band.ReadAsArray(
+                            buf_xsize=target_width, 
+                            buf_ysize=target_height
+                        ))
+                    image_data = np.stack(data, axis=-1)
+        else:
+            # 无需降采样，直接读取
+            if band_count == 1:
+                image_data = band1.ReadAsArray()
+            else:
+                data = []
+                for i in range(1, band_count + 1):
+                    band = ds.GetRasterBand(i)
+                    data.append(band.ReadAsArray())
+                image_data = np.stack(data, axis=-1)
+        
+        ds = None
+        return image_data, (original_width, original_height), downsample_factor
+    
+    def _read_image_downsampled(self, file_path):
+        """
+        使用PIL读取普通图像，支持降采样
+        返回: (image_data, (original_width, original_height), downsample_factor)
+        """
+        img = Image.open(file_path)
+        original_width, original_height = img.size
+        self.nodata_value = None
+        
+        # 计算降采样因子
+        max_dim = max(original_width, original_height)
+        if max_dim > self.MAX_DISPLAY_SIZE:
+            downsample_factor = int(np.ceil(max_dim / self.MAX_DISPLAY_SIZE))
+            # 计算目标尺寸
+            target_width = original_width // downsample_factor
+            target_height = original_height // downsample_factor
+            # 使用LANCZOS进行高质量降采样
+            img = img.resize((target_width, target_height), Image.LANCZOS)
+        else:
+            downsample_factor = 1
+        
+        image_data = np.array(img)
+        
+        # 如果有alpha通道，去掉
+        if image_data.ndim == 3 and image_data.shape[2] == 4:
+            image_data = image_data[:, :, :3]
+        
+        return image_data, (original_width, original_height), downsample_factor
+    
+    def _find_best_overview(self, band, target_factor):
+        """
+        查找最适合目标降采样因子的金字塔层级
+        返回: overview索引（0-based），如果没有合适的则返回None
+        """
+        overview_count = band.GetOverviewCount()
+        if overview_count == 0:
+            return None
+        
+        original_width = band.XSize
+        best_level = None
+        best_ratio = float('inf')
+        
+        for i in range(overview_count):
+            overview = band.GetOverview(i)
+            overview_width = overview.XSize
+            factor = original_width / overview_width
+            
+            # 选择最接近但不超过目标因子的层级
+            if factor <= target_factor * 1.5:
+                ratio_diff = abs(factor - target_factor)
+                if ratio_diff < best_ratio:
+                    best_ratio = ratio_diff
+                    best_level = i
+        
+        return best_level
+    
+    def _read_original_region(self, x1, y1, x2, y2):
+        """
+        从原始图像文件读取指定区域的数据（用于精确分析）
+        坐标是原始图像坐标
+        """
+        if self.image_file is None:
+            return None
+        
+        # 确保坐标在有效范围内
+        x1 = max(0, min(x1, self.original_width - 1))
+        x2 = max(0, min(x2, self.original_width))
+        y1 = max(0, min(y1, self.original_height - 1))
+        y2 = max(0, min(y2, self.original_height))
+        
+        width = x2 - x1
+        height = y2 - y1
+        
+        if width <= 0 or height <= 0:
+            return None
+        
+        try:
+            if self.is_tiff:
+                ds = gdal.Open(self.image_file)
+                if ds is None:
+                    return None
+                
+                band_count = ds.RasterCount
+                if band_count == 1:
+                    band = ds.GetRasterBand(1)
+                    region_data = band.ReadAsArray(x1, y1, width, height)
+                else:
+                    data = []
+                    for i in range(1, band_count + 1):
+                        band = ds.GetRasterBand(i)
+                        data.append(band.ReadAsArray(x1, y1, width, height))
+                    region_data = np.stack(data, axis=-1)
+                
+                ds = None
+                return region_data
+            else:
+                # 对于非TIFF图像，需要加载整个图像
+                # 这里可以使用PIL的crop功能，但PIL会加载整个图像到内存
+                img = Image.open(self.image_file)
+                img = img.crop((x1, y1, x2, y2))
+                region_data = np.array(img)
+                if region_data.ndim == 3 and region_data.shape[2] == 4:
+                    region_data = region_data[:, :, :3]
+                return region_data
+        except Exception as e:
+            traceback.print_exc()
+            return None
+    
+    def _read_original_pixel(self, x, y):
+        """
+        从原始图像文件读取指定像素的值
+        坐标是原始图像坐标
+        """
+        if self.image_file is None:
+            return None
+        
+        # 确保坐标在有效范围内
+        if x < 0 or x >= self.original_width or y < 0 or y >= self.original_height:
+            return None
+        
+        try:
+            if self.is_tiff:
+                ds = gdal.Open(self.image_file)
+                if ds is None:
+                    return None
+                
+                band_count = ds.RasterCount
+                if band_count == 1:
+                    band = ds.GetRasterBand(1)
+                    value = band.ReadAsArray(x, y, 1, 1)[0, 0]
+                else:
+                    values = []
+                    for i in range(1, band_count + 1):
+                        band = ds.GetRasterBand(i)
+                        values.append(band.ReadAsArray(x, y, 1, 1)[0, 0])
+                    value = np.array(values)
+                
+                ds = None
+                return value
+            else:
+                # 对于非TIFF图像，读取单个像素区域
+                region = self._read_original_region(x, y, x+1, y+1)
+                if region is not None:
+                    if region.ndim == 2:
+                        return region[0, 0]
+                    else:
+                        return region[0, 0, :]
+                return None
+        except Exception as e:
+            traceback.print_exc()
+            return None
+
     def on_colormap_changed(self, colormap_name):
         """颜色映射改变"""
         self.image_viewer.set_colormap(colormap_name)
@@ -303,22 +519,55 @@ class LocalImageViewerDialog(QDialog):
     def on_mouse_moved(self, x, y, value):
         """鼠标移动事件"""
         if value is not None:
+            # 计算原始坐标
+            if self.downsample_factor > 1:
+                orig_x = int(x * self.downsample_factor)
+                orig_y = int(y * self.downsample_factor)
+                # 确保在有效范围内
+                orig_x = min(orig_x, self.original_width - 1)
+                orig_y = min(orig_y, self.original_height - 1)
+                coord_str = f"原始坐标: ({orig_x}, {orig_y})"
+            else:
+                orig_x, orig_y = x, y
+                coord_str = f"像素位置: ({x}, {y})"
+            
+            # 显示像素值
             if isinstance(value, (int, float, np.integer, np.floating)):
-                self.pixel_info_label.setText(f"像素位置: ({x}, {y}) | 值: {value:.6g}")
+                self.pixel_info_label.setText(f"{coord_str} | 值: {value:.6g}")
             elif isinstance(value, np.ndarray):
                 if value.ndim == 0:
-                    self.pixel_info_label.setText(f"像素位置: ({x}, {y}) | 值: {value:.6g}")
+                    self.pixel_info_label.setText(f"{coord_str} | 值: {value:.6g}")
                 else:
                     value_str = ", ".join([f"{v:.6g}" for v in value])
-                    self.pixel_info_label.setText(f"像素位置: ({x}, {y}) | 值: [{value_str}]")
+                    self.pixel_info_label.setText(f"{coord_str} | 值: [{value_str}]")
         else:
             self.pixel_info_label.setText("像素信息: -")
     
     def on_rect_drawn(self, rect):
         """矩形绘制完成"""
         try:
-            # 获取矩形区域数据
-            region_data = self.image_viewer.get_rect_region()
+            # 获取当前矩形的坐标（显示坐标）
+            current_rect = self.image_viewer.current_rect
+            if current_rect is None:
+                return
+            
+            # 计算原始图像坐标
+            if self.downsample_factor > 1:
+                # 将显示坐标转换为原始坐标
+                x1 = int(current_rect.x() * self.downsample_factor)
+                y1 = int(current_rect.y() * self.downsample_factor)
+                x2 = int((current_rect.x() + current_rect.width()) * self.downsample_factor)
+                y2 = int((current_rect.y() + current_rect.height()) * self.downsample_factor)
+                
+                # 从原始文件读取区域数据
+                region_data = self._read_original_region(x1, y1, x2, y2)
+                if region_data is None:
+                    # 如果无法读取原始数据，使用显示数据
+                    region_data = self.image_viewer.get_rect_region()
+            else:
+                # 无降采样，直接使用显示数据
+                region_data = self.image_viewer.get_rect_region()
+            
             if region_data is None:
                 return
             
@@ -349,16 +598,43 @@ class LocalImageViewerDialog(QDialog):
     def on_polyline_drawn(self, points):
         """折线绘制完成"""
         try:
-            # 获取折线路径上所有像素值
-            path_points, path_values = self.image_viewer.get_polyline_path_values()
-            if path_values is None or len(path_values) == 0:
+            # 获取折线路径上所有像素的显示坐标
+            display_path_points, _ = self.image_viewer.get_polyline_path_values()
+            if display_path_points is None or len(display_path_points) == 0:
                 return
             
-            # 存储路径点用于悬停标记
-            self.polyline_path_points = path_points
+            # 根据降采样因子计算原始坐标和获取原始像素值
+            if self.downsample_factor > 1:
+                # 将显示坐标转换为原始坐标
+                original_path_points = []
+                path_values = []
+                
+                for (dx, dy) in display_path_points:
+                    # 转换到原始坐标
+                    ox = int(dx * self.downsample_factor)
+                    oy = int(dy * self.downsample_factor)
+                    
+                    # 确保坐标在有效范围内
+                    ox = min(ox, self.original_width - 1)
+                    oy = min(oy, self.original_height - 1)
+                    
+                    original_path_points.append((ox, oy))
+                    
+                    # 从原始文件读取像素值
+                    value = self._read_original_pixel(ox, oy)
+                    path_values.append(value if value is not None else np.nan)
+                
+                # 存储原始坐标用于悬停标记（但显示时仍使用显示坐标）
+                self.polyline_path_points = display_path_points  # 保持显示坐标用于图像标记
+                self.polyline_original_points = original_path_points  # 原始坐标用于显示
+            else:
+                # 无降采样，直接使用
+                _, path_values = self.image_viewer.get_polyline_path_values()
+                self.polyline_path_points = display_path_points
+                self.polyline_original_points = display_path_points
             
             # 排除Nodata值并绘制折线图
-            self.plot_polyline(path_values, path_points)
+            self.plot_polyline(path_values, self.polyline_original_points)
             
         except Exception as e:
             QMessageBox.warning(self, "警告", f"绘制折线图失败: {str(e)}")
