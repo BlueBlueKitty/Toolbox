@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # 1. 环境准备
-source .venv_linux/bin/activate
+source .venv/bin/activate
 
 # 2. 清理旧产物
-rm -rf build dist Toolbox_linux.zip
+rm -rf build dist
 
 # 3. 运行 PyInstaller
 # 我们使用环境变量 ONEFILE=0 来确保生成目录模式
@@ -15,7 +15,7 @@ ONEFILE=0 python -m PyInstaller Toolbox.spec --clean --noconfirm
 if [ -d "dist/Toolbox_linux" ]; then
     echo "正在压缩 Toolbox_linux..."
     cd dist
-    zip -r ../Toolbox_linux.zip Toolbox_linux/
+    tar -cJf Toolbox_linux.tar.xz Toolbox_linux/
     cd ..
     echo "打包成功: Toolbox_linux.zip"
 else
