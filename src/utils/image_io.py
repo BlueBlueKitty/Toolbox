@@ -823,11 +823,20 @@ def read_h5_timeseries_metadata(file_path: str) -> Tuple[Optional[List[str]], Op
             # 获取形状
             timeseries_shape = h5f['timeseries'].shape
             
-            # 检查第一帧是否全为0
+            # 检查第一帧是否为参考帧（全0）
             start_index = 0
-            first_frame = h5f['timeseries'][0, :, :]
-            if len(timeseries_shape) == 3 and np.all(first_frame == 0):
-                start_index = 1
+            if len(timeseries_shape) == 3:
+                num_frames = timeseries_shape[0]
+                num_dates = len(date_list)
+                
+                # 检查第一帧是否全为0（参考帧）
+                first_frame = h5f['timeseries'][0, :, :]
+                if np.all(first_frame == 0):
+                    # 第一帧是参考帧，从第1帧开始读取
+                    start_index = 1
+                    print(f"检测到第0帧为参考帧（全0），将从第1帧开始读取")
+                    print(f"总帧数：{num_frames}，有效数据帧：{num_frames - 1}")
+                    print(f"日期数：{num_dates}")
             
             return date_list, timeseries_shape, start_index
             

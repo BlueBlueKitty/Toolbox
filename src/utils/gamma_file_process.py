@@ -502,6 +502,14 @@ def read_gamma_pixel(
     dtype, is_complex = _parse_format(bkformat)
     bytes_per_elem = dtype.itemsize
     
+    # 检查坐标是否在有效范围内
+    if x < 0 or x >= width or y < 0 or y >= height:
+        # 坐标超出范围，返回0
+        if is_complex:
+            return complex(0, 0)
+        else:
+            return 0
+    
     # 计算偏移量
     if is_complex:
         # 复数数据，每个像素包含两个元素
@@ -515,8 +523,18 @@ def read_gamma_pixel(
         fh.seek(pixel_offset, os.SEEK_SET)
         data = np.fromfile(fh, dtype=dtype, count=read_count)
     
+    # 检查是否成功读取数据
+    if len(data) == 0:
+        if is_complex:
+            return complex(0, 0)
+        else:
+            return 0
+    
     if is_complex:
-        return complex(data[0], data[1])
+        if len(data) >= 2:
+            return complex(data[0], data[1])
+        else:
+            return complex(0, 0)
     else:
         return data[0]
 

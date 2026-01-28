@@ -1,6 +1,11 @@
 version = 1
 revision = 3
 requires-python = ">=3.12"
+resolution-markers = [
+    "sys_platform == 'linux'",
+    "sys_platform == 'win32'",
+    "sys_platform != 'linux' and sys_platform != 'win32'",
+]
 
 [[package]]
 name = "altgraph"
@@ -194,6 +199,30 @@ wheels = [
 ]
 
 [[package]]
+name = "gdal"
+version = "3.8.4"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "sys_platform == 'linux'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/21/6f/7f76d6ff3673fa18e9edd8d76679968d682f937cded93311f82fa172697f/GDAL-3.8.4.tar.gz", hash = "sha256:7c51e0ae7a7ccf43ad9e4bf435176baa9276653dfa16fd167c3632f6e7275207", size = 802459, upload-time = "2024-02-18T15:35:29.047Z" }
+
+[[package]]
+name = "gdal"
+version = "3.11.4"
+source = { path = "wheels/gdal-3.11.4-cp312-cp312-win_amd64.whl" }
+resolution-markers = [
+    "sys_platform == 'win32'",
+]
+wheels = [
+    { filename = "gdal-3.11.4-cp312-cp312-win_amd64.whl", hash = "sha256:6832fa5f5158b595333b8b2630782ba33f8028315acee3a3e726ccd07c337c57" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", marker = "extra == 'numpy'", specifier = ">1.0.0" }]
+provides-extras = ["numpy"]
+
+[[package]]
 name = "h5py"
 version = "3.15.1"
 source = { registry = "https://pypi.org/simple" }
@@ -314,7 +343,7 @@ name = "macholib"
 version = "1.16.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "altgraph" },
+    { name = "altgraph", marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/10/2f/97589876ea967487978071c9042518d28b958d87b17dceb7cdc1d881f963/macholib-1.16.4.tar.gz", hash = "sha256:f408c93ab2e995cd2c46e34fe328b130404be143469e41bc366c807448979362", size = 59427, upload-time = "2025-11-22T08:28:38.373Z" }
 wheels = [
@@ -692,6 +721,8 @@ name = "toolbox"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "gdal", version = "3.8.4", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
+    { name = "gdal", version = "3.11.4", source = { path = "wheels/gdal-3.11.4-cp312-cp312-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
     { name = "h5py" },
     { name = "matplotlib" },
     { name = "numpy" },
@@ -703,6 +734,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "gdal", marker = "sys_platform == 'linux'", specifier = "==3.8.4" },
+    { name = "gdal", marker = "sys_platform == 'win32'", path = "wheels/gdal-3.11.4-cp312-cp312-win_amd64.whl" },
     { name = "h5py", specifier = ">=3.15.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.4.1" },

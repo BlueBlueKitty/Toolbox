@@ -12,7 +12,10 @@ dependencies = [
     "pyinstaller>=6.18.0",
     "pyside6>=6.10.1",
     "requests>=2.32.5",
+    "gdal==3.11.4; sys_platform == 'win32'",
+    "gdal; sys_platform == 'linux'"
 ]
 
 [tool.uv.sources]
-gdal = { path = "/path_to_your_gdal_wheel_path/gdal-3.11.4-cp312-cp312-win_amd64.whl" }
+# 仅在 Windows 且满足特定路径时生效
+gdal = { path = "./wheels/gdal-3.11.4-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'"}

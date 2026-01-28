@@ -143,10 +143,14 @@ class LocalImageViewerDialog(QDialog):
         
         control_layout.addStretch()
         
-        self.image_info_label = QLabel("未加载图像")
-        control_layout.addWidget(self.image_info_label)
-        
         main_layout.addLayout(control_layout)
+        
+        # 第二排：文件信息
+        info_layout = QHBoxLayout()
+        self.image_info_label = QLabel("未加载图像")
+        info_layout.addWidget(self.image_info_label)
+        info_layout.addStretch()
+        main_layout.addLayout(info_layout)
         
         # 创建主分割器：左侧图像，右侧图表
         splitter = QSplitter(Qt.Horizontal)
@@ -230,6 +234,12 @@ class LocalImageViewerDialog(QDialog):
             # 显示图像
             original_size = (self.original_width, self.original_height) if self.downsample_factor > 1 else None
             self.image_viewer.set_image_from_array(self.image_data, original_size=original_size)
+            
+            # 设置Nodata值到图像查看器
+            self.image_viewer.set_nodata_value(self.nodata_value)
+            
+            # 确保图像居中显示（使用延迟模式）
+            self.image_viewer.fit_in_view(delayed=True)
             
             # 更新信息
             if self.downsample_factor > 1:
@@ -611,8 +621,8 @@ class LocalImageViewerDialog(QDialog):
             color = colors[i % len(colors)]
             label = f'波段{i+1}' if len(data_list) > 1 else '像素值'
             
-            # 计算直方图
-            counts, bins = np.histogram(finite_data, bins=50)
+            # 计算直方图（使用更多的bins使x间隔更细）
+            counts, bins = np.histogram(finite_data, bins=200)
             bin_centers = (bins[:-1] + bins[1:]) / 2
             
             # 绘制填充折线图
@@ -749,7 +759,7 @@ class LocalImageViewerDialog(QDialog):
         
         self.chart_info_label.setText(f"折线图: 共{len(points)}个点")    
     def open_h5_file(self):
-        """打开h5文件"""
+        """打开h5文件（逐级选择）"""
         # 读取上次打开的路径
         settings = get_settings()
         last_path = settings.value("last_h5_path", "")
@@ -775,35 +785,51 @@ class LocalImageViewerDialog(QDialog):
                 QMessageBox.warning(self, "警告", "h5文件中没有找到合适的图像数据集！")
                 return
             
-            # 如果只有一个数据集，直接加载
-            if len(datasets) == 1:
-                selected_dataset = datasets[0][0]
-            else:
-                # 弹出对话框让用户选择数据集
-                selected_dataset = self._show_dataset_selection_dialog(datasets)
-                if not selected_dataset:
-                    return
+            # 逐级让用户选择数据集
+            selected_dataset = self._show_dataset_selection_dialog(datasets)
+            if not selected_dataset:
+                return
             
-            # 检查数据形状决定是否需要选择帧
+            # 获取选中数据集的形状
             dataset_shape = None
             for name, _, shape in datasets:
                 if name == selected_dataset:
                     dataset_shape = shape
                     break
             
-            frame_index = None
-            if dataset_shape and len(dataset_shape) == 3:
-                # 3D数据，判断是多波段还是时序
-                if not (dataset_shape[0] < dataset_shape[1] and dataset_shape[0] < dataset_shape[2]):
-                    # 可能是时序数据，让用户选择帧
+            if dataset_shape is None:
+                QMessageBox.critical(self, "错误", "无法获取数据集信息")
+                return
+            
+            # 检查数据维度
+            if len(dataset_shape) < 2:
+                QMessageBox.warning(self, "警告", 
+                    f"数据集 '{selected_dataset}' 不是图像数据（维度：{len(dataset_shape)}）")
+                return
+            elif len(dataset_shape) == 2:
+                # 2D数据，直接加载
+                frame_index = None
+            elif len(dataset_shape) == 3:
+                # 3D数据，判断是多波段还是多景
+                first_dim = dataset_shape[0]
+                # 如果第一维小于其他维度，可能是多波段（如RGB）
+                if first_dim <= 4 and first_dim < dataset_shape[1] and first_dim < dataset_shape[2]:
+                    # 可能是多波段，直接加载
+                    frame_index = None
+                else:
+                    # 多景数据，让用户选择
                     frame_idx, ok = QInputDialog.getInt(
                         self, "选择帧", 
-                        f"数据包含 {dataset_shape[0]} 帧，请选择要显示的帧（0-{dataset_shape[0]-1}）:",
-                        0, 0, dataset_shape[0]-1)
+                        f"数据集包含 {first_dim} 景数据，请选择要显示的景（0-{first_dim-1}）:",
+                        0, 0, first_dim-1)
                     if ok:
                         frame_index = frame_idx
                     else:
                         return
+            else:
+                QMessageBox.warning(self, "警告", 
+                    f"数据集维度过高（{len(dataset_shape)}D），无法显示")
+                return
             
             # 使用image_io模块读取数据集
             data, original_shape = read_h5_dataset(file_path, selected_dataset, frame_index)
@@ -812,9 +838,20 @@ class LocalImageViewerDialog(QDialog):
                 QMessageBox.critical(self, "错误", "无法读取数据集")
                 return
             
+            # 验证是否为有效图像
+            if data.ndim < 2:
+                QMessageBox.warning(self, "警告", "读取的数据不是有效的图像")
+                return
+            
+            # 设置图像数据和相关属性
             self.image_data = data
             self.image_file = file_path
-            self.nodata_value = None  # h5文件默认没有Nodata值
+            self.nodata_value = None
+            self.is_gamma = False
+            self.is_tiff = False
+            self.original_width = original_shape[0] if original_shape else data.shape[1]
+            self.original_height = original_shape[1] if original_shape else data.shape[0]
+            self.downsample_factor = 1
             
             # 显示图像
             self.image_viewer.set_image_from_array(self.image_data)
@@ -825,19 +862,24 @@ class LocalImageViewerDialog(QDialog):
             # 设置默认colormap为jet（h5数据）
             self.colormap_combo.setCurrentText('jet')
             
-            # 确保图像居中显示
-            self.image_viewer.fit_in_view()
+            # 确保图像居中显示（使用延迟模式）
+            self.image_viewer.fit_in_view(delayed=True)
             
             # 更新信息
             shape = self.image_data.shape
-            if self.image_data.ndim == 2:
-                info = f"{os.path.basename(file_path)} [{selected_dataset}] | 尺寸: {shape[1]}x{shape[0]} | 单波段"
-            elif self.image_data.ndim == 3:
-                info = f"{os.path.basename(file_path)} [{selected_dataset}] | 尺寸: {shape[1]}x{shape[0]} | {shape[2]}波段"
-            else:
-                info = f"{os.path.basename(file_path)} [{selected_dataset}] | 尺寸: {shape}"
+            info_parts = [f"{os.path.basename(file_path)} [{selected_dataset}]"]
             
-            self.image_info_label.setText(info)
+            if frame_index is not None:
+                info_parts.append(f"帧: {frame_index}")
+            
+            if self.image_data.ndim == 2:
+                info_parts.append(f"尺寸: {shape[1]}x{shape[0]} | 单波段")
+            elif self.image_data.ndim == 3:
+                info_parts.append(f"尺寸: {shape[1]}x{shape[0]} | {shape[2]}波段")
+            else:
+                info_parts.append(f"尺寸: {shape}")
+            
+            self.image_info_label.setText(" | ".join(info_parts))
             
             # 自动显示整个图像的直方图
             self.show_image_histogram()
@@ -1061,11 +1103,8 @@ class LocalImageViewerDialog(QDialog):
             else:
                 self.colormap_combo.setCurrentText('gray')
             
-            # 确保图像居中显示
-            self.image_viewer.fit_in_view()
-            
-            # 确保图像居中显示
-            self.image_viewer.fit_in_view()
+            # 确保图像居中显示（使用延迟模式）
+            self.image_viewer.fit_in_view(delayed=True)
             
             # 更新信息
             info = f"{os.path.basename(file_path)} | GAMMA {gamma_format}"

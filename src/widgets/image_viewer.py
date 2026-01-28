@@ -208,8 +208,7 @@ class ImageViewer(QGraphicsView):
         self.image_item.setTransformationMode(Qt.FastTransformation)
         self.scene.addItem(self.image_item)
         
-        # 适应视图
-        self.fit_in_view()
+        # 注意：不在这里调用fit_in_view，让调用者在合适的时机调用
         
     def _apply_colormap(self, arr):
         """应用colormap到2D数组，返回RGB数组和alpha通道"""
@@ -270,9 +269,21 @@ class ImageViewer(QGraphicsView):
         if self.image_array is not None:
             self._update_display()
     
-    def fit_in_view(self):
-        """适应视图大小"""
+    def fit_in_view(self, delayed=False):
+        """适应视图大小
+        
+        Args:
+            delayed: 是否延迟执行，用于确保场景完全更新后再居中
+        """
+        if delayed:
+            # 延迟执行，确保场景布局完成
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(100, lambda: self.fit_in_view(delayed=False))
+            return
+        
         if self.image_item:
+            # 确保场景矩形已更新
+            self.scene.setSceneRect(self.image_item.boundingRect())
             self.fitInView(self.image_item, Qt.KeepAspectRatio)
             self.current_zoom = 1.0
     
