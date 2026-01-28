@@ -121,7 +121,7 @@ cd Toolbox
 2. 使用 `uv` 同步环境（`uv` 会读取 `pyproject.toml`）：
 
 ```bash
-uv sync
+uv sync --active
 ```
 
 注意：`pyproject.toml` 中的 `tool.uv.sources` 里通常需要指定 GDAL 的 Windows wheel 路径。请在运行 `uv sync` 前，手动编辑 `pyproject.toml` 中 `gdal` 的路径为你本地 Windows wheel 文件的绝对或相对路径，例如：
@@ -142,13 +142,29 @@ python main.py
 使用 `PyInstaller` 打包：
 
 ```bash
-pip install pyinstaller
-# 单次构建（单文件）：
+# 自动打包脚本：
+# PowerShell
+./build_win.ps1
+
+# Linux Shell
+sudo chmod +x build_linux.sh
+bash build_linux.sh
+
+# 或者手动打包：
+# 目录模式(PowerShell)
+$env:ONEFILE='0'; python -m PyInstaller Toolbox.spec --clean --noconfirm
+
+# 目录模式(Linux Shell)
+ONEFILE=0 python -m PyInstaller Toolbox.spec --clean --noconfirm
+
+# 单文件模式(PowerShell)
 $env:ONEFILE="1"; python -m PyInstaller Toolbox.spec --clean --noconfirm; Remove-Item Env:\ONEFILE
-# 目录模式：
-python -m PyInstaller Toolbox.spec --clean --noconfirm
+
+# 单文件模式(Linux Shell)
+ONEFILE=1 python -m PyInstaller Toolbox.spec --clean --noconfirm
 ```
 
 ## 许可证
 
 Copyright (c) 2026 by Yibo Yuan, All Rights Reserved.
+```
