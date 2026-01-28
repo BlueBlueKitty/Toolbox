@@ -67,16 +67,39 @@ else:
             os.environ["GDAL_DATA"] = p
             break
 
+
+
+
 # 【重要】设置 QtWebEngine 标志必须在任何 Qt 相关模块导入之前
 # --ignore-certificate-errors 用于解决地图瓦片加载时的 SSL 握手失败问题
 # --single-process 解决渲染进程崩溃问题
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--single-process --ignore-certificate-errors --ignore-ssl-errors"
+flags = ["--single-process", "--ignore-certificate-errors", "--ignore-ssl-errors"]
+
+# =====================================================================
+# 【动态 GPU 策略】 解决 WSL/Linux/Windows 的Pyside6的WebEngine的gpu兼容性问题
+# =====================================================================
+def is_wsl():
+    try:
+        with open("/proc/version", "r") as f:
+            return "microsoft" in f.read().lower()
+    except:
+        return False
+
+# 在WSL中禁用 GPU
+if is_wsl():
+    print("检测到系统为 WSL，禁用 GPU 加速以提高稳定性")
+    os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    flags.extend(["--disable-gpu", "--disable-software-rasterizer"])
+
+
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = " ".join(flags)
+os.environ["QTWEBENGINE_DISABLE_SPELLCHECK"] = "1" # 解决字典路径报错
+
 
 # 将项目根目录添加到Python模块搜索路径
 project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(project_root)
 
-# 以下导入虽然没用到，但是打包时需要用到
 from osgeo import gdal, ogr, osr
 
 # 在打包环境下，使用 osr.SetPROJSearchPaths() 设置 PROJ 搜索路径
@@ -88,6 +111,7 @@ if _proj_path:
 gdal.UseExceptions()
 ogr.UseExceptions()
 
+# 以下导入虽然没用到，但是打包时需要用到
 import numpy as np
 try:
     import matplotlib.cm as cm
@@ -114,11 +138,6 @@ def main():
     """
     应用程序的入口函数
     """
-    # 1. 禁用 GPU 加速
-    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --disable-software-rasterizer"
-
-    # 2. 如果第一条无效，可以尝试更彻底的环境变量
-    os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
     
     # 创建应用程序实例
     app = QApplication(sys.argv)
