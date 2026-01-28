@@ -102,6 +102,7 @@ import h5py
 import requests
 from src.main_window import MainWindow
 from PySide6.QtWidgets import QApplication
+from src.utils.font_config import configure_matplotlib_font, configure_pyside6_font
 # 尝试导入 WebEngine
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineSettings
@@ -113,8 +114,19 @@ def main():
     """
     应用程序的入口函数
     """
+    # 1. 禁用 GPU 加速
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --disable-software-rasterizer"
+
+    # 2. 如果第一条无效，可以尝试更彻底的环境变量
+    os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    
     # 创建应用程序实例
     app = QApplication(sys.argv)
+    
+    # 配置字体（必须在创建 QApplication 后）
+    configure_pyside6_font(app)
+    if MATPLOTLIB_AVAILABLE:
+        configure_matplotlib_font()
 
     # 创建主窗口实例
     window = MainWindow()

@@ -28,6 +28,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
+from src.utils.font_config import configure_matplotlib_font
 import traceback
 
 from src.widgets import ImageViewer, ColormapComboBox
@@ -61,8 +62,7 @@ from src.utils.image_io import (
 )
 
 # 设置matplotlib支持中文显示
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'KaiTi', 'FangSong']
-plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+configure_matplotlib_font()
 
 
 class PixelTimeSeriesViewerDialog(QDialog):

@@ -24,7 +24,11 @@ def get_settings():
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+from src.utils.font_config import configure_matplotlib_font
 import traceback
+
+# 配置 matplotlib 中文字体
+configure_matplotlib_font()
 
 from src.widgets import InteractiveImageViewer, ColormapComboBox
 from src.utils.gamma_file_process import (
