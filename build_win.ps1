@@ -129,7 +129,7 @@ function Clean-Build {
         (Join-Path $BUILD_DIR "Toolbox_win"),
         (Join-Path $DIST_DIR "Toolbox_win"),
         (Join-Path $DIST_DIR "Toolbox_win.exe"),
-        (Join-Path $DIST_DIR "${APP_NAME}-${APP_VERSION}-Setup.exe")
+        (Join-Path $DIST_DIR "${APP_NAME}-${APP_VERSION}-x86_64-Setup.exe")
     )
     
     foreach ($path in $pathsToClean) {
@@ -216,7 +216,7 @@ function Create-NSISScript {
 
 ; 基本信息
 Name "${APP_NAME}"
-OutFile "dist\${APP_NAME}-${APP_VERSION}-Setup.exe"
+OutFile "dist\${APP_NAME}-${APP_VERSION}-x86_64-Setup.exe"
 InstallDir "`$PROGRAMFILES64\${APP_NAME}"
 InstallDirRegKey HKLM "Software\${APP_NAME}" "Install_Dir"
 RequestExecutionLevel admin
@@ -367,15 +367,14 @@ function Show-Summary {
             Write-Host "输出目录: " -NoNewline
             Write-Host $dirPath -ForegroundColor Cyan
             Write-Host ("总大小: {0:N2} MB" -f $size)
-        }
         
-        $zipPath = Join-Path $DIST_DIR "${APP_NAME}-${APP_VERSION}-win-x64.zip"
-        if (Test-Path $zipPath) {
-            $zipSize = (Get-Item $zipPath).Length / 1MB
+        $installerPath = Join-Path $DIST_DIR "${APP_NAME}-${APP_VERSION}-x86_64-Setup.exe"
+        if (Test-Path $installerPath) {
+            $installerSize = (Get-Item $installerPath).Length / 1MB
             Write-Host ""
-            Write-Host "ZIP 压缩包: " -NoNewline
-            Write-Host $zipPath -ForegroundColor Cyan
-            Write-Host ("大小: {0:N2} MB" -f $zipSize)
+            Write-Host "安装程序: " -NoNewline
+            Write-Host $installerPath -ForegroundColor Cyan
+            Write-Host ("大小: {0:N2} MB" -f $installerSize)
         }
     }
     
@@ -408,10 +407,6 @@ function Main {
     # PyInstaller 打包
     Build-WithPyInstaller
     
-    # 如果是目录模式，创建 ZIP 压缩包
-    if (-not $OneFile) {
-        Create-ZipPackage
-    }
     
     # 默认创建 NSIS 安装程序（目录模式）
     if (-not $OneFile) {

@@ -233,9 +233,7 @@ sudo apt install -y \
 ```
 
 **输出文件：**
-- `dist/Toolbox_win/` - PyInstaller 打包的目录
-- `dist/Toolbox-{版本号}-win-x64.zip` - ZIP 压缩包
-- `dist/Toolbox-{版本号}-Setup.exe` - **NSIS 安装程序**（推荐分发）
+- `dist/Toolbox-{版本号}-x86_64-Setup.exe` - **NSIS 安装程序**（推荐分发）
 
 ### Linux 打包
 
