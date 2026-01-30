@@ -107,6 +107,22 @@ def main():
     应用程序的入口函数
     """
     
+    # 在Linux系统上配置Qt和Chromium环境变量
+    # 这些配置与 build_linux.sh 中的 AppRun 脚本保持一致，确保开发环境和打包环境行为一致
+    if sys.platform.startswith('linux'):
+        print("检测到Linux系统，正在配置Qt和Chromium环境变量... ", sys.platform)    
+        # Qt 兼容性设置 - 解决不同系统上的图形渲染问题
+        os.environ['QT_XCB_GL_INTEGRATION'] = 'none'
+        os.environ['LIBGL_ALWAYS_SOFTWARE'] = '1'
+        os.environ['QT_QUICK_BACKEND'] = 'software'
+        
+        # QtWebEngine 设置 - 禁用 GPU 加速
+        os.environ['QTWEBENGINE_DISABLE_SANDBOX'] = '1'
+        os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--disable-gpu --disable-software-rasterizer --no-sandbox --disable-dev-shm-usage'
+        
+        # 强制使用 xcb 平台插件（X11）
+        os.environ['QT_QPA_PLATFORM'] = 'xcb'
+    
     # 创建应用程序实例
     app = QApplication(sys.argv)
     

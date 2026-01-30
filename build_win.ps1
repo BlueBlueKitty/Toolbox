@@ -397,25 +397,32 @@ function Main {
     Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
     
-    # # 检查依赖
-    # Check-Dependencies
+    # 检查依赖
+    Check-Dependencies
     
-    # # 如果指定了清理
-    # if ($Clean) {
-    #     Clean-Build
-    # }
+    # 如果指定了清理
+    if ($Clean) {
+        Clean-Build
+    }
     
-    # # PyInstaller 打包
-    # Build-WithPyInstaller
+    # PyInstaller 打包
+    Build-WithPyInstaller
     
-    # # 如果是目录模式，创建 ZIP 压缩包
-    # if (-not $OneFile) {
-    #     Create-ZipPackage
-    # }
+    # 如果是目录模式，创建 ZIP 压缩包
+    if (-not $OneFile) {
+        Create-ZipPackage
+    }
     
-    # 如果需要创建安装程序
-    if ($CreateInstaller -and -not $OneFile) {
-        Create-Installer
+    # 默认创建 NSIS 安装程序（目录模式）
+    if (-not $OneFile) {
+        if ($CreateInstaller) {
+            Create-Installer
+        }
+        else {
+            # 默认创建安装程序
+            Write-Info "默认创建 NSIS 安装程序（使用 -CreateInstaller:`$false 可禁用）"
+            Create-Installer
+        }
     }
     
     # 显示构建摘要

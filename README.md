@@ -118,17 +118,56 @@ git clone <repository-url>
 cd Toolbox
 ```
 
-2. 使用 `uv` 同步环境（`uv` 会读取 `pyproject.toml`）：
+2. 安装 GDAL（重要！）
+
+GDAL 是本项目的核心依赖，需要先安装系统级别的 GDAL，然后安装对应版本的 Python 绑定。
+
+#### Linux 系统安装 GDAL
 
 ```bash
-uv sync --active
+# 1. 安装系统 GDAL 库
+sudo apt update
+sudo apt install gdal-bin libgdal-dev
+
+# 2. 查看系统 GDAL 版本
+gdal-config --version
+# 例如输出: 3.8.4
+
+# 3. 手动编辑 pyproject.toml，将 gdal 版本改为与系统一致
+# 找到 [project.dependencies] 部分，修改为：
+# gdal = "3.8.4.*"  # 替换为你的实际版本
+
+# 4. 同步环境
+uv sync
+
+# 5. 如果遇到 "No module named 'osgeo._gdal_array'" 错误，执行以下修复命令：
+uv add numpy
+GDAL_VERSION=$(gdal-config --version)
+uv pip install --no-cache --force-reinstall --no-binary gdal --no-build-isolation "gdal==$GDAL_VERSION.*"
+
+# 6. 验证 GDAL 是否正确安装
+python -c "from osgeo import gdal_array; print('成功加载 gdal_array')"
 ```
 
-注意：`pyproject.toml` 中的 `tool.uv.sources` 里通常需要指定 GDAL 的 Windows wheel 路径。请在运行 `uv sync` 前，手动编辑 `pyproject.toml` 中 `gdal` 的路径为你本地 Windows wheel 文件的绝对或相对路径，例如：
+#### Windows 系统安装 GDAL
 
-```toml
-[tool.uv.sources]
-gdal = { path = "C:/path/to/gdal‑3.11.4‑cp312‑cp312‑win_amd64.whl" }
+Windows 下推荐使用预编译的 wheel 文件：
+
+```bash
+# 1. 从 GitHub 下载与你的 Python 版本匹配的 GDAL wheel
+# 访问: https://github.com/cgohlke/geospatial-wheels/releases
+# 例如: gdal-3.11.4-cp312-cp312-win_amd64.whl (Python 3.12, 64位)
+
+# 2. 手动编辑 pyproject.toml，指定 wheel 文件路径
+# 在 [tool.uv.sources] 部分添加或修改：
+# [tool.uv.sources]
+# gdal = { path = "C:/path/to/gdal-3.11.4-cp312-cp312-win_amd64.whl" }
+
+# 3. 或者直接使用 uv pip 安装
+uv pip install path/to/gdal-3.11.4-cp312-cp312-win_amd64.whl
+
+# 4. 同步其他依赖
+uv sync
 ```
 
 3. 运行程序：
@@ -137,34 +176,102 @@ gdal = { path = "C:/path/to/gdal‑3.11.4‑cp312‑cp312‑win_amd64.whl" }
 python main.py
 ```
 
+
+
 ## 项目打包
 
-本项目在仓库中包含了用于打包的脚本和配置，支持两种常见目标：Windows 可执行文件（使用 PyInstaller）和 Linux AppImage（基于 PyInstaller 的目录模式 + appimagetool）。
+本项目支持 Windows 和 Linux 平台的打包，分别生成安装程序和 AppImage。
 
-- Windows (PyInstaller):
-  - 使用 `build_win.ps1` 自动调用 PyInstaller（在 Windows PowerShell 下运行）。
-  - 可选择目录模式（Directory）或单文件模式（OneFile），通过环境变量 `ONEFILE` 控制：`ONEFILE=0` 目录模式，`ONEFILE=1` 单文件模式。示例（PowerShell）：
+### 打包前准备
 
-    ```powershell
-    # 自动打包（Windows）
-    ./build_win.ps1
-    ```
+#### Windows 平台
 
-- Linux (PyInstaller + AppImage):
-  - 仓库提供 `build_linux.sh`，默认使用 PyInstaller 的目录模式生成一个 AppDir（可通过设置 `ONEFILE` 切换为单文件，但 AppImage 通常基于目录模式更可靠）。
-  - `build/` 目录下包含 `appimagetool`，脚本会尝试生成 `.AppImage` 文件。
-  - 生成后的 AppImage 可用 `install_appimage.sh` 安装到用户目录并创建桌面条目。示例：
+在 Windows 上打包前，需要安装以下软件：
 
-    ```bash
-    sudo chmod +x build_linux.sh
-    bash build_linux.sh
+1. **Python 3.12+** 和所有项目依赖（通过 `uv sync` 安装）
+2. **NSIS (Nullsoft Scriptable Install System)**
+   - 下载地址：https://nsis.sourceforge.io/Download
+   - 安装后确保 `makensis.exe` 在系统 PATH 中，或安装在默认位置：
+     - `C:\Program Files (x86)\NSIS\`
+     - `C:\Program Files\NSIS\`
 
-    # 生成的 AppImage 后，安装到本用户：
-    chmod +x install_appimage.sh
-    ./install_appimage.sh path/to/Toolbox-*.AppImage
-    ```
+#### Linux 平台
 
-注意：不同系统和发行版环境对打包依赖（尤其 GDAL、Qt 等本地库）要求不同。建议在目标平台的干净环境或对应的构建容器中执行打包脚本以减少兼容性问题。
+在 Linux 上打包前，需要安装以下系统依赖：
+
+```bash
+# Ubuntu/Debian
+sudo apt update
+sudo apt install -y \
+    python3-dev \
+    gdal-bin libgdal-dev \
+    libxcb-xinerama0 \
+    libxcb-cursor0 \
+    libxkbcommon-x11-0 \
+    wget \
+    file
+
+# 确保已安装 Python 虚拟环境和所有项目依赖
+```
+
+### Windows 打包
+
+使用 `build_win.ps1` 脚本进行打包，**默认会创建 NSIS 安装程序**：
+
+```powershell
+# 基本打包（目录模式 + NSIS 安装程序）
+.\build_win.ps1
+
+# 清理后重新打包
+.\build_win.ps1 -Clean
+
+# 单文件模式（不创建安装程序）
+.\build_win.ps1 -OneFile
+
+# 禁用 NSIS 安装程序创建
+.\build_win.ps1 -CreateInstaller:$false
+```
+
+**输出文件：**
+- `dist/Toolbox_win/` - PyInstaller 打包的目录
+- `dist/Toolbox-{版本号}-win-x64.zip` - ZIP 压缩包
+- `dist/Toolbox-{版本号}-Setup.exe` - **NSIS 安装程序**（推荐分发）
+
+### Linux 打包
+
+使用 `build_linux.sh` 脚本生成 AppImage：
+
+```bash
+# 给脚本添加执行权限
+chmod +x build_linux.sh
+
+# 执行打包
+./build_linux.sh
+
+# 清理后重新打包
+./build_linux.sh --clean
+```
+
+**输出文件：**
+- `dist/Toolbox-{版本号}-x86_64.AppImage` - AppImage 可执行文件
+
+**运行 AppImage：**
+
+```bash
+# 添加执行权限
+chmod +x dist/Toolbox-*.AppImage
+
+# 运行
+./dist/Toolbox-*.AppImage
+```
+
+### 注意事项
+
+1. **GDAL 依赖**：不同系统的 GDAL 版本可能不同，建议在目标平台上进行打包
+2. **Qt 库兼容性**：打包脚本已处理 GTK 和 Qt 插件冲突问题
+3. **测试**：打包后请在干净的系统环境中测试，确保所有依赖都已正确打包
+4. **Windows NSIS**：如果未安装 NSIS，脚本会跳过安装程序创建，但仍会生成 ZIP 压缩包
+
 
 ## 许可证
 
