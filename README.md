@@ -107,7 +107,59 @@
 
 ### 使用可执行文件（推荐）
 
-运行打包好的 `Toolbox.exe` 即可，无需安装 Python 环境。
+#### Windows 平台
+
+1. **下载安装程序**：从 [Releases](https://github.com/BlueBlueKitty/Toolbox/releases) 页面下载最新的 `Toolbox-{版本号}-x86_64-Setup.exe`
+
+2. **运行安装程序**：
+   - 双击下载的安装程序
+   - 按照安装向导提示完成安装
+   - 安装完成后会在开始菜单和桌面创建快捷方式
+
+3. **启动软件**：
+   - 从开始菜单或桌面快捷方式启动
+   - 或直接运行安装目录下的 `Toolbox_win.exe`
+
+#### Linux 平台
+
+1. **安装依赖**：AppImage 需要 `libfuse2` 库支持
+
+```bash
+# Ubuntu/Debian
+sudo apt update
+sudo apt install libfuse2
+
+# Fedora/RHEL
+sudo dnf install fuse-libs
+
+# Arch Linux
+sudo pacman -S fuse2
+```
+
+2. **下载 AppImage**：从 [Releases](https://github.com/BlueBlueKitty/Toolbox/releases) 页面下载最新的 `Toolbox-{版本号}-x86_64.AppImage`
+
+3. **移动到合适的位置**：建议将 AppImage 移动到主目录或专门的应用目录，避免被误删
+
+```bash
+# 移动到主目录
+mv ~/Downloads/Toolbox-*.AppImage ~/
+
+# 或者创建专门的应用目录
+mkdir -p ~/Applications
+mv ~/Downloads/Toolbox-*.AppImage ~/Applications/
+```
+
+4. **赋予执行权限并运行**：
+
+```bash
+# 赋予执行权限（假设已移动到主目录）
+chmod +x ~/Toolbox-*.AppImage
+
+# 运行软件
+~/Toolbox-*.AppImage
+```
+
+5. **（可选）安装到系统**：首次运行时，软件会询问是否安装到系统菜单，点击"是"即可在应用启动器中找到图标。
 
 ### 从源码运行（推荐使用 `uv` 管理依赖）
 
