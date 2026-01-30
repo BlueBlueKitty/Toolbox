@@ -12,5 +12,5 @@ dependencies = [
     "pyinstaller>=6.18.0",
     "pyside6<6.10",
     "requests>=2.32.5",
-    “gdal==3.4.3"
+    "gdal==3.4.3",
 ]
