@@ -57,7 +57,6 @@ def transform_corners_to_wgs84(spatial_ref, corners):
         return (min(xs), min(ys), max(xs), max(ys))
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2026-01-26
 Description: 文件处理工具
     提供从矢量文件和栅格文件提取边界的功能
 

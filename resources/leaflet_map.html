@@ -1,44 +1,51 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Leaflet Map</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
     <style>
-        html, body, #map { 
-            height: 100%; 
+        html,
+        body,
+        #map {
+            height: 100%;
             width: 100%;
-            margin: 0; 
-            padding: 0; 
+            margin: 0;
+            padding: 0;
         }
+
         .info-box {
             padding: 6px 8px;
             background: white;
-            background: rgba(255,255,255,0.9);
-            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
             border-radius: 5px;
             font-size: 12px;
             max-width: 200px;
         }
+
         .legend {
             padding: 8px 10px;
             background: white;
-            background: rgba(255,255,255,0.9);
-            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
             border-radius: 5px;
             font-size: 12px;
             line-height: 18px;
         }
+
         .legend i {
             width: 16px;
             height: 12px;
             float: left;
             margin-right: 6px;
             opacity: 0.7;
-            border: 1px solid rgba(0,0,0,0.3);
+            border: 1px solid rgba(0, 0, 0, 0.3);
         }
+
         #loading {
             position: absolute;
             top: 50%;
@@ -49,6 +56,7 @@
         }
     </style>
 </head>
+
 <body>
     <div id="loading">地图加载中...</div>
     <div id="map"></div>
@@ -57,65 +65,83 @@
     <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
     <script>
         console.log('开始加载地图...');
-        
+
         // 等待 Leaflet 加载完成
-        window.addEventListener('load', function() {
+        window.addEventListener('load', function () {
             console.log('页面加载完成，初始化地图...');
-            
+
             try {
                 // 隐藏加载提示
                 document.getElementById('loading').style.display = 'none';
-                
+
                 // 初始化地图
                 var map = L.map('map').setView([35, 105], 4);
                 console.log('地图容器创建成功');
-                
+
                 // 底图图层
-                var cartoLight = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-                    maxZoom: 19,
-                    attribution: '© CARTO © OpenStreetMap'
-                });
-                
-                var cartoDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                    maxZoom: 19,
-                    attribution: '© CARTO'
-                });
-                
-                var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    maxZoom: 19,
-                    attribution: '© OpenStreetMap contributors'
-                });
-                
-                // 高德地图（国内访问更快，中文标签）
+                // 高德地图（国内访问更快，中文标签，使用 HTTP 协议更稳定）
                 var gdLayer = L.tileLayer('http://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
                     subdomains: ['1', '2', '3', '4'],
                     maxZoom: 18,
                     attribution: '© 高德地图'
                 });
-                
-                // OpenStreetMap 多语言版本（显示各国本地语言）
-                var osmMultilangLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    maxZoom: 19,
+
+                // OpenStreetMap 德国镜像（速度较快，HTTP 协议，英语标签）
+                var osmDeLayer = L.tileLayer('http://{s}.tile.openstreetmap.de/tiles/osmde/{z}/{x}/{y}.png', {
+                    maxZoom: 18,
                     attribution: '© OpenStreetMap contributors'
                 });
-                
-                // 默认使用 OpenStreetMap 多语言版本
-                osmMultilangLayer.addTo(map);
+
+                // OpenStreetMap 法国镜像（HTTP 协议，英语标签）
+                var osmFrLayer = L.tileLayer('http://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+                    maxZoom: 20,
+                    attribution: '© OpenStreetMap France | © OpenStreetMap contributors'
+                });
+
+                // OpenStreetMap HOT（人道主义，HTTP 协议，英语标签）
+                var osmHotLayer = L.tileLayer('http://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '© OpenStreetMap contributors, Tiles style by Humanitarian OpenStreetMap Team'
+                });
+
+                // OpenStreetMap 标准英语版本（强制英语标签）
+                var osmEnLayer = L.tileLayer('http://tile-{s}.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    subdomains: 'abc',
+                    attribution: '© OpenStreetMap contributors'
+                });
+
+                // CARTO 使用 HTTP（更好的兼容性，英语标签）
+                var cartoLight = L.tileLayer('http://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '© CARTO © OpenStreetMap'
+                });
+
+                var cartoDark = L.tileLayer('http://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '© CARTO'
+                });
+
+                // 默认使用 OSM 德国镜像
+                osmDeLayer.addTo(map);
                 console.log('底图添加成功');
-                
-                // 图层控制
+
+                // 图层控制 - 提供多语言地图选项
                 var baseMaps = {
-                    "OpenStreetMap (多语言)": osmMultilangLayer,
+                    "OSM 德国镜像": osmDeLayer,
+                    "OSM 法国镜像": osmFrLayer,
+                    "OSM HOT镜像": osmEnLayer,
+                    "OSM 人道主义镜像": osmHotLayer,
                     "高德地图 (中文)": gdLayer,
                     "CARTO Light": cartoLight,
                     "CARTO Dark": cartoDark
                 };
                 L.control.layers(baseMaps).addTo(map);
-                
+
                 // 绘制图层
                 var drawnItems = new L.FeatureGroup();
                 map.addLayer(drawnItems);
-                
+
                 // 绘制控件 - 只保留矩形绘制和删除功能
                 var drawControl = new L.Control.Draw({
                     draw: {
@@ -140,15 +166,15 @@
                 });
                 map.addControl(drawControl);
                 console.log('绘制控件添加成功');
-                
+
                 // 信息显示控件
-                var info = L.control({position: 'bottomleft'});
-                info.onAdd = function(map) {
+                var info = L.control({ position: 'bottomleft' });
+                info.onAdd = function (map) {
                     this._div = L.DomUtil.create('div', 'info-box');
                     this.update();
                     return this._div;
                 };
-                info.update = function(bounds) {
+                info.update = function (bounds) {
                     if (bounds) {
                         this._div.innerHTML = '<b>选择区域</b><br>' +
                             '南: ' + bounds.south.toFixed(6) + '°<br>' +
@@ -160,13 +186,13 @@
                     }
                 };
                 info.addTo(map);
-                
+
                 // Python 通信桥接
                 var pyBridge = null;
-                
+
                 if (typeof qt !== 'undefined' && qt.webChannelTransport) {
                     console.log('QWebChannel transport 可用，正在初始化...');
-                    new QWebChannel(qt.webChannelTransport, function(channel) {
+                    new QWebChannel(qt.webChannelTransport, function (channel) {
                         pyBridge = channel.objects.bridge;
                         if (pyBridge) {
                             console.log('QWebChannel 初始化成功，bridge 对象已连接');
@@ -177,13 +203,13 @@
                 } else {
                     console.log('QWebChannel 不可用（独立运行模式）');
                 }
-                
+
                 // 绘制完成事件
-                map.on(L.Draw.Event.CREATED, function(e) {
+                map.on(L.Draw.Event.CREATED, function (e) {
                     console.log('绘制事件触发');
                     drawnItems.clearLayers();
                     drawnItems.addLayer(e.layer);
-                    
+
                     var bounds = e.layer.getBounds();
                     var boundsData = {
                         south: bounds.getSouth(),
@@ -191,10 +217,10 @@
                         west: bounds.getWest(),
                         east: bounds.getEast()
                     };
-                    
+
                     info.update(boundsData);
                     console.log('绘制区域:', JSON.stringify(boundsData));
-                    
+
                     if (pyBridge) {
                         console.log('正在调用 pyBridge.onBoundsDrawn...');
                         try {
@@ -207,20 +233,20 @@
                         console.log('pyBridge 未初始化，无法发送边界数据到 Python');
                     }
                 });
-                
+
                 // 删除事件
-                map.on(L.Draw.Event.DELETED, function(e) {
+                map.on(L.Draw.Event.DELETED, function (e) {
                     info.update();
                     if (pyBridge) {
                         pyBridge.onBoundsCleared();
                     }
                 });
-                
+
                 // 从 Python 调用的函数
-                window.showBounds = function(south, north, west, east) {
+                window.showBounds = function (south, north, west, east) {
                     console.log('显示边界:', south, north, west, east);
                     drawnItems.clearLayers();
-                    
+
                     if (south !== null && north !== null && west !== null && east !== null) {
                         var bounds = [[south, west], [north, east]];
                         var rect = L.rectangle(bounds, {
@@ -229,19 +255,19 @@
                             fillOpacity: 0.2
                         });
                         drawnItems.addLayer(rect);
-                        map.fitBounds(bounds, {padding: [50, 50]});
-                        
-                        info.update({south: south, north: north, west: west, east: east});
+                        map.fitBounds(bounds, { padding: [50, 50] });
+
+                        info.update({ south: south, north: north, west: west, east: east });
                     } else {
                         info.update();
                     }
                 };
-                
+
                 // 显示多个边界区域，用不同颜色区分
-                window.showMultipleBounds = function(boundsArray) {
+                window.showMultipleBounds = function (boundsArray) {
                     console.log('显示多个边界:', boundsArray);
                     drawnItems.clearLayers();
-                    
+
                     var allBounds = [];
                     for (var i = 0; i < boundsArray.length; i++) {
                         var item = boundsArray[i];
@@ -251,30 +277,30 @@
                             weight: 2,
                             fillOpacity: 0.2
                         });
-                        
+
                         // 添加标签
                         if (item.label) {
-                            rect.bindTooltip(item.label, {permanent: true, direction: 'center'});
+                            rect.bindTooltip(item.label, { permanent: true, direction: 'center' });
                         }
-                        
+
                         drawnItems.addLayer(rect);
                         allBounds.push(bounds);
                     }
-                    
+
                     // 调整视图以显示所有边界
                     if (allBounds.length > 0) {
-                        var group = L.featureGroup(allBounds.map(function(b) {
+                        var group = L.featureGroup(allBounds.map(function (b) {
                             return L.rectangle(b);
                         }));
-                        map.fitBounds(group.getBounds(), {padding: [50, 50]});
+                        map.fitBounds(group.getBounds(), { padding: [50, 50] });
                     }
                 };
-                
+
                 // 显示多个边界区域（不带标签）
-                window.showMultipleBoundsNoLabel = function(boundsArray) {
+                window.showMultipleBoundsNoLabel = function (boundsArray) {
                     console.log('显示多个边界(无标签):', boundsArray);
                     drawnItems.clearLayers();
-                    
+
                     var allBounds = [];
                     for (var i = 0; i < boundsArray.length; i++) {
                         var item = boundsArray[i];
@@ -287,33 +313,33 @@
                         drawnItems.addLayer(rect);
                         allBounds.push(bounds);
                     }
-                    
+
                     // 调整视图以显示所有边界
                     if (allBounds.length > 0) {
-                        var group = L.featureGroup(allBounds.map(function(b) {
+                        var group = L.featureGroup(allBounds.map(function (b) {
                             return L.rectangle(b);
                         }));
-                        map.fitBounds(group.getBounds(), {padding: [50, 50]});
+                        map.fitBounds(group.getBounds(), { padding: [50, 50] });
                     }
                 };
-                
+
                 // 图例控件
                 var legendControl = null;
-                
+
                 // 显示边界区域并添加图例
-                window.showBoundsWithLegend = function(boundsArray) {
+                window.showBoundsWithLegend = function (boundsArray) {
                     console.log('显示边界(带图例):', boundsArray);
                     drawnItems.clearLayers();
-                    
+
                     // 移除旧图例
                     if (legendControl) {
                         map.removeControl(legendControl);
                         legendControl = null;
                     }
-                    
+
                     var allBounds = [];
                     var legendItems = [];
-                    
+
                     for (var i = 0; i < boundsArray.length; i++) {
                         var item = boundsArray[i];
                         var bounds = [[item.south, item.west], [item.north, item.east]];
@@ -324,17 +350,17 @@
                         });
                         drawnItems.addLayer(rect);
                         allBounds.push(bounds);
-                        
+
                         // 收集图例项
                         if (item.name) {
-                            legendItems.push({color: item.color, name: item.name});
+                            legendItems.push({ color: item.color, name: item.name });
                         }
                     }
-                    
+
                     // 创建图例
                     if (legendItems.length > 0) {
-                        legendControl = L.control({position: 'bottomright'});
-                        legendControl.onAdd = function(map) {
+                        legendControl = L.control({ position: 'bottomright' });
+                        legendControl.onAdd = function (map) {
                             var div = L.DomUtil.create('div', 'legend');
                             for (var i = 0; i < legendItems.length; i++) {
                                 div.innerHTML += '<i style="background:' + legendItems[i].color + '"></i> ' + legendItems[i].name + '<br>';
@@ -343,29 +369,29 @@
                         };
                         legendControl.addTo(map);
                     }
-                    
+
                     // 调整视图以显示所有边界
                     if (allBounds.length > 0) {
-                        var group = L.featureGroup(allBounds.map(function(b) {
+                        var group = L.featureGroup(allBounds.map(function (b) {
                             return L.rectangle(b);
                         }));
-                        map.fitBounds(group.getBounds(), {padding: [50, 50]});
+                        map.fitBounds(group.getBounds(), { padding: [50, 50] });
                     }
                 };
-                
-                window.clearBounds = function() {
+
+                window.clearBounds = function () {
                     console.log('清除边界');
                     drawnItems.clearLayers();
                     info.update();
                 };
-                
-                window.setView = function(lat, lng, zoom) {
+
+                window.setView = function (lat, lng, zoom) {
                     console.log('设置视图:', lat, lng, zoom);
                     map.setView([lat, lng], zoom);
                 };
-                
+
                 console.log('Leaflet 地图初始化完成！');
-                
+
             } catch (error) {
                 console.error('地图初始化失败:', error);
                 document.getElementById('loading').innerHTML = '地图初始化失败: ' + error.message;
@@ -374,4 +400,5 @@
         });
     </script>
 </body>
+
 </html>

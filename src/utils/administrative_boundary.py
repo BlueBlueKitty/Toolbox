@@ -1,6 +1,5 @@
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2026-01-26
 Description: 行政区划选择器
     提供按省份和城市选择行政区划边界的功能
 

@@ -1,6 +1,5 @@
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2026-01-26
 Description: OpenTopography API客户端
     实现从OpenTopography下载DEM数据的功能
 

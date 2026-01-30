@@ -1,6 +1,5 @@
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2026-01-26
 Description: DEM数据获取对话框
     支持从本地全球DEM数据文件夹或OpenTopography获取DEM数据
     集成Leaflet地图用于区域选择和可视化
@@ -949,10 +948,6 @@ class DEMAcquisitionDialog(QDialog):
             self.map_area_label.setText(f"区域面积: {area:.2f} km²")
             self.map_area_label.setStyleSheet("color: #27ae60; font-weight: bold;")
         
-        # 自动切换到地图绘制标签页
-        if WEBENGINE_AVAILABLE:
-            self.region_tab.setCurrentIndex(0)  # 地图绘制现在是第一个标签页
-        
         self.log(f"地图绘制区域: 南={self.map_south:.4f}, 北={self.map_north:.4f}, "
                 f"西={self.map_west:.4f}, 东={self.map_east:.4f}")
     
@@ -1174,6 +1169,9 @@ class DEMAcquisitionDialog(QDialog):
     def log(self, message: str):
         """添加日志消息"""
         self.log_text.append(message)
+        # 自动滚动到底部显示最新日志
+        scrollbar = self.log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
     
     def _update_manual_area(self):
         """更新手动输入的面积并自动显示在地图上"""
@@ -1531,6 +1529,9 @@ class DEMAcquisitionDialog(QDialog):
                 QMessageBox.warning(self, "警告", f"API密钥长度应为32位，当前为{len(api_key)}位")
                 return
             
+            # 保存API密钥
+            self.settings.setValue("api_key", api_key)
+            
             dataset_name = self.dem_type_combo.currentData()
             if not dataset_name:
                 QMessageBox.warning(self, "警告", "请选择DEM类型")
@@ -1657,9 +1658,6 @@ class DEMAcquisitionDialog(QDialog):
             # 在地图上显示边界框（使用legend）
             if bounds_list and self.map_widget.is_available():
                 self.map_widget.show_bounds_with_legend(bounds_list)
-                # 切换到地图标签页以便查看
-                if WEBENGINE_AVAILABLE:
-                    self.region_tab.setCurrentIndex(0)
                 self.log("✓ 边界已显示在地图上（见右下角图例）")
             
             self.log(f"✓ DEM文件已保存: {dem_path}")

@@ -1,8 +1,6 @@
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2025-03-24 20:57:49
-LastEditors: Yibo Yuan 2633669459@qq.com
-Description: 
+Description: 应用程序入口
 
 Copyright (c) 2025 by Yibo Yuan 2633669459@qq.com, All Rights Reserved. 
 '''
@@ -67,34 +65,8 @@ else:
             os.environ["GDAL_DATA"] = p
             break
 
-
-
-
-# 【重要】设置 QtWebEngine 标志必须在任何 Qt 相关模块导入之前
-# --ignore-certificate-errors 用于解决地图瓦片加载时的 SSL 握手失败问题
-# --single-process 解决渲染进程崩溃问题
-flags = ["--single-process", "--ignore-certificate-errors", "--ignore-ssl-errors"]
-
-# =====================================================================
-# 【动态 GPU 策略】 解决 WSL/Linux/Windows 的Pyside6的WebEngine的gpu兼容性问题
-# =====================================================================
-def is_wsl():
-    try:
-        with open("/proc/version", "r") as f:
-            return "microsoft" in f.read().lower()
-    except:
-        return False
-
-# 在WSL中禁用 GPU
-if is_wsl():
-    print("检测到系统为 WSL，禁用 GPU 加速以提高稳定性")
-    os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
-    flags.extend(["--disable-gpu", "--disable-software-rasterizer"])
-
-
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = " ".join(flags)
-os.environ["QTWEBENGINE_DISABLE_SPELLCHECK"] = "1" # 解决字典路径报错
-
+# 强制使用桌面 OpenGL，解决部分 Linux 驱动导致的崩溃
+os.environ["QT_XCB_GL_INTEGRATION"] = "xcb_egl"
 
 # 将项目根目录添加到Python模块搜索路径
 project_root = os.path.dirname(os.path.abspath(__file__))
@@ -127,7 +99,6 @@ import requests
 from src.main_window import MainWindow
 from PySide6.QtWidgets import QApplication
 from src.utils.font_config import configure_matplotlib_font, configure_pyside6_font
-# 尝试导入 WebEngine
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebChannel import QWebChannel

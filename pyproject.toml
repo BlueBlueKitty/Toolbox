@@ -3,19 +3,14 @@ name = "toolbox"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
     "h5py>=3.15.1",
     "matplotlib>=3.10.8",
-    "numpy>=2.4.1",
+    "numpy>=2.2.6",
     "pillow>=12.1.0",
     "pyinstaller>=6.18.0",
-    "pyside6>=6.10.1",
+    "pyside6<6.10",
     "requests>=2.32.5",
-    "gdal==3.11.4; sys_platform == 'win32'",
-    "gdal; sys_platform == 'linux'"
+    “gdal==3.4.3"
 ]
-
-[tool.uv.sources]
-# 仅在 Windows 且满足特定路径时生效
-gdal = { path = "./wheels/gdal-3.11.4-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'"}

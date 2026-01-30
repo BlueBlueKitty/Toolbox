@@ -1,6 +1,5 @@
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2026-01-22
 Description: 图像局部查看器对话框
 
 Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved. 
@@ -24,11 +23,7 @@ def get_settings():
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-from src.utils.font_config import configure_matplotlib_font
 import traceback
-
-# 配置 matplotlib 中文字体
-configure_matplotlib_font()
 
 from src.widgets import InteractiveImageViewer, ColormapComboBox
 from src.utils.gamma_file_process import (

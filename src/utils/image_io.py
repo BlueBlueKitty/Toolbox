@@ -1,6 +1,5 @@
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2026-01-27
 Description: 图像读取工具模块
 
 提供统一的图像读取接口，支持：

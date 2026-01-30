@@ -1,6 +1,5 @@
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2026-01-26
 Description: Leaflet 地图组件
     基于 QWebEngineView 和 Leaflet.js 的交互式地图组件
     支持绘制矩形、显示边界、底图切换等功能
@@ -13,21 +12,11 @@ from typing import Optional, Callable
 from PySide6.QtCore import QObject, Signal, Slot, Qt, QUrl
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QMessageBox
 
-# 尝试导入 WebEngine
-try:
-    from PySide6.QtWebEngineWidgets import QWebEngineView
-    from PySide6.QtWebEngineCore import QWebEngineSettings
-    from PySide6.QtWebChannel import QWebChannel
-    WEBENGINE_AVAILABLE = True
-except ImportError:
-    try:
-        from PyQt6.QtWebEngineWidgets import QWebEngineView
-        from PyQt6.QtWebEngineCore import QWebEngineSettings
-        from PyQt6.QtWebChannel import QWebChannel
-        WEBENGINE_AVAILABLE = True
-    except ImportError:
-        WEBENGINE_AVAILABLE = False
-        QWebEngineView = None
+
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import QWebEngineSettings
+from PySide6.QtWebChannel import QWebChannel
+WEBENGINE_AVAILABLE = True
 
 
 class MapBridge(QObject):
@@ -463,8 +452,6 @@ class LeafletMapWidget(QWidget):
 # 测试代码
 if __name__ == "__main__":
     import sys
-    # Fix for QtWebEngine crash
-    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--single-process"
     from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QHBoxLayout
     
     class TestWindow(QMainWindow):

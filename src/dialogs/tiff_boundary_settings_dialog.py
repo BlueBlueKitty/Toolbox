@@ -1,15 +1,12 @@
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2025-03-24 21:50:23
-LastEditors: Yibo Yuan 2633669459@qq.com
-LastEditTime: 2025-03-25 01:23:14
+
 Description: 
 
 Copyright (c) 2025 by Yibo Yuan 2633669459@qq.com, All Rights Reserved. 
 '''
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2025-03-24
 Description: TIFF边界转矢量的参数设置对话框
 
 Copyright (c) 2025 by Yibo Yuan 2633669459@qq.com, All Rights Reserved. 

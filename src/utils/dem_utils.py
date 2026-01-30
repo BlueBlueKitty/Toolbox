@@ -1,6 +1,5 @@
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2026-01-26
 Description: DEM处理工具模块
     包含本地DEM处理、面积计算等功能
 

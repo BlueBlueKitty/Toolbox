@@ -1,8 +1,5 @@
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2025-03-24 21:01:28
-LastEditors: Yibo Yuan 2633669459@qq.com
-LastEditTime: 2026-01-22
 
 Copyright (c) 2025 by Yibo Yuan 2633669459@qq.com, All Rights Reserved. 
 '''

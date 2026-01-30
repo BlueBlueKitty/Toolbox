@@ -1,6 +1,5 @@
 '''
 Author: Yibo Yuan 2633669459@qq.com
-Date: 2026-01-22
 Description: 图像查看器组件，支持缩放、拖动、颜色映射等功能
 
 Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved. 
