@@ -1,0 +1,18 @@
+# Python 依赖
+# 使用 pip install -r requirements.txt 安装
+
+# 核心依赖
+numpy>=2.2.6
+h5py>=3.15.1
+matplotlib>=3.10.8
+pillow>=12.1.0
+requests>=2.32.5
+
+# GUI 框架
+pyside6<6.10
+
+# 地理空间
+gdal==3.4.3
+
+# 打包工具
+pyinstaller>=6.18.0

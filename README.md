@@ -139,32 +139,33 @@ python main.py
 
 ## 项目打包
 
-使用 `PyInstaller` 打包：
+本项目在仓库中包含了用于打包的脚本和配置，支持两种常见目标：Windows 可执行文件（使用 PyInstaller）和 Linux AppImage（基于 PyInstaller 的目录模式 + appimagetool）。
 
-```bash
-# 自动打包脚本：
-# PowerShell
-./build_win.ps1
+- Windows (PyInstaller):
+  - 使用 `build_win.ps1` 自动调用 PyInstaller（在 Windows PowerShell 下运行）。
+  - 可选择目录模式（Directory）或单文件模式（OneFile），通过环境变量 `ONEFILE` 控制：`ONEFILE=0` 目录模式，`ONEFILE=1` 单文件模式。示例（PowerShell）：
 
-# Linux Shell
-sudo chmod +x build_linux.sh
-bash build_linux.sh
+    ```powershell
+    # 自动打包（Windows）
+    ./build_win.ps1
+    ```
 
-# 或者手动打包：
-# 目录模式(PowerShell)
-$env:ONEFILE='0'; python -m PyInstaller Toolbox.spec --clean --noconfirm
+- Linux (PyInstaller + AppImage):
+  - 仓库提供 `build_linux.sh`，默认使用 PyInstaller 的目录模式生成一个 AppDir（可通过设置 `ONEFILE` 切换为单文件，但 AppImage 通常基于目录模式更可靠）。
+  - `build/` 目录下包含 `appimagetool`，脚本会尝试生成 `.AppImage` 文件。
+  - 生成后的 AppImage 可用 `install_appimage.sh` 安装到用户目录并创建桌面条目。示例：
 
-# 目录模式(Linux Shell)
-ONEFILE=0 python -m PyInstaller Toolbox.spec --clean --noconfirm
+    ```bash
+    sudo chmod +x build_linux.sh
+    bash build_linux.sh
 
-# 单文件模式(PowerShell)
-$env:ONEFILE="1"; python -m PyInstaller Toolbox.spec --clean --noconfirm; Remove-Item Env:\ONEFILE
+    # 生成的 AppImage 后，安装到本用户：
+    chmod +x install_appimage.sh
+    ./install_appimage.sh path/to/Toolbox-*.AppImage
+    ```
 
-# 单文件模式(Linux Shell)
-ONEFILE=1 python -m PyInstaller Toolbox.spec --clean --noconfirm
-```
+注意：不同系统和发行版环境对打包依赖（尤其 GDAL、Qt 等本地库）要求不同。建议在目标平台的干净环境或对应的构建容器中执行打包脚本以减少兼容性问题。
 
 ## 许可证
 
 Copyright (c) 2026 by Yibo Yuan, All Rights Reserved.
-```

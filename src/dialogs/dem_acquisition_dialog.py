@@ -1258,7 +1258,8 @@ class DEMAcquisitionDialog(QDialog):
             self,
             "选择矢量文件",
             initial_dir,
-            "矢量文件 (*.json *.geojson *.kml *.kmz *.shp *.gpkg);;所有文件 (*.*)"
+            "矢量文件 (*.json *.geojson *.kml *.kmz *.shp *.gpkg);;所有文件 (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         
         if file_path:
@@ -1301,7 +1302,8 @@ class DEMAcquisitionDialog(QDialog):
             self,
             "选择TIF文件",
             initial_dir,
-            "TIF文件 (*.tif *.tiff);;所有文件 (*.*)"
+            "TIF文件 (*.tif *.tiff);;所有文件 (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         
         if file_path:
@@ -1358,7 +1360,8 @@ class DEMAcquisitionDialog(QDialog):
             self,
             "保存DEM文件",
             initial_dir,
-            "GeoTIFF文件 (*.tif);;所有文件 (*.*)"
+            "GeoTIFF文件 (*.tif);;所有文件 (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         
         if file_path:

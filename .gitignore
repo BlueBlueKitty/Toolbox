@@ -222,3 +222,16 @@ test/
 docs/
 .vscode/
 DEM_downloader/
+
+# AppImage 相关
+*.AppImage
+AppDir/
+appimagetool
+
+# NSIS 安装程序
+installer.nsi
+*.nsi
+
+# 临时文件
+*.log
+*.tmp

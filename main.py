@@ -65,9 +65,6 @@ else:
             os.environ["GDAL_DATA"] = p
             break
 
-# 强制使用桌面 OpenGL，解决部分 Linux 驱动导致的崩溃
-os.environ["QT_XCB_GL_INTEGRATION"] = "xcb_egl"
-
 # 将项目根目录添加到Python模块搜索路径
 project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(project_root)

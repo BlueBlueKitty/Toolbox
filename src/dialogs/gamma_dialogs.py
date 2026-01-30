@@ -145,7 +145,8 @@ class GammaSingleFileDialog(QDialog):
         start_dir = os.path.dirname(self.binary_file) if self.binary_file else ""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择PAR文件", start_dir, 
-            "PAR文件 (*.par *par* *.PAR *PAR*);;所有文件 (*.*)"
+            "PAR文件 (*.par *par* *.PAR *PAR*);;所有文件 (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         if file_path:
             # 添加到下拉框
@@ -280,7 +281,8 @@ class GammaTimeSeriesDialog(QDialog):
         
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择PAR文件", start_dir,
-            "PAR文件 (*.par *par* *.PAR *PAR*);;所有文件 (*.*)"
+            "PAR文件 (*.par *par* *.PAR *PAR*);;所有文件 (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         
         if file_path:
