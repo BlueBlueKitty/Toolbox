@@ -1,13 +1,5 @@
 # Toolbox - 遥感工具箱
 
-一个基于PySide6开发的遥感数据处理与分析工具箱，提供便捷的栅格数据处理、时序分析和可视化功能。
-
-## 项目简介
-
-本项目旨在打造一个功能丰富、易用的遥感数据处理工具箱，整合常用的遥感数据分析功能，提供友好的图形界面，降低遥感数据处理的门槛。
-
-# Toolbox - 遥感工具箱
-
 一个基于 PySide6 的遥感数据处理与分析工具箱，提供便捷的栅格数据处理、时序分析和可视化功能。
 
 ## 项目简介
@@ -166,7 +158,7 @@ chmod +x ~/Toolbox-*.AppImage
 1. 克隆项目并进入目录：
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/BlueBlueKitty/Toolbox
 cd Toolbox
 ```
 
