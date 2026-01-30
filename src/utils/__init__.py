@@ -83,6 +83,9 @@ from .image_io import (
     read_h5_timeseries_pixel,
 )
 
+from .appimage_installer import AppImageInstaller
+from .update_checker import UpdateChecker, UpdateError, NetworkError
+
 __all__ = [
     'LocalDEMProcessor',
     'calculate_area_km2',
@@ -141,4 +144,9 @@ __all__ = [
     'read_h5_timeseries_metadata',
     'read_h5_timeseries_frame',
     'read_h5_timeseries_pixel',
+    'AppImageInstaller',
+    # 更新检查
+    'UpdateChecker',
+    'UpdateError',
+    'NetworkError',
 ]

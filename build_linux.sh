@@ -17,16 +17,28 @@ NC='\033[0m' # No Color
 
 # 项目信息
 APP_NAME="Toolbox"
-APP_VERSION="1.2.0"
 APP_ID="com.toolbox.app"
 
-# 路径定义
+# 路径定义（必须先于版本号读取）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
 DIST_DIR="${SCRIPT_DIR}/dist"
 APPDIR="${BUILD_DIR}/AppDir"
 APPIMAGE_TOOL="appimagetool"
 APPIMAGE_TOOL_URL="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+
+# 从 src/version.py 动态读取版本号
+VERSION_FILE="${SCRIPT_DIR}/src/version.py"
+if [ -f "${VERSION_FILE}" ]; then
+    APP_VERSION=$(grep -oP "__version__\s*=\s*['\"]\K[^'\"]+" "${VERSION_FILE}")
+    if [ -z "${APP_VERSION}" ]; then
+        APP_VERSION="0.0.0"
+        echo -e "${YELLOW}[WARN]${NC} 无法从 version.py 解析版本号，使用默认版本"
+    fi
+else
+    APP_VERSION="0.0.0"
+    echo -e "${YELLOW}[WARN]${NC} 未找到 version.py，使用默认版本"
+fi
 
 # 解析参数
 ONEFILE=0

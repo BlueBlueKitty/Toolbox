@@ -8,9 +8,7 @@ Toolbox - 一个地理信息工具箱应用
 等功能
 
 作者: Yibo Yuan (2633669459@qq.com)
-版本: 0.1.0
 """
 
-__version__ = '0.1.0'
-__author__ = 'Yibo Yuan'
-__email__ = '2633669459@qq.com'
+# 从 src.version 导入版本信息，保持向后兼容
+from src.version import __version__, __author__, __email__

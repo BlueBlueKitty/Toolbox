@@ -15,8 +15,32 @@ param(
 
 # 项目信息
 $APP_NAME = "Toolbox"
-$APP_VERSION = "0.1.0"
 $APP_PUBLISHER = "Yibo Yuan"
+
+# 从 src/version.py 动态读取版本号
+$VERSION_FILE = Join-Path $PSScriptRoot "src\version.py"
+if (Test-Path $VERSION_FILE) {
+    # 使用 Select-String 避免复杂的正则转义
+    $versionLine = Select-String -Path $VERSION_FILE -Pattern "__version__" | Select-Object -First 1
+    if ($versionLine) {
+        $lineText = $versionLine.Line
+        # 分别匹配单引号和双引号
+        if ($lineText -match "=\s*'([^']+)'") {
+            $APP_VERSION = $matches[1]
+        } elseif ($lineText -match '=\s*"([^"]+)"') {
+            $APP_VERSION = $matches[1]
+        } else {
+            $APP_VERSION = "0.0.0"
+            Write-Host "[WARN] 无法从 version.py 解析版本号，使用默认版本" -ForegroundColor Yellow
+        }
+    } else {
+        $APP_VERSION = "0.0.0"
+        Write-Host "[WARN] version.py 中未找到 __version__" -ForegroundColor Yellow
+    }
+} else {
+    $APP_VERSION = "0.0.0"
+    Write-Host "[WARN] 未找到 version.py，使用默认版本" -ForegroundColor Yellow
+}
 
 # 路径定义
 $SCRIPT_DIR = $PSScriptRoot
