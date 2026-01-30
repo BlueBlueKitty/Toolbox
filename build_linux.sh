@@ -99,21 +99,6 @@ check_dependencies() {
         pip install pyinstaller
     fi
     
-    # 检查 GDAL/osgeo (使用 pip list 避免 GDAL 核心转储问题)
-    if ! pip list 2>/dev/null | grep -i "^GDAL " &> /dev/null; then
-        warn "未找到 GDAL Python 绑定"
-        warn "正在检查是否有 requirements.txt..."
-        
-        if [ -f "${SCRIPT_DIR}/requirements.txt" ]; then
-            warn "正在安装项目依赖（包括 GDAL）..."
-            pip install -r "${SCRIPT_DIR}/requirements.txt"
-        else
-            error "未找到 GDAL，请先安装依赖：pip install -r requirements.txt"
-        fi
-    else
-        info "GDAL 已安装: $(pip list 2>/dev/null | grep -i "^GDAL " | awk '{print $2}')"
-    fi
-    
     success "依赖检查完成"
 }
 
@@ -303,7 +288,7 @@ main() {
     activate_venv
     
     # 检查依赖
-    # check_dependencies
+    check_dependencies
     
     # 如果指定了清理
     if [ $CLEAN -eq 1 ]; then

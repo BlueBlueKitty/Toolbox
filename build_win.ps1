@@ -1,4 +1,4 @@
-#-----------------------------------------------------------------------------
+﻿#-----------------------------------------------------------------------------
 # Windows 构建脚本 - 生成 exe
 # 用法: .\build_win.ps1 [-OneFile] [-Clean] [-CreateInstaller]
 #   -OneFile:        使用 PyInstaller 单文件模式
@@ -146,7 +146,8 @@ function Build-WithPyInstaller {
     # 检查构建产物是否存在
     $expectedOutput = if ($OneFile) { 
         Join-Path $DIST_DIR "Toolbox_win.exe" 
-    } else { 
+    }
+    else { 
         Join-Path $DIST_DIR "Toolbox_win\Toolbox_win.exe" 
     }
     
@@ -372,21 +373,21 @@ function Main {
     Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
     
-    # 检查依赖
-    Check-Dependencies
+    # # 检查依赖
+    # Check-Dependencies
     
-    # 如果指定了清理
-    if ($Clean) {
-        Clean-Build
-    }
+    # # 如果指定了清理
+    # if ($Clean) {
+    #     Clean-Build
+    # }
     
-    # PyInstaller 打包
-    Build-WithPyInstaller
+    # # PyInstaller 打包
+    # Build-WithPyInstaller
     
-    # 如果是目录模式，创建 ZIP 压缩包
-    if (-not $OneFile) {
-        Create-ZipPackage
-    }
+    # # 如果是目录模式，创建 ZIP 压缩包
+    # if (-not $OneFile) {
+    #     Create-ZipPackage
+    # }
     
     # 如果需要创建安装程序
     if ($CreateInstaller -and -not $OneFile) {
