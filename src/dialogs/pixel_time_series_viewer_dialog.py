@@ -1570,7 +1570,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 tick_positions = list(range(0, len(self.date_list), step))
                 tick_labels = [self.date_list[i] for i in tick_positions]
                 ax.set_xticks(tick_positions)
-                ax.set_xticklabels(tick_labels, rotation=45, ha='right')
+                ax.set_xticklabels(tick_labels)
             else:
                 ax.set_xlabel('图像索引')
             
