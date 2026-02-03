@@ -78,6 +78,7 @@ from .image_io import (
     # HDF5读取
     list_h5_datasets,
     read_h5_dataset,
+    read_h5_dataset_downsampled,
     read_h5_timeseries_metadata,
     read_h5_timeseries_frame,
     read_h5_timeseries_pixel,
@@ -141,6 +142,7 @@ __all__ = [
     'read_any_image_pixel',
     'list_h5_datasets',
     'read_h5_dataset',
+    'read_h5_dataset_downsampled',
     'read_h5_timeseries_metadata',
     'read_h5_timeseries_frame',
     'read_h5_timeseries_pixel',

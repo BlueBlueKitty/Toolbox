@@ -10,6 +10,8 @@ from .image_viewer import ImageViewerSynchronizer
 from .colormap_combobox import ColormapComboBox
 from .interactive_image_viewer import InteractiveImageViewer
 from .leaflet_map_widget import LeafletMapWidget, MapBridge, WEBENGINE_AVAILABLE
+from .render_settings_widget import RenderSettingsWidget, apply_render_settings
+from .colorbar_widget import ColorbarWidget
 
 __all__ = [
     'ImageViewer', 
@@ -17,5 +19,9 @@ __all__ = [
     'InteractiveImageViewer',
     'LeafletMapWidget',
     'MapBridge',
-    'WEBENGINE_AVAILABLE'
+    'WEBENGINE_AVAILABLE',
+    'RenderSettingsWidget',
+    'apply_render_settings',
+    'ImageViewerSynchronizer',
+    'ColorbarWidget',
 ]

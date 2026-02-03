@@ -6,12 +6,13 @@ Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 '''
 
 import os
+import re
 import numpy as np
 from pathlib import Path
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QFileDialog, QLabel, QSlider, QComboBox, QMessageBox,
                                QSplitter, QGroupBox, QGridLayout, QCheckBox, QFormLayout,
-                               QDialogButtonBox, QInputDialog)
+                               QDialogButtonBox, QInputDialog, QFrame)
 from PySide6.QtCore import Qt, QSettings
 
 # 导入共享的GAMMA对话框
@@ -23,13 +24,71 @@ def get_settings():
     config_dir.mkdir(parents=True, exist_ok=True)
     config_file = config_dir / "pixel_time_series_viewer.ini"
     return QSettings(str(config_file), QSettings.IniFormat)
+
+def extract_dates_from_filenames(file_paths):
+    """从文件名列表中提取日期
+    
+    尝试从文件名中提取日期，支持多种常见格式：
+    - YYYYMMDD (如 20210315)
+    - YYYY-MM-DD (如 2021-03-15)
+    - YYYY_MM_DD (如 2021_03_15)
+    - YYYYDDD (年+儒略日，如 2021074)
+    
+    Args:
+        file_paths: 文件路径列表
+        
+    Returns:
+        list: 提取的日期字符串列表，如果提取失败则返回None
+    """
+    date_patterns = [
+        # YYYY-MM-DD 或 YYYY_MM_DD 或 YYYY.MM.DD
+        r'(\d{4})[-_\.](\d{2})[-_\.](\d{2})',
+        # YYYYMMDD
+        r'(\d{8})',
+        # YYYYDDD (年+儒略日)
+        r'(\d{4})(\d{3})'
+    ]
+    
+    dates = []
+    for file_path in file_paths:
+        filename = os.path.basename(file_path)
+        found_date = None
+        
+        for pattern in date_patterns:
+            match = re.search(pattern, filename)
+            if match:
+                if len(match.groups()) == 3:
+                    # YYYY-MM-DD 格式
+                    year, month, day = match.groups()
+                    found_date = f"{year}-{month}-{day}"
+                elif len(match.groups()) == 1:
+                    date_str = match.group(1)
+                    if len(date_str) == 8:
+                        # YYYYMMDD 格式
+                        found_date = f"{date_str[0:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                    elif len(date_str) == 7:
+                        # YYYYDDD 格式（年+儒略日），保持原样
+                        found_date = date_str
+                elif len(match.groups()) == 2:
+                    # YYYYDDD 格式
+                    year, doy = match.groups()
+                    found_date = f"{year}-{doy}"
+                break
+        
+        if found_date:
+            dates.append(found_date)
+        else:
+            # 如果任何一个文件没有找到日期，返回None
+            return None
+    
+    return dates if dates else None
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import traceback
 
-from src.widgets import ImageViewer, ColormapComboBox
+from src.widgets import ImageViewer, ColormapComboBox, RenderSettingsWidget, ColorbarWidget
 from src.utils.gamma_file_process import (
     GAMMA_FORMATS,
     read_gamma_downsampled,
@@ -49,9 +108,9 @@ from src.utils.image_io import (
     read_any_image_downsampled,
     read_any_image_pixel,
     get_image_info,
+    get_geotransform,
+    pixel_to_lonlat,
     find_best_overview,
-    check_tiff_needs_overview,
-    build_tiff_overviews,
     read_h5_timeseries_metadata,
     read_h5_timeseries_frame,
     read_h5_timeseries_pixel,
@@ -63,8 +122,11 @@ from src.utils.image_io import (
 class PixelTimeSeriesViewerDialog(QDialog):
     """像素时序查看器对话框"""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, max_display_size=2048):
         super().__init__(parent)
+        
+        # 降采样配置
+        self.max_display_size = max_display_size  # 显示时的最大尺寸
         
         self.setWindowTitle("像素时序查看器")
         self.resize(1600, 900)
@@ -103,6 +165,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._plot_annotation = None  # matplotlib annotation对象
         self._plot_ax = None  # 当前axes对象
         
+        # 地理信息
+        self.geotransform = None  # GDAL地理变换参数
+        self.projection = None  # 投影信息
+        
         # dB转换标志
         self._converted_to_db = False  # 是否已转换为dB
         
@@ -115,51 +181,116 @@ class PixelTimeSeriesViewerDialog(QDialog):
         main_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.setSpacing(5)
         
-        # 顶部控制区
-        control_layout = QHBoxLayout()
-        control_layout.setSpacing(10)
+        # 第一行：文件操作和基本控制
+        control_layout1 = QHBoxLayout()
+        control_layout1.setSpacing(10)
         
         self.open_folder_btn = QPushButton("打开图像文件夹")
         self.open_folder_btn.clicked.connect(self.open_folder)
-        control_layout.addWidget(self.open_folder_btn)
+        control_layout1.addWidget(self.open_folder_btn)
         
         self.open_gamma_folder_btn = QPushButton("打开GAMMA时序数据")
         self.open_gamma_folder_btn.clicked.connect(self.open_gamma_folder)
-        control_layout.addWidget(self.open_gamma_folder_btn)
+        control_layout1.addWidget(self.open_gamma_folder_btn)
         
         self.open_h5_btn = QPushButton("打开h5时序数据")
         self.open_h5_btn.clicked.connect(self.open_h5_timeseries)
-        control_layout.addWidget(self.open_h5_btn)
+        control_layout1.addWidget(self.open_h5_btn)
         
-        control_layout.addWidget(QLabel("排序方式:"))
+        control_layout1.addWidget(QLabel("排序:"))
         self.sort_order_combo = QComboBox()
         self.sort_order_combo.addItems(["正序", "倒序"])
         self.sort_order_combo.currentIndexChanged.connect(self.sort_images)
-        control_layout.addWidget(self.sort_order_combo)
+        control_layout1.addWidget(self.sort_order_combo)
         
         self.image_count_label = QLabel("未加载图像")
-        control_layout.addWidget(self.image_count_label)
+        control_layout1.addWidget(self.image_count_label)
         
-        control_layout.addStretch()
-        
-        # Colormap选择（两个窗口共用）
-        control_layout.addWidget(QLabel("Colormap:"))
-        self.colormap_combo = ColormapComboBox()
-        self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
-        control_layout.addWidget(self.colormap_combo)
+        control_layout1.addStretch()
         
         # Nodata值设置
         self.set_nodata_btn = QPushButton("设置Nodata值")
         self.set_nodata_btn.clicked.connect(self.set_nodata_value)
-        control_layout.addWidget(self.set_nodata_btn)
+        control_layout1.addWidget(self.set_nodata_btn)
         
         # 转为dB按钮
         self.to_db_btn = QPushButton("转为dB")
         self.to_db_btn.clicked.connect(self.convert_to_db)
         self.to_db_btn.setEnabled(False)
-        control_layout.addWidget(self.to_db_btn)
+        control_layout1.addWidget(self.to_db_btn)
         
-        main_layout.addLayout(control_layout)
+        main_layout.addLayout(control_layout1)
+        
+        # 第二行：渲染设置（波段选择、Colormap、拉伸、Gamma等）
+        # 顺序：波段选择 | Colormap+反向 | 拉伸 | 最大最小值 | Gamma
+        control_layout2 = QHBoxLayout()
+        control_layout2.setSpacing(5)
+        
+        # 渲染设置组件（包含波段选择、反向、拉伸、最大最小值、Gamma）
+        self.render_settings = RenderSettingsWidget(compact=True)
+        self.render_settings.settings_changed.connect(self.on_render_settings_changed)
+        self.render_settings.suggest_colormap.connect(self.on_suggest_colormap)
+        
+        # 从主窗口设置中读取平滑显示设置
+        from PySide6.QtCore import QSettings
+        settings = QSettings("Toolbox", "RemoteSensingToolbox")
+        smooth_display = settings.value("display/smooth_display", False, type=bool)
+        self.render_settings.set_smooth_display(smooth_display)
+        
+        # 把波段选择部分放最前面
+        control_layout2.addWidget(self.render_settings.band_widget)
+        
+        # 分隔线
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        control_layout2.addWidget(sep)
+        
+        # Colormap选择
+        control_layout2.addWidget(QLabel("Colormap:"))
+        self.colormap_combo = ColormapComboBox()
+        self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
+        control_layout2.addWidget(self.colormap_combo)
+        
+        # "反向"选项（从render_settings中获取）
+        control_layout2.addWidget(self.render_settings.reverse_check)
+        
+        # 分隔线
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.VLine)
+        sep2.setFrameShadow(QFrame.Sunken)
+        control_layout2.addWidget(sep2)
+        
+        # 拉伸控件（从render_settings获取）
+        control_layout2.addWidget(QLabel("拉伸:"))
+        control_layout2.addWidget(self.render_settings.stretch_combo)
+        control_layout2.addWidget(self.render_settings.stretch_param_widget)
+        
+        # 分隔线
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.VLine)
+        sep3.setFrameShadow(QFrame.Sunken)
+        control_layout2.addWidget(sep3)
+        
+        # 最大最小值控件（从render_settings获取）
+        control_layout2.addWidget(self.render_settings.auto_range_check)
+        control_layout2.addWidget(self.render_settings.min_spin)
+        control_layout2.addWidget(self.render_settings.range_dash_label)
+        control_layout2.addWidget(self.render_settings.max_spin)
+        
+        # 分隔线
+        sep4 = QFrame()
+        sep4.setFrameShape(QFrame.VLine)
+        sep4.setFrameShadow(QFrame.Sunken)
+        control_layout2.addWidget(sep4)
+        
+        # Gamma控件（从render_settings获取）
+        control_layout2.addWidget(QLabel("γ:"))
+        control_layout2.addWidget(self.render_settings.gamma_spin)
+        
+        control_layout2.addStretch()
+        
+        main_layout.addLayout(control_layout2)
         
         # 创建主分割器：上方图像查看区，下方时序曲线
         main_splitter = QSplitter(Qt.Vertical)
@@ -218,7 +349,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
             viewer_id: 查看器ID（1或2）
         """
         panel = QGroupBox(title)
-        layout = QVBoxLayout(panel)
+        main_layout = QVBoxLayout(panel)
+        
+        # 创建水平布局：图像查看器 + Colorbar
+        image_layout = QHBoxLayout()
         
         # 图像查看器
         viewer = ImageViewer()
@@ -226,6 +360,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         # 连接像素点击信号
         viewer.pixel_clicked.connect(self.on_pixel_clicked)
+        
+        # 连接鼠标移动信号，用于更新colorbar
+        viewer.mouse_moved.connect(lambda x, y, val: self.on_viewer_mouse_moved(viewer_id, x, y, val))
         
         # 连接视图变换信号（用于同步缩放）
         viewer.view_transformed.connect(lambda t: self.sync_other_viewer(viewer_id, t))
@@ -236,7 +373,14 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 连接滚动条位置变化信号（用于同步拖动）
         viewer.scroll_changed.connect(lambda h, v: self.sync_other_scroll(viewer_id, h, v))
         
-        layout.addWidget(viewer)
+        image_layout.addWidget(viewer)
+        
+        # Colorbar组件
+        colorbar = ColorbarWidget()
+        setattr(self, f'colorbar_{viewer_id}', colorbar)
+        image_layout.addWidget(colorbar)
+        
+        main_layout.addLayout(image_layout)
         
         # 控制区域
         control_layout = QVBoxLayout()
@@ -280,9 +424,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
         setattr(self, f'pixel_value_label_{viewer_id}', pixel_value_label)
         control_layout.addWidget(pixel_value_label)
         
-        layout.addLayout(control_layout)
+        main_layout.addLayout(control_layout)
         
-        # 连接鼠标移动事件，指標显示像素值
+        # 连接鼠标移动事件，显示像素值
         viewer.mouse_moved.connect(lambda x, y, val: self.on_viewer_mouse_moved(viewer_id, x, y, val))
         
         return panel
@@ -326,10 +470,57 @@ class PixelTimeSeriesViewerDialog(QDialog):
     
     def on_colormap_changed(self, colormap_name):
         """Colormap变化时同时更新两个窗口"""
+        # 跳过分隔符项（分隔符以"━"开头）
+        if colormap_name.startswith('━'):
+            return
+        
         if hasattr(self, 'image_viewer_1'):
             self.image_viewer_1.set_colormap(colormap_name)
         if hasattr(self, 'image_viewer_2'):
             self.image_viewer_2.set_colormap(colormap_name)
+        
+        # 更新colorbar
+        reversed = self.render_settings.reverse_check.isChecked() if hasattr(self, 'render_settings') else False
+        if hasattr(self, 'colorbar_1'):
+            self.colorbar_1.set_colormap(colormap_name, reversed)
+        if hasattr(self, 'colorbar_2'):
+            self.colorbar_2.set_colormap(colormap_name, reversed)
+    
+    def on_render_settings_changed(self):
+        """渲染设置变化时更新两个窗口"""
+        settings = self.render_settings.get_all_settings()
+        if hasattr(self, 'image_viewer_1'):
+            self.image_viewer_1.set_render_settings(settings)
+        if hasattr(self, 'image_viewer_2'):
+            self.image_viewer_2.set_render_settings(settings)
+        
+        # 更新colorbar的数值范围
+        if hasattr(self, 'colorbar_1'):
+            self.colorbar_1.set_range(settings['value_min'], settings['value_max'])
+            self.colorbar_1.set_colormap(self.colormap_combo.currentText(), settings['colormap_reversed'])
+        if hasattr(self, 'colorbar_2'):
+            self.colorbar_2.set_range(settings['value_min'], settings['value_max'])
+            self.colorbar_2.set_colormap(self.colormap_combo.currentText(), settings['colormap_reversed'])
+    
+    def on_suggest_colormap(self, colormap_name):
+        """接收建议的colormap并切换"""
+        self.colormap_combo.setCurrentText(colormap_name)
+    
+    def _update_image_stats_to_render_settings(self):
+        """从当前图像计算统计信息并更新到渲染设置"""
+        # 使用第一个窗口的缓存图像
+        if self._cached_image_1 is not None:
+            arr = self._cached_image_1
+            # 创建有效掩码
+            valid_mask = np.isfinite(arr)
+            if self.nodata_value is not None:
+                valid_mask = valid_mask & (arr != self.nodata_value)
+            
+            if np.any(valid_mask):
+                valid_data = arr[valid_mask]
+                min_val = float(np.min(valid_data))
+                max_val = float(np.max(valid_data))
+                self.render_settings.set_image_stats(min_val, max_val)
     
     def switch_image(self, viewer_id, direction):
         """切换图像
@@ -357,12 +548,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
             setattr(self, f'current_image_index_{viewer_id}', value)
             self.show_image(viewer_id)
     
-    def _get_image_data(self, index, max_display_size=2048):
+    def _get_image_data(self, index):
         """按需获取指定索引的图像数据（支持降采样）
         
         Args:
             index: 图像索引
-            max_display_size: 显示用的最大边长，超过此尺寸会降采样
             
         Returns:
             tuple: (图像数据数组, 原始尺寸(width, height))，失败返回(None, None)
@@ -376,14 +566,14 @@ class PixelTimeSeriesViewerDialog(QDialog):
             image_data, original_size = read_h5_timeseries_frame(
                 self.h5_file_path, 
                 actual_index, 
-                max_size=max_display_size
+                max_size=self.max_display_size
             )
         elif self.data_source_type == 'gamma':
             # 从GAMMA二进制文件读取
             if index < len(self.image_files):
                 image_data, _, original_size = self._read_gamma_image_downsampled(
                     self.image_files[index],
-                    max_size=max_display_size
+                    max_size=self.max_display_size
                 )
             else:
                 return None, None
@@ -392,7 +582,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             if index < len(self.image_files):
                 image_data, _, original_size = self._read_image_downsampled(
                     self.image_files[index], 
-                    max_size=max_display_size
+                    max_size=self.max_display_size
                 )
             else:
                 return None, None
@@ -473,6 +663,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 更新图像查看器（传递原始尺寸用于坐标映射）
         viewer.set_image_from_array(current_data, original_size=original_size)
         
+        # 设置地理信息到图像查看器（用于hillshade计算）
+        viewer.set_geotransform(self.geotransform, self.projection)
+        
         # 确保图像居中显示（使用延迟模式）
         viewer.fit_in_view(delayed=True)
         
@@ -534,7 +727,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         try:
             # 查找支持的图像文件
-            supported_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff']
+            supported_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.grd']
             files = []
             
             for filename in os.listdir(folder):
@@ -687,12 +880,6 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._cached_index_2 = -1
             self._cached_original_size_2 = None
             
-            # 检查第一张图像是否是大型TIFF，提示创建金字塔
-            first_file = file_list[0]
-            ext = os.path.splitext(first_file)[1].lower()
-            if ext in ['.tif', '.tiff']:
-                self._check_and_build_overviews_local(first_file)
-            
             # 使用降采样读取第一张图像以检查尺寸和波段数
             first_image_data, first_nodata, first_original_size = self._read_image_downsampled(file_list[0])
             if first_image_data is None:
@@ -715,6 +902,13 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.data_source_type = 'folder'
             self.h5_file_path = None
             self.h5_start_index = 0
+            
+            # 获取地理信息（从第一个文件）
+            if file_list:
+                self.geotransform, self.projection = get_geotransform(file_list[0])
+            else:
+                self.geotransform = None
+                self.projection = None
             
             # 验证所有图像的一致性（只检查文件是否可读，不加载全部数据）
             inconsistent_files = []
@@ -781,6 +975,13 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.image_files = valid_files
             self.image_count = len(valid_files)
             
+            # 尝试从文件名中提取日期
+            extracted_dates = extract_dates_from_filenames(valid_files)
+            if extracted_dates:
+                self.date_list = extracted_dates
+            else:
+                self.date_list = []  # 没有提取到日期，使用空列表
+            
             # 更新UI
             self.image_count_label.setText(f"已加载 {self.image_count} 张图像")
             
@@ -799,11 +1000,24 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.image_viewer_1.set_nodata_value(self.nodata_value)
             self.image_viewer_2.set_nodata_value(self.nodata_value)
             
+            # 更新渲染设置组件的波段数
+            if len(self.image_shape) == 3:
+                num_bands = self.image_shape[2]
+            else:
+                num_bands = 1
+            self.render_settings.set_num_bands(num_bands)
+            
             # 显示第一张和第二张图像
             self.current_image_index_1 = 0
             self.current_image_index_2 = min(1, self.image_count - 1)  # 如果只有一张图像，两个窗口都显示第一张
             self.show_image(1)
             self.show_image(2)
+            
+            # 设置默认colormap为gray（非h5文件）
+            self.colormap_combo.setCurrentText('gray')
+            
+            # 更新渲染设置的最大最小值（从第一张图像计算）
+            self._update_image_stats_to_render_settings()
             
             # 启用转dB按钮
             self.to_db_btn.setEnabled(True)
@@ -950,6 +1164,13 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.image_files = valid_files
             self.image_count = len(valid_files)
             
+            # 尝试从文件名中提取日期
+            extracted_dates = extract_dates_from_filenames(valid_files)
+            if extracted_dates:
+                self.date_list = extracted_dates
+            else:
+                self.date_list = []  # 没有提取到日期，使用空列表
+            
             # 设置默认Nodata值
             self.nodata_value = 0
             self.image_viewer_1.set_nodata_value(0)
@@ -981,6 +1202,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.current_image_index_2 = min(1, self.image_count - 1)
             self.show_image(1)
             self.show_image(2)
+            
+            # 更新渲染设置的最大最小值
+            self._update_image_stats_to_render_settings()
             
             # 启用转dB按钮
             self.to_db_btn.setEnabled(True)
@@ -1095,8 +1319,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         try:
             ext = os.path.splitext(file_path)[1].lower()
             
-            if ext in ['.tif', '.tiff']:
-                # 使用image_io读取TIFF
+            if ext in ['.tif', '.tiff', '.grd']:
+                # 使用image_io读取TIFF/GRD
                 data, nodata, original_size, factor = read_tiff_downsampled(file_path, max_size)
                 return data, nodata, original_size
             else:
@@ -1119,74 +1343,6 @@ class PixelTimeSeriesViewerDialog(QDialog):
         except Exception as e:
             print(f"降采样读取图像失败 {file_path}: {e}")
             return None, None, None
-
-    def _check_and_build_overviews_local(self, file_path):
-        """
-        检查TIFF文件是否有金字塔，如果没有则询问用户是否创建
-        
-        Args:
-            file_path: TIFF文件路径
-            
-        Returns:
-            bool: 是否有金字塔可用
-        """
-        try:
-            ext = os.path.splitext(file_path)[1].lower()
-            if ext not in ['.tif', '.tiff']:
-                return False
-            
-            # 使用image_io模块检查是否需要金字塔
-            needs_overview, width, height = check_tiff_needs_overview(file_path, threshold=4096)
-            
-            if not needs_overview:
-                return True
-            
-            # 询问用户是否创建金字塔
-            reply = QMessageBox.question(
-                self, 
-                "创建金字塔",
-                f"检测到大图像 ({width}x{height})，但没有金字塔（Overview）。\n"
-                f"金字塔可以显著提升大图像的加载和显示速度。\n\n"
-                f"是否现在创建金字塔？（这可能需要一些时间）",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes
-            )
-            
-            if reply == QMessageBox.Yes:
-                return self._build_overviews_local(file_path)
-            
-            return False
-            
-        except Exception as e:
-            print(f"检查金字塔失败 {file_path}: {e}")
-            return False
-    
-    def _build_overviews_local(self, file_path):
-        """
-        使用image_io模块为TIFF文件创建金字塔
-        
-        Args:
-            file_path: TIFF文件路径
-            
-        Returns:
-            bool: 是否成功创建
-        """
-        # 显示进度提示
-        QMessageBox.information(
-            self, 
-            "正在创建金字塔",
-            "正在为图像创建金字塔...\n请稍候，这可能需要几分钟。"
-        )
-        
-        # 使用image_io模块创建金字塔
-        success, levels = build_tiff_overviews(file_path, "NEAREST")
-        
-        if success:
-            QMessageBox.information(self, "完成", f"金字塔创建成功！级别: {levels}")
-            return True
-        else:
-            QMessageBox.warning(self, "警告", "创建金字塔失败，可能是只读文件。")
-            return False
     
     def sort_images(self):
         """排序图像"""
@@ -1670,17 +1826,39 @@ class PixelTimeSeriesViewerDialog(QDialog):
         if value is not None:
             if isinstance(value, (int, float, np.integer, np.floating)):
                 if np.isnan(value) if isinstance(value, float) else False:
-                    pixel_value_label.setText(f"像素值: ({x}, {y}) = NaN")
+                    base_text = f"像素值: ({x}, {y}) = NaN"
                 else:
-                    pixel_value_label.setText(f"像素值: ({x}, {y}) = {value:.6g}")
+                    base_text = f"像素值: ({x}, {y}) = {value:.6g}"
             elif isinstance(value, np.ndarray):
                 if value.ndim == 0:
-                    pixel_value_label.setText(f"像素值: ({x}, {y}) = {value:.6g}")
+                    base_text = f"像素值: ({x}, {y}) = {value:.6g}"
                 else:
                     value_str = ", ".join([f"{v:.6g}" for v in value])
-                    pixel_value_label.setText(f"像素值: ({x}, {y}) = [{value_str}]")
+                    base_text = f"像素值: ({x}, {y}) = [{value_str}]"
+            
+            # 如果有地理信息，添加经纬度
+            if self.geotransform is not None:
+                lon, lat = pixel_to_lonlat(x, y, self.geotransform, self.projection)
+                if lon is not None and lat is not None:
+                    base_text += f" | 经纬度: ({lon:.6f}, {lat:.6f})"
+            
+            pixel_value_label.setText(base_text)
         else:
             pixel_value_label.setText("像素值: -")
+        
+        # 更新colorbar当前值指示
+        colorbar = getattr(self, f'colorbar_{viewer_id}', None)
+        if colorbar and value is not None:
+            # 如果是单通道图像，显示像素值
+            if isinstance(value, (int, float, np.integer, np.floating)):
+                if not (np.isnan(value) if isinstance(value, float) else False):
+                    colorbar.set_current_value(float(value))
+                else:
+                    colorbar.set_current_value(None)
+            else:
+                colorbar.set_current_value(None)
+        elif colorbar:
+            colorbar.set_current_value(None)
         
         # 同时更新另一个窗口的像素值，基于它当前缓存的图像
         other_viewer_id = 2 if viewer_id == 1 else 1

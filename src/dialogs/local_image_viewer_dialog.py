@@ -7,11 +7,12 @@ Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 
 import os
 import numpy as np
+import h5py
 from pathlib import Path
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QFileDialog, QLabel, QMessageBox, QSplitter, 
                                QGroupBox, QButtonGroup, QRadioButton, QListWidget,
-                               QDialogButtonBox, QInputDialog, QComboBox)
+                               QDialogButtonBox, QInputDialog, QComboBox, QFrame)
 from PySide6.QtCore import Qt, QSettings
 
 # 配置文件路径
@@ -25,7 +26,7 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as Navigation
 from matplotlib.figure import Figure
 import traceback
 
-from src.widgets import InteractiveImageViewer, ColormapComboBox
+from src.widgets import InteractiveImageViewer, ColormapComboBox, RenderSettingsWidget, ColorbarWidget
 from src.utils.gamma_file_process import (
     GAMMA_FORMATS,
     read_gamma_downsampled,
@@ -44,6 +45,9 @@ from src.utils.image_io import (
     read_image_region,
     list_h5_datasets,
     read_h5_dataset,
+    read_h5_dataset_downsampled,
+    get_geotransform,
+    pixel_to_lonlat,
 )
 from src.dialogs.gamma_dialogs import GammaSingleFileDialog
 
@@ -51,11 +55,11 @@ from src.dialogs.gamma_dialogs import GammaSingleFileDialog
 class LocalImageViewerDialog(QDialog):
     """图像局部查看器对话框"""
     
-    # 降采样配置
-    MAX_DISPLAY_SIZE = 2048  # 显示时的最大尺寸
-    
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, max_display_size=2048):
         super().__init__(parent)
+        
+        # 降采样配置
+        self.MAX_DISPLAY_SIZE = max_display_size  # 显示时的最大尺寸
         
         self.setWindowTitle("图像局部查看器")
         self.resize(1400, 800)
@@ -71,6 +75,7 @@ class LocalImageViewerDialog(QDialog):
         self.original_height = None  # 原始图像高度
         self.downsample_factor = 1   # 降采样因子
         self.is_tiff = False         # 是否为TIFF格式
+        self.is_h5 = False           # 是否为H5/NC格式
         
         # GAMMA二进制文件相关
         self.is_gamma = False           # 是否为GAMMA二进制文件
@@ -80,69 +85,151 @@ class LocalImageViewerDialog(QDialog):
         # dB转换标志
         self._converted_to_db = False   # 是否已转换为dB
         
+        # 地理信息
+        self.geotransform = None  # GDAL地理变换参数
+        self.projection = None    # 投影信息
+        
         # 创建UI
         self._create_ui()
+    
+    def _update_render_settings_bands(self):
+        """根据当前图像更新渲染设置的波段数和统计信息"""
+        if self.image_data is not None:
+            if self.image_data.ndim == 3:
+                num_bands = self.image_data.shape[2]
+            else:
+                num_bands = 1
+            self.render_settings.set_num_bands(num_bands)
+            
+            # 同时更新图像统计信息（最大最小值）
+            self._update_image_stats_to_render_settings()
         
     def _create_ui(self):
         """创建用户界面"""
         main_layout = QVBoxLayout(self)
         
-        # 顶部控制区
-        control_layout = QHBoxLayout()
+        # 第一行：文件操作和绘制模式
+        control_layout1 = QHBoxLayout()
         
         self.open_btn = QPushButton("打开图像")
         self.open_btn.clicked.connect(self.open_image)
-        control_layout.addWidget(self.open_btn)
+        control_layout1.addWidget(self.open_btn)
         
         self.open_gamma_btn = QPushButton("打开GAMMA文件")
         self.open_gamma_btn.clicked.connect(self.open_gamma_file)
-        control_layout.addWidget(self.open_gamma_btn)
+        control_layout1.addWidget(self.open_gamma_btn)
         
         self.open_h5_btn = QPushButton("打开h5文件")
         self.open_h5_btn.clicked.connect(self.open_h5_file)
-        control_layout.addWidget(self.open_h5_btn)
-        
-        control_layout.addWidget(QLabel("颜色映射:"))
-        self.colormap_combo = ColormapComboBox()
-        self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
-        control_layout.addWidget(self.colormap_combo)
+        control_layout1.addWidget(self.open_h5_btn)
         
         self.set_nodata_btn = QPushButton("设置Nodata值")
         self.set_nodata_btn.clicked.connect(self.set_nodata_value)
-        control_layout.addWidget(self.set_nodata_btn)
+        control_layout1.addWidget(self.set_nodata_btn)
         
         self.to_db_btn = QPushButton("转为dB")
         self.to_db_btn.clicked.connect(self.convert_to_db)
         self.to_db_btn.setEnabled(False)
-        control_layout.addWidget(self.to_db_btn)
+        control_layout1.addWidget(self.to_db_btn)
         
         # 绘制模式选择
-        control_layout.addWidget(QLabel("绘制模式:"))
+        control_layout1.addWidget(QLabel("绘制模式:"))
         self.mode_group = QButtonGroup(self)
         
         self.mode_none_radio = QRadioButton("浏览")
         self.mode_none_radio.setChecked(True)
         self.mode_none_radio.clicked.connect(self.on_mode_changed)
         self.mode_group.addButton(self.mode_none_radio, 0)
-        control_layout.addWidget(self.mode_none_radio)
+        control_layout1.addWidget(self.mode_none_radio)
         
         self.mode_rect_radio = QRadioButton("矩形")
         self.mode_rect_radio.clicked.connect(self.on_mode_changed)
         self.mode_group.addButton(self.mode_rect_radio, 1)
-        control_layout.addWidget(self.mode_rect_radio)
+        control_layout1.addWidget(self.mode_rect_radio)
         
         self.mode_polyline_radio = QRadioButton("折线")
         self.mode_polyline_radio.clicked.connect(self.on_mode_changed)
         self.mode_group.addButton(self.mode_polyline_radio, 2)
-        control_layout.addWidget(self.mode_polyline_radio)
+        control_layout1.addWidget(self.mode_polyline_radio)
         
         self.clear_btn = QPushButton("清除绘制")
         self.clear_btn.clicked.connect(self.clear_drawing)
-        control_layout.addWidget(self.clear_btn)
+        control_layout1.addWidget(self.clear_btn)
         
-        control_layout.addStretch()
+        control_layout1.addStretch()
         
-        main_layout.addLayout(control_layout)
+        main_layout.addLayout(control_layout1)
+        
+        # 第二行：渲染设置（波段选择、Colormap、拉伸、Gamma等）
+        # 顺序：波段选择 | Colormap+反向 | 拉伸 | 最大最小值 | Gamma
+        control_layout2 = QHBoxLayout()
+        control_layout2.setSpacing(5)
+        
+        # 渲染设置组件（包含波段选择、反向、拉伸、最大最小值、Gamma）
+        self.render_settings = RenderSettingsWidget(compact=True)
+        self.render_settings.settings_changed.connect(self.on_render_settings_changed)
+        self.render_settings.suggest_colormap.connect(self.on_suggest_colormap)
+        
+        # 从主窗口设置中读取平滑显示设置
+        from PySide6.QtCore import QSettings
+        settings = QSettings("Toolbox", "RemoteSensingToolbox")
+        smooth_display = settings.value("display/smooth_display", False, type=bool)
+        self.render_settings.set_smooth_display(smooth_display)
+        
+        # 把波段选择部分放最前面
+        control_layout2.addWidget(self.render_settings.band_widget)
+        
+        # 分隔线
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        control_layout2.addWidget(sep)
+        
+        # Colormap选择
+        control_layout2.addWidget(QLabel("Colormap:"))
+        self.colormap_combo = ColormapComboBox()
+        self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
+        control_layout2.addWidget(self.colormap_combo)
+        
+        # "反向"选项（从render_settings中获取）
+        control_layout2.addWidget(self.render_settings.reverse_check)
+        
+        # 分隔线
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.VLine)
+        sep2.setFrameShadow(QFrame.Sunken)
+        control_layout2.addWidget(sep2)
+        
+        # 拉伸控件（从render_settings获取）
+        control_layout2.addWidget(QLabel("拉伸:"))
+        control_layout2.addWidget(self.render_settings.stretch_combo)
+        control_layout2.addWidget(self.render_settings.stretch_param_widget)
+        
+        # 分隔线
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.VLine)
+        sep3.setFrameShadow(QFrame.Sunken)
+        control_layout2.addWidget(sep3)
+        
+        # 最大最小值控件（从render_settings获取）
+        control_layout2.addWidget(self.render_settings.auto_range_check)
+        control_layout2.addWidget(self.render_settings.min_spin)
+        control_layout2.addWidget(self.render_settings.range_dash_label)
+        control_layout2.addWidget(self.render_settings.max_spin)
+        
+        # 分隔线
+        sep4 = QFrame()
+        sep4.setFrameShape(QFrame.VLine)
+        sep4.setFrameShadow(QFrame.Sunken)
+        control_layout2.addWidget(sep4)
+        
+        # Gamma控件（从render_settings获取）
+        control_layout2.addWidget(QLabel("γ:"))
+        control_layout2.addWidget(self.render_settings.gamma_spin)
+        
+        control_layout2.addStretch()
+        
+        main_layout.addLayout(control_layout2)
         
         # 第二排：文件信息
         info_layout = QHBoxLayout()
@@ -156,7 +243,10 @@ class LocalImageViewerDialog(QDialog):
         
         # ========== 左侧：图像查看区 ==========
         left_widget = QGroupBox("图像查看")
-        left_layout = QVBoxLayout(left_widget)
+        left_main_layout = QVBoxLayout(left_widget)
+        
+        # 创建水平布局：图像查看器 + Colorbar
+        image_layout = QHBoxLayout()
         
         # 图像查看器
         self.image_viewer = InteractiveImageViewer()
@@ -164,11 +254,17 @@ class LocalImageViewerDialog(QDialog):
         self.image_viewer.rect_drawn.connect(self.on_rect_drawn)
         self.image_viewer.polyline_drawn.connect(self.on_polyline_drawn)
         self.image_viewer.polyline_hover.connect(self.on_polyline_hover)
-        left_layout.addWidget(self.image_viewer)
+        image_layout.addWidget(self.image_viewer)
+        
+        # Colorbar组件
+        self.colorbar = ColorbarWidget()
+        image_layout.addWidget(self.colorbar)
+        
+        left_main_layout.addLayout(image_layout)
         
         # 像素信息显示
         self.pixel_info_label = QLabel("像素信息: -")
-        left_layout.addWidget(self.pixel_info_label)
+        left_main_layout.addWidget(self.pixel_info_label)
         
         splitter.addWidget(left_widget)
         
@@ -207,7 +303,7 @@ class LocalImageViewerDialog(QDialog):
             self,
             "打开图像文件",
             last_path,
-            "图像文件 (*.tif *.tiff *.png *.jpg *.jpeg *.bmp);;所有文件 (*.*)",
+            "图像文件 (*.tif *.tiff *.grd *.png *.jpg *.jpeg *.bmp *.h5 *.hdf5 *.nc);;所有文件 (*.*)",
             options=QFileDialog.Option.DontUseNativeDialog
         )
         
@@ -220,9 +316,105 @@ class LocalImageViewerDialog(QDialog):
         try:
             self.image_file = file_path
             ext = os.path.splitext(file_path)[1].lower()
-            self.is_tiff = ext in ['.tif', '.tiff']
+            self.is_tiff = ext in ['.tif', '.tiff', '.grd']
+            self.is_h5 = ext in ['.h5', '.hdf5', '.nc']
             
-            if self.is_tiff:
+            if self.is_h5:
+                # H5/NC文件需要选择数据集
+                datasets = list_h5_datasets(file_path, min_ndim=2)
+                if not datasets:
+                    raise ValueError("HDF5/NC文件中没有找到2维及以上的数据集")
+                
+                # 弹出对话框让用户选择数据集
+                from PySide6.QtWidgets import QDialog, QVBoxLayout, QListWidget, QDialogButtonBox
+                dialog = QDialog(self)
+                dialog.setWindowTitle("选择数据集")
+                dialog.resize(500, 300)
+                layout = QVBoxLayout()
+                
+                info_label = QLabel("请选择要打开的数据集：")
+                layout.addWidget(info_label)
+                
+                list_widget = QListWidget()
+                for name, shape_str, shape in datasets:
+                    ndim = len(shape)
+                    if ndim == 2:
+                        desc = "2D图像"
+                    elif ndim == 3:
+                        desc = f"3D数据 ({shape[0]}景)"
+                    else:
+                        desc = f"{ndim}D数据"
+                    list_widget.addItem(f"{name} {shape_str} - {desc}")
+                
+                # 支持双击直接打开
+                list_widget.itemDoubleClicked.connect(dialog.accept)
+                layout.addWidget(list_widget)
+                
+                buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+                buttons.accepted.connect(dialog.accept)
+                buttons.rejected.connect(dialog.reject)
+                layout.addWidget(buttons)
+                
+                dialog.setLayout(layout)
+                
+                if dialog.exec() != QDialog.Accepted or list_widget.currentRow() < 0:
+                    return
+                
+                # 获取选中的数据集
+                selected_idx = list_widget.currentRow()
+                selected_dataset = datasets[selected_idx][0]  # 名称
+                selected_shape = datasets[selected_idx][2]    # 形状元组
+                selected_ndim = len(selected_shape)
+                
+                # 根据维度处理
+                if selected_ndim == 2:
+                    # 2D数据，直接打开
+                    self.h5_dataset_name = selected_dataset
+                    self.h5_frame_index = None
+                    
+                    self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
+                        read_h5_dataset_downsampled(file_path, selected_dataset, self.MAX_DISPLAY_SIZE)
+                    
+                    if self.image_data is None:
+                        raise ValueError(f"无法读取数据集: {selected_dataset}")
+                        
+                elif selected_ndim == 3:
+                    # 3D数据，让用户选择第几景
+                    num_frames = selected_shape[0]
+                    
+                    # 判断是否是多波段图像（第一维很小，如RGB的3）
+                    if num_frames <= 4 and num_frames < selected_shape[1] and num_frames < selected_shape[2]:
+                        # 可能是多波段图像，直接打开
+                        self.h5_dataset_name = selected_dataset
+                        self.h5_frame_index = None
+                        
+                        self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
+                            read_h5_dataset_downsampled(file_path, selected_dataset, self.MAX_DISPLAY_SIZE)
+                        
+                        if self.image_data is None:
+                            raise ValueError(f"无法读取数据集: {selected_dataset}")
+                    else:
+                        # 时序数据，让用户选择景
+                        frame_idx, ok = QInputDialog.getInt(
+                            self, "选择数据景", 
+                            f"该数据集包含 {num_frames} 景数据\n请选择要打开的景（0-{num_frames-1}）：",
+                            0, 0, num_frames-1, 1)
+                        
+                        if not ok:
+                            return
+                        
+                        self.h5_dataset_name = selected_dataset
+                        self.h5_frame_index = frame_idx
+                        
+                        self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
+                            read_h5_dataset_downsampled(file_path, selected_dataset, self.MAX_DISPLAY_SIZE, frame_idx)
+                        
+                        if self.image_data is None:
+                            raise ValueError(f"无法读取数据集: {selected_dataset} 的第 {frame_idx} 景")
+                else:
+                    # 其他维度不支持
+                    raise ValueError(f"不支持的数据维度: {selected_ndim}D\n只支持2D图像或3D时序数据")
+            elif self.is_tiff:
                 # 使用image_io模块读取TIFF（支持降采样和金字塔）
                 self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
                     self._read_tiff_downsampled_local(file_path)
@@ -234,6 +426,17 @@ class LocalImageViewerDialog(QDialog):
             # 显示图像
             original_size = (self.original_width, self.original_height) if self.downsample_factor > 1 else None
             self.image_viewer.set_image_from_array(self.image_data, original_size=original_size)
+            
+            # H5文件默认使用jet colormap
+            if self.is_h5:
+                self.colormap_combo.setCurrentText('jet')
+                self.image_viewer.set_colormap('jet')
+            
+            # 获取地理信息
+            self.geotransform, self.projection = get_geotransform(file_path)
+            
+            # 设置地理信息到图像查看器（用于hillshade计算）
+            self.image_viewer.set_geotransform(self.geotransform, self.projection)
             
             # 设置Nodata值到图像查看器
             self.image_viewer.set_nodata_value(self.nodata_value)
@@ -261,6 +464,9 @@ class LocalImageViewerDialog(QDialog):
             
             # 设置Nodata值到图像查看器
             self.image_viewer.set_nodata_value(self.nodata_value)
+            
+            # 更新渲染设置的波段数
+            self._update_render_settings_bands()
             
             # 自动显示整个图像的直方图
             self.show_image_histogram()
@@ -299,6 +505,20 @@ class LocalImageViewerDialog(QDialog):
         从原始图像文件读取指定区域的数据（用于精确分析）
         坐标是原始图像坐标
         """
+        if self.is_h5 and hasattr(self, 'h5_dataset_name'):
+            # H5文件使用专门的区域读取函数
+            with h5py.File(self.image_file, 'r') as h5f:
+                if self.h5_dataset_name in h5f:
+                    dataset = h5f[self.h5_dataset_name]
+                    if dataset.ndim == 2:
+                        return dataset[y1:y2, x1:x2].astype(np.float32)
+                    elif dataset.ndim == 3:
+                        if hasattr(self, 'h5_frame_index') and self.h5_frame_index is not None:
+                            return dataset[self.h5_frame_index, y1:y2, x1:x2].astype(np.float32)
+                        else:
+                            # 多波段情况
+                            return np.moveaxis(dataset[:, y1:y2, x1:x2], 0, -1).astype(np.float32)
+            return None
         if self.image_file is None:
             return None
         
@@ -339,8 +559,22 @@ class LocalImageViewerDialog(QDialog):
             return None
         
         try:
+            # H5文件使用专门的读取方法
+            if self.is_h5 and hasattr(self, 'h5_dataset_name'):
+                with h5py.File(self.image_file, 'r') as h5f:
+                    if self.h5_dataset_name in h5f:
+                        dataset = h5f[self.h5_dataset_name]
+                        if dataset.ndim == 2:
+                            return dataset[y, x].astype(np.float32)
+                        elif dataset.ndim == 3:
+                            if hasattr(self, 'h5_frame_index') and self.h5_frame_index is not None:
+                                return dataset[self.h5_frame_index, y, x].astype(np.float32)
+                            else:
+                                # 多波段情况
+                                return dataset[:, y, x].astype(np.float32)
+                return None
             # GAMMA文件使用专用读取方法
-            if self.is_gamma:
+            elif self.is_gamma:
                 return self._read_gamma_original_pixel(x, y)
             elif self.is_tiff:
                 return read_tiff_pixel(self.image_file, x, y)
@@ -359,7 +593,49 @@ class LocalImageViewerDialog(QDialog):
 
     def on_colormap_changed(self, colormap_name):
         """颜色映射改变"""
+        # 跳过分隔符项（分隔符以"━"开头）
+        if colormap_name.startswith('━'):
+            return
+        
         self.image_viewer.set_colormap(colormap_name)
+        
+        # 更新colorbar
+        if hasattr(self, 'colorbar'):
+            reversed = self.render_settings.reverse_check.isChecked() if hasattr(self, 'render_settings') else False
+            self.colorbar.set_colormap(colormap_name, reversed)
+    
+    def on_render_settings_changed(self):
+        """渲染设置变化时更新图像显示"""
+        settings = self.render_settings.get_all_settings()
+        self.image_viewer.set_render_settings(settings)
+        
+        # 更新colorbar
+        if hasattr(self, 'colorbar'):
+            self.colorbar.set_range(settings['value_min'], settings['value_max'])
+            self.colorbar.set_colormap(self.colormap_combo.currentText(), settings['colormap_reversed'])
+    
+    def on_suggest_colormap(self, colormap_name):
+        """接收建议的colormap并切换"""
+        self.colormap_combo.setCurrentText(colormap_name)
+    
+    def _update_image_stats_to_render_settings(self):
+        """从当前图像计算统计信息并更新到渲染设置"""
+        if self.image_data is not None:
+            arr = self.image_data
+            # 创建有效掩码
+            valid_mask = np.isfinite(arr)
+            if self.nodata_value is not None:
+                valid_mask = valid_mask & (arr != self.nodata_value)
+            
+            if np.any(valid_mask):
+                valid_data = arr[valid_mask]
+                min_val = float(np.min(valid_data))
+                max_val = float(np.max(valid_data))
+                self.render_settings.set_image_stats(min_val, max_val)
+                
+                # 更新colorbar范围
+                if hasattr(self, 'colorbar'):
+                    self.colorbar.set_range(min_val, max_val)
     
     def on_mode_changed(self):
         """绘制模式改变"""
@@ -439,15 +715,34 @@ class LocalImageViewerDialog(QDialog):
             
             # 显示像素值
             if isinstance(value, (int, float, np.integer, np.floating)):
-                self.pixel_info_label.setText(f"{coord_str} | 值: {value:.6g}")
+                base_text = f"{coord_str} | 值: {value:.6g}"
+                # 更新colorbar当前值指示
+                if hasattr(self, 'colorbar'):
+                    if not (np.isnan(value) if isinstance(value, float) else False):
+                        self.colorbar.set_current_value(float(value))
+                    else:
+                        self.colorbar.set_current_value(None)
             elif isinstance(value, np.ndarray):
                 if value.ndim == 0:
-                    self.pixel_info_label.setText(f"{coord_str} | 值: {value:.6g}")
+                    base_text = f"{coord_str} | 值: {value:.6g}"
                 else:
                     value_str = ", ".join([f"{v:.6g}" for v in value])
-                    self.pixel_info_label.setText(f"{coord_str} | 值: [{value_str}]")
+                    base_text = f"{coord_str} | 值: [{value_str}]"
+                # RGB图像不显示colorbar指示
+                if hasattr(self, 'colorbar'):
+                    self.colorbar.set_current_value(None)
+            
+            # 如果有地理信息，添加经纬度
+            if self.geotransform is not None:
+                lon, lat = pixel_to_lonlat(orig_x, orig_y, self.geotransform, self.projection)
+                if lon is not None and lat is not None:
+                    base_text += f" | 经纬度: ({lon:.6f}, {lat:.6f})"
+            
+            self.pixel_info_label.setText(base_text)
         else:
             self.pixel_info_label.setText("像素信息: -")
+            if hasattr(self, 'colorbar'):
+                self.colorbar.set_current_value(None)
     
     def on_rect_drawn(self, rect):
         """矩形绘制完成"""
@@ -832,8 +1127,10 @@ class LocalImageViewerDialog(QDialog):
                     f"数据集维度过高（{len(dataset_shape)}D），无法显示")
                 return
             
-            # 使用image_io模块读取数据集
-            data, original_shape = read_h5_dataset(file_path, selected_dataset, frame_index)
+            # 使用降采样读取数据集
+            data, original_size, downsample_factor = read_h5_dataset_downsampled(
+                file_path, selected_dataset, self.MAX_DISPLAY_SIZE, frame_index
+            )
             
             if data is None:
                 QMessageBox.critical(self, "错误", "无法读取数据集")
@@ -850,12 +1147,16 @@ class LocalImageViewerDialog(QDialog):
             self.nodata_value = None
             self.is_gamma = False
             self.is_tiff = False
-            self.original_width = original_shape[0] if original_shape else data.shape[1]
-            self.original_height = original_shape[1] if original_shape else data.shape[0]
-            self.downsample_factor = 1
+            self.is_h5 = True  # 标记为H5文件
+            self.h5_dataset_name = selected_dataset  # 保存数据集名称
+            self.h5_frame_index = frame_index  # 保存帧索引
+            self.original_width = original_size[0] if original_size else data.shape[1]
+            self.original_height = original_size[1] if original_size else data.shape[0]
+            self.downsample_factor = downsample_factor
             
             # 显示图像
-            self.image_viewer.set_image_from_array(self.image_data)
+            display_original_size = original_size if downsample_factor > 1 else None
+            self.image_viewer.set_image_from_array(self.image_data, original_size=display_original_size)
             
             # 设置Nodata值到图像查看器
             self.image_viewer.set_nodata_value(self.nodata_value)
@@ -867,20 +1168,26 @@ class LocalImageViewerDialog(QDialog):
             self.image_viewer.fit_in_view(delayed=True)
             
             # 更新信息
-            shape = self.image_data.shape
             info_parts = [f"{os.path.basename(file_path)} [{selected_dataset}]"]
             
             if frame_index is not None:
                 info_parts.append(f"帧: {frame_index}")
             
-            if self.image_data.ndim == 2:
-                info_parts.append(f"尺寸: {shape[1]}x{shape[0]} | 单波段")
-            elif self.image_data.ndim == 3:
-                info_parts.append(f"尺寸: {shape[1]}x{shape[0]} | {shape[2]}波段")
+            if downsample_factor > 1:
+                info_parts.append(f"原始: {self.original_width}x{self.original_height}")
+                info_parts.append(f"显示: {data.shape[1]}x{data.shape[0]} (1/{downsample_factor})")
             else:
-                info_parts.append(f"尺寸: {shape}")
+                info_parts.append(f"尺寸: {self.original_width}x{self.original_height}")
+            
+            if self.image_data.ndim == 2:
+                info_parts.append("单波段")
+            elif self.image_data.ndim == 3:
+                info_parts.append(f"{self.image_data.shape[2]}波段")
             
             self.image_info_label.setText(" | ".join(info_parts))
+            
+            # 更新渲染设置的波段数
+            self._update_render_settings_bands()
             
             # 自动显示整个图像的直方图
             self.show_image_histogram()
@@ -962,6 +1269,13 @@ class LocalImageViewerDialog(QDialog):
                     
                     self.nodata_value = nodata_value
                     self.image_viewer.set_nodata_value(nodata_value)
+                    
+                    # 重新计算图像统计信息（排除新的Nodata值）
+                    self._update_image_stats_to_render_settings()
+                    
+                    # 重新计算并显示直方图（排除Nodata值）
+                    self.show_image_histogram()
+                    
                     QMessageBox.information(self, "成功", f"已设置Nodata值为: {nodata_value}")
                 except ValueError:
                     QMessageBox.warning(self, "错误", "请输入有效的数字或'nan'！")
@@ -1120,6 +1434,9 @@ class LocalImageViewerDialog(QDialog):
                 info += f" | PAR: {os.path.basename(par_file_used)}"
             
             self.image_info_label.setText(info)
+            
+            # 更新渲染设置的波段数
+            self._update_render_settings_bands()
             
             # 显示直方图
             self.show_image_histogram()

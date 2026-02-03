@@ -16,6 +16,13 @@ try:
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
+# 导入自定义colormap注册模块（确保colormap在使用前已注册）
+try:
+    from ..utils.custom_colormaps import register_custom_colormaps
+    register_custom_colormaps()
+except:
+    pass
+
 
 class ColormapDelegate(QStyledItemDelegate):
     """Colormap下拉框的自定义代理，显示颜色渐变"""
@@ -25,9 +32,22 @@ class ColormapDelegate(QStyledItemDelegate):
         # 获取colormap名称
         colormap_name = index.data(Qt.DisplayRole)
         
+        # 检查是否是分隔符（以"━"开头）
+        is_separator = colormap_name.startswith('━')
+        
         # 绘制背景
-        if option.state & QStyle.State_Selected:
+        if option.state & QStyle.State_Selected and not is_separator:
             painter.fillRect(option.rect, option.palette.highlight())
+        
+        # 如果是分隔符，只绘制文本（居中，加粗）
+        if is_separator:
+            # 使用windowText颜色确保在深色模式下也能看清
+            painter.setPen(option.palette.windowText().color())
+            font = painter.font()
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(option.rect, Qt.AlignCenter, colormap_name)
+            return
         
         # 绘制colormap渐变条
         gradient_rect = option.rect.adjusted(5, 5, -100, -5)
@@ -81,7 +101,7 @@ class ColormapDelegate(QStyledItemDelegate):
 
 
 class ColormapComboBox(QComboBox):
-    """Colormap选择器，显示颜色渐变"""
+    """Colormap选择器，显示颜色渐变，按分类组织"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -89,15 +109,89 @@ class ColormapComboBox(QComboBox):
         # 设置自定义代理
         self.setItemDelegate(ColormapDelegate())
         
-        # 添加colormap选项
-        self.available_colormaps = [
-            'gray', 'viridis', 'plasma', 'inferno', 'magma', 'cividis',
-            'jet', 'hot', 'cool', 'spring', 'summer', 'autumn', 'winter',
-            'bone', 'copper', 'pink', 'hsv', 'twilight', 'terrain', 'ocean'
-        ]
+        # 存储所有可用的colormap（不包括分隔符）
+        self.available_colormaps = []
         
-        self.addItems(self.available_colormaps)
+        # ========== 常用 ==========
+        self.addItem("━━━ 常用 ━━━")
+        self.model().item(self.count() - 1).setEnabled(False)  # 禁用分隔符
+        common_colormaps = ['gray', 'viridis', 'jet', 'seismic', 'GMT_polar', 'GMT_dem4', 'terrain']
+        self.addItems(common_colormaps)
+        self.available_colormaps.extend(common_colormaps)
+        
+        # 设置默认选择为gray（第一个常用colormap）
+        self.setCurrentText('gray')
+        
+        # ========== GMT系列（地球科学常用）==========
+        self.addItem("━━━ GMT系列 ━━━")
+        self.model().item(self.count() - 1).setEnabled(False)
+        # GMT colormap来自CPT文件
+        gmt_colormaps = [
+            'GMT_polar',       # 极地
+            'GMT_seis'  ,      # 地震
+            'GMT_cyclic',      # 周期性
+            'GMT_ocean',       # 海洋
+            'GMT_sealand',     # 海陆
+            'GMT_dem1',        # DEM1地形
+            'GMT_dem2',        # DEM2地形
+            'GMT_dem3',        # DEM3地形
+            'GMT_dem4',        # DEM4地形（晕渲推荐）
+            'GMT_relief',      # 地形起伏
+            'GMT_topo',        # 地形高程
+            'GMT_globe',       # 全球地形
+            'GMT_gebco',       # GEBCO海底地形
+            'GMT_haxby',       # Haxby海底地形
+            'GMT_elevation',   # 高程
+            'gist_earth',      # 地球（matplotlib）
+            'terrain',         # 地形（matplotlib）
+            'ocean',           # 海洋（matplotlib）
+        ]
+        self.addItems(gmt_colormaps)
+        self.available_colormaps.extend(gmt_colormaps)
+        
+        # ========== Matplotlib感知均匀 ==========
+        self.addItem("━━━ Matplotlib感知均匀 ━━━")
+        self.model().item(self.count() - 1).setEnabled(False)
+        perceptual_colormaps = ['viridis', 'plasma', 'inferno', 'magma', 'cividis']
+        self.addItems(perceptual_colormaps)
+        self.available_colormaps.extend(perceptual_colormaps)
+        
+        # ========== Matplotlib序列 ==========
+        self.addItem("━━━ Matplotlib序列 ━━━")
+        self.model().item(self.count() - 1).setEnabled(False)
+        sequential_colormaps = ['Blues', 'Greens', 'Greys', 'Oranges', 'Purples', 'Reds',
+                                 'YlGn', 'YlGnBu', 'YlOrBr', 'YlOrRd',
+                                 'BuGn', 'BuPu', 'GnBu', 'OrRd', 'PuBu', 'PuBuGn', 
+                                 'PuRd', 'RdPu']
+        self.addItems(sequential_colormaps)
+        self.available_colormaps.extend(sequential_colormaps)
+        
+        # ========== Matplotlib发散 ==========
+        self.addItem("━━━ Matplotlib发散 ━━━")
+        self.model().item(self.count() - 1).setEnabled(False)
+        diverging_colormaps = ['BrBG', 'PRGn', 'PiYG', 'PuOr', 'RdBu', 'RdGy', 
+                                'RdYlBu', 'RdYlGn', 'Spectral', 'coolwarm', 'bwr', 'seismic']
+        self.addItems(diverging_colormaps)
+        self.available_colormaps.extend(diverging_colormaps)
+        
+        # ========== 其他传统 ==========
+        self.addItem("━━━ 其他传统 ━━━")
+        self.model().item(self.count() - 1).setEnabled(False)
+        misc_colormaps = ['jet', 'hot', 'cool', 'spring', 'summer', 'autumn', 'winter',
+                          'bone', 'copper', 'pink', 'rainbow', 'afmhot',
+                          'gist_gray', 'gist_yarg', 'gist_heat', 'gist_stern',
+                          'gnuplot', 'gnuplot2', 'brg', 'hsv', 'twilight']
+        self.addItems(misc_colormaps)
+        self.available_colormaps.extend(misc_colormaps)
         
         # 设置下拉框样式
         self.setIconSize(QSize(150, 20))
         self.setMinimumWidth(200)
+        
+    def get_current_colormap(self):
+        """获取当前选中的colormap名称（排除分隔符）"""
+        current = self.currentText()
+        if current in self.available_colormaps:
+            return current
+        # 如果当前是分隔符，返回第一个有效colormap
+        return self.available_colormaps[0] if self.available_colormaps else 'gray'

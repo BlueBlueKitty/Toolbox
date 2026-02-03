@@ -376,6 +376,7 @@ function Show-Summary {
             Write-Host $installerPath -ForegroundColor Cyan
             Write-Host ("大小: {0:N2} MB" -f $installerSize)
         }
+        }
     }
     
     Write-Host ""

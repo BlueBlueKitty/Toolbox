@@ -27,6 +27,45 @@ from src.utils.gamma_file_process import (
     complex_to_phase,
 )
 
+# 配置GDAL支持UTF-8路径（解决中文路径问题）
+gdal.SetConfigOption('GDAL_FILENAME_IS_UTF8', 'YES')
+gdal.UseExceptions()  # 启用异常处理
+
+
+def _is_netcdf_file(file_path: str) -> bool:
+    """
+    检测文件是否为NetCDF格式（通过文件头）
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(4)
+            # NetCDF3: CDF\x01 或 CDF\x02
+            # NetCDF4/HDF5: \x89HDF
+            return header[:3] == b'CDF' or header[:3] == b'\x89HD'
+    except:
+        return False
+
+
+def _open_gdal_dataset(file_path: str):
+    """
+    使用GDAL打开数据集，自动处理GRD/NetCDF文件
+    """
+    # 规范化路径（统一使用反斜杠）
+    normalized_path = os.path.normpath(file_path)
+    
+    # 检查是否为.grd文件且是NetCDF格式
+    if normalized_path.lower().endswith('.grd') and _is_netcdf_file(normalized_path):
+        # 使用netCDF驱动打开
+        try:
+            ds = gdal.OpenEx(normalized_path, gdal.OF_RASTER, allowed_drivers=['netCDF'])
+            if ds is not None:
+                return ds
+        except:
+            pass
+    
+    # 普通GDAL打开
+    return gdal.Open(normalized_path)
+
 
 # ============================================================================
 # TIFF文件读取
@@ -43,7 +82,7 @@ def read_tiff(file_path: str) -> Tuple[Optional[np.ndarray], Optional[float], Op
         tuple: (图像数据, nodata值, 原始尺寸(width, height)) 或 (None, None, None)
     """
     try:
-        ds = gdal.Open(file_path)
+        ds = _open_gdal_dataset(file_path)
         if ds is None:
             return None, None, None
         
@@ -85,7 +124,7 @@ def get_tiff_info(file_path: str) -> Tuple[Optional[Tuple[int, int]], Optional[i
         tuple: ((width, height), band_count, nodata_value) 或 (None, None, None)
     """
     try:
-        ds = gdal.Open(file_path)
+        ds = _open_gdal_dataset(file_path)
         if ds is None:
             return None, None, None
         
@@ -102,6 +141,342 @@ def get_tiff_info(file_path: str) -> Tuple[Optional[Tuple[int, int]], Optional[i
         return None, None, None
 
 
+def get_geotransform(file_path: str) -> Tuple[Optional[Tuple], Optional[str]]:
+    """
+    获取TIFF文件的地理变换和投影信息
+    
+    Args:
+        file_path: TIFF文件路径
+        
+    Returns:
+        tuple: (geotransform, projection) 或 (None, None)
+        geotransform: (x_origin, pixel_width, 0, y_origin, 0, pixel_height)
+        projection: WKT格式的投影字符串
+    """
+    try:
+        ds = _open_gdal_dataset(file_path)
+        if ds is None:
+            return None, None
+        
+        geotransform = ds.GetGeoTransform()
+        projection = ds.GetProjection()
+        
+        ds = None
+        
+        # 检查是否有有效的地理变换
+        if geotransform and geotransform != (0, 1, 0, 0, 0, 1):
+            return geotransform, projection if projection else None
+        else:
+            return None, None
+            
+    except Exception as e:
+        print(f"获取地理信息失败 {file_path}: {e}")
+        return None, None
+
+
+def pixel_to_lonlat(x: int, y: int, geotransform: Tuple, projection: str = None) -> Tuple[Optional[float], Optional[float]]:
+    """
+    将像素坐标转换为经纬度坐标
+    
+    Args:
+        x: 像素X坐标
+        y: 像素Y坐标
+        geotransform: GDAL地理变换参数
+        projection: 投影信息（WKT格式）
+        
+    Returns:
+        tuple: (经度, 纬度) 或 (None, None)
+    """
+    try:
+        from osgeo import osr
+        
+        # 计算地理坐标
+        x_geo = geotransform[0] + x * geotransform[1] + y * geotransform[2]
+        y_geo = geotransform[3] + x * geotransform[4] + y * geotransform[5]
+        
+        # 如果有投影信息，转换为WGS84经纬度
+        if projection:
+            # 创建源坐标系
+            source_srs = osr.SpatialReference()
+            source_srs.ImportFromWkt(projection)
+            
+            # 创建目标坐标系（WGS84）
+            target_srs = osr.SpatialReference()
+            target_srs.ImportFromEPSG(4326)  # WGS84
+            
+            # 创建坐标转换
+            transform = osr.CoordinateTransformation(source_srs, target_srs)
+            
+            # 执行转换
+            lon, lat, _ = transform.TransformPoint(x_geo, y_geo)
+            return lon, lat
+        else:
+            # 没有投影信息，假设已经是经纬度
+            return x_geo, y_geo
+            
+    except Exception as e:
+        print(f"坐标转换失败: {e}")
+        return None, None
+    
+def calculate_hillshade(dem_array: np.ndarray, azimuth: float = 315.0, altitude: float = 45.0, 
+                        z_factor: float = 1.0, nodata_value: Optional[float] = None,
+                        geotransform: Optional[Tuple] = None, projection: Optional[str] = None) -> np.ndarray:
+    """
+    计算DEM的山体阴影（hillshade）
+    
+    Args:
+        dem_array: DEM数据数组
+        azimuth: 光照方位角（度，0=北，90=东，180=南，270=西），默认315（西北）
+        altitude: 光照高度角（度），默认45
+        z_factor: 高程缩放因子，默认1.0
+        nodata_value: 无效值
+        geotransform: GDAL地理变换参数，用于获取像素间隔
+        projection: 投影信息（WKT格式），用于判断是否为地理坐标系
+        
+    Returns:
+        np.ndarray: 山体阴影数组，值范围0-255
+    """
+    from osgeo import osr
+    
+    # 转换角度为弧度
+    azimuth_rad = np.radians(azimuth)
+    altitude_rad = np.radians(altitude)
+    
+    # 创建mask来处理nodata
+    if nodata_value is not None:
+        if np.isnan(nodata_value):
+            valid_mask = ~np.isnan(dem_array)
+        else:
+            valid_mask = dem_array != nodata_value
+    else:
+        valid_mask = np.ones_like(dem_array, dtype=bool)
+    
+    # 获取像素间隔并判断坐标系类型
+    pixel_size_x = 1.0  # 默认值（度或米）
+    pixel_size_y = 1.0
+    scale_x = 1.0  # x方向的scale：地图单位到米的转换因子
+    scale_y = 1.0  # y方向的scale：地图单位到米的转换因子
+    
+    if geotransform is not None:
+        pixel_size_x = abs(geotransform[1])  # x方向像素大小（度或米）
+        pixel_size_y = abs(geotransform[5])  # y方向像素大小（度或米）
+        
+        # 判断是否为地理坐标系
+        if projection:
+            try:
+                srs = osr.SpatialReference()
+                srs.ImportFromWkt(projection)
+                is_geographic = srs.IsGeographic()
+                
+                # 如果是地理坐标系，计算scale（每度对应多少米）
+                # 关键：x和y方向的scale不同！
+                if is_geographic:
+                    # 使用图像中心纬度计算转换因子
+                    center_lat = geotransform[3] + (dem_array.shape[0] / 2) * geotransform[5]
+                    center_lat_rad = np.radians(abs(center_lat))
+                    
+                    # x方向（经度）：1度 = 111320 * cos(纬度) 米
+                    scale_x = 111320.0 * np.cos(center_lat_rad)
+                    
+                    # y方向（纬度）：1度 = 111320 米
+                    scale_y = 111320.0
+            except:
+                pass
+    
+    # GDAL hillshade算法：
+    # 1. 使用3x3 Sobel算子计算梯度（而不是简单的中心差分）
+    # 2. 应用z_factor
+    # 3. 转换为坡度：梯度 / (scale * pixel_size)
+    # 
+    # 3x3窗口：
+    # a b c
+    # d e f
+    # g h i
+    # dz/dx = ((c + 2f + i) - (a + 2d + g)) / 8
+    # dz/dy = ((g + 2h + i) - (a + 2b + c)) / 8
+    
+    # 手动实现Sobel算子（避免scipy依赖）
+    def apply_sobel(arr):
+        """使用3x3 Sobel算子计算梯度"""
+        rows, cols = arr.shape
+        dx = np.zeros_like(arr, dtype=np.float64)
+        dy = np.zeros_like(arr, dtype=np.float64)
+        
+        # 对内部像素应用Sobel算子
+        # x方向（东西）：右侧列减左侧列
+        dx[1:-1, 1:-1] = (
+            (arr[0:-2, 2:] + 2*arr[1:-1, 2:] + arr[2:, 2:]) -
+            (arr[0:-2, :-2] + 2*arr[1:-1, :-2] + arr[2:, :-2])
+        ) / 8.0
+        
+        # y方向（南北）：下侧行减上侧行
+        dy[1:-1, 1:-1] = (
+            (arr[2:, :-2] + 2*arr[2:, 1:-1] + arr[2:, 2:]) -
+            (arr[0:-2, :-2] + 2*arr[0:-2, 1:-1] + arr[0:-2, 2:])
+        ) / 8.0
+        
+        # 边缘处理：使用简单差分
+        # 顶部和底部边缘
+        dx[0, :] = dx[1, :]
+        dx[-1, :] = dx[-2, :]
+        dy[0, :] = dy[1, :]
+        dy[-1, :] = dy[-2, :]
+        
+        # 左侧和右侧边缘
+        dx[:, 0] = dx[:, 1]
+        dx[:, -1] = dx[:, -2]
+        dy[:, 0] = dy[:, 1]
+        dy[:, -1] = dy[:, -2]
+        
+        return dx, dy
+    
+    # 应用Sobel算子计算梯度
+    dem_float = dem_array.astype(float)
+    ew_dx, ns_dy = apply_sobel(dem_float)
+    
+    # 计算坡度分量：梯度 / (scale * pixel_size)
+    # 注意：x和y方向使用各自的scale
+    # 这里scale*pixel_size就是实际的水平距离（米）
+    dx = ew_dx / (scale_x * pixel_size_x)
+    dy = ns_dy / (scale_y * pixel_size_y)
+    
+    # 计算坡度和坡向
+    # slope: 坡度角（弧度）
+    slope = np.arctan(z_factor* np.sqrt(dx**2 + dy**2))
+    
+    # aspect: 坡向角（弧度）
+    # 恢复此前的计算方式
+    aspect = np.arctan2(-dx, dy)
+    
+    # 计算山体阴影
+    # Hillshade = ((cos(Zenith) * cos(Slope)) + (sin(Zenith) * sin(Slope) * cos(Azimuth - Aspect)))
+    zenith_rad = np.pi / 2.0 - altitude_rad
+    
+    hillshade = (np.cos(zenith_rad) * np.cos(slope) + 
+                 np.sin(zenith_rad) * np.sin(slope) * np.cos(azimuth_rad - aspect))
+    
+    # 限制在0.0-1.0范围内（保持float32精度）
+    hillshade = np.clip(hillshade, 0.0, 1.0)
+    
+    # 处理nodata区域
+    hillshade[~valid_mask] = 0.0
+    
+    return hillshade.astype(np.float32)
+
+# def calculate_hillshade(dem_array: np.ndarray, azimuth: float = 315.0, altitude: float = 45.0, 
+#                         z_factor: float = 1.0, nodata_value: Optional[float] = None,
+#                         geotransform: Optional[Tuple] = None, projection: Optional[str] = None) -> np.ndarray:
+#     """
+#     使用GDAL DEMProcessing计算DEM的山体阴影（hillshade）
+    
+#     Args:
+#         dem_array: DEM数据数组
+#         azimuth: 光照方位角（度，0=北，90=东，180=南，270=西），默认315（西北）
+#         altitude: 光照高度角（度），默认45
+#         z_factor: 高程缩放因子，默认1.0
+#         nodata_value: 无效值
+#         geotransform: GDAL地理变换参数，用于获取像素间隔
+#         projection: 投影信息（WKT格式），用于判断是否为地理坐标系
+        
+#     Returns:
+#         np.ndarray: 山体阴影数组，值范围0-255
+#     """
+#     from osgeo import osr
+#     import uuid
+    
+#     try:
+#         # 创建虚拟内存数据集路径
+#         mem_path = f'/vsimem/dem_{uuid.uuid4().hex}.tif'
+#         mem_hillshade_path = f'/vsimem/hillshade_{uuid.uuid4().hex}.tif'
+        
+#         # 创建内存中的DEM数据集
+#         driver = gdal.GetDriverByName('GTiff')
+#         height, width = dem_array.shape
+        
+#         # 创建数据集
+#         dem_ds = driver.Create(mem_path, width, height, 1, gdal.GDT_Float32)
+        
+#         # 设置地理变换和投影
+#         if geotransform is not None:
+#             dem_ds.SetGeoTransform(geotransform)
+#         else:
+#             # 默认地理变换
+#             dem_ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
+        
+#         if projection is not None:
+#             dem_ds.SetProjection(projection)
+        
+#         # 写入DEM数据
+#         band = dem_ds.GetRasterBand(1)
+#         band.WriteArray(dem_array)
+        
+#         # 设置NoData值
+#         if nodata_value is not None:
+#             band.SetNoDataValue(float(nodata_value))
+        
+#         band.FlushCache()
+#         dem_ds.FlushCache()
+        
+#         # 计算scale参数
+#         scale = 1.0
+#         if geotransform is not None and projection is not None:
+#             try:
+#                 srs = osr.SpatialReference()
+#                 srs.ImportFromWkt(projection)
+#                 if srs.IsGeographic():
+#                     # 地理坐标系，计算scale
+#                     # center_lat = geotransform[3] + (height / 2) * geotransform[5]
+#                     # center_lat_rad = np.radians(abs(center_lat))
+#                     # scale = 111320.0 * np.cos(center_lat_rad)
+#                     scale = 111120.0
+#             except:
+#                 pass
+        
+#         # 使用GDAL DEMProcessing计算hillshade
+#         options = gdal.DEMProcessingOptions(
+#             azimuth=azimuth,
+#             altitude=altitude,
+#             zFactor=z_factor,
+#             scale=scale,
+#             computeEdges=True
+#         )
+        
+#         hillshade_ds = gdal.DEMProcessing(
+#             mem_hillshade_path,
+#             dem_ds,
+#             'hillshade',
+#             options=options
+#         )
+        
+#         # 读取hillshade结果
+#         if hillshade_ds is not None:
+#             hillshade_band = hillshade_ds.GetRasterBand(1)
+#             hillshade = hillshade_band.ReadAsArray()
+            
+#             # 确保是uint8类型
+#             hillshade = hillshade.astype(np.uint8)
+            
+#             # 清理
+#             hillshade_band = None
+#             hillshade_ds = None
+#         else:
+#             hillshade = np.zeros_like(dem_array, dtype=np.uint8)
+        
+#         # 清理内存数据集
+#         band = None
+#         dem_ds = None
+#         gdal.Unlink(mem_path)
+#         gdal.Unlink(mem_hillshade_path)      
+        
+#         return hillshade
+        
+#     except Exception as e:
+#         print(f"GDAL hillshade计算失败: {e}")
+#         traceback.print_exc()
+#         # 返回空数组
+#         return np.zeros_like(dem_array, dtype=np.uint8)
+
+
 def get_image_info(file_path: str) -> Tuple[Optional[Tuple[int, int]], Optional[int]]:
     """
     获取普通图像文件的基本信息（尺寸、通道数），不完全读取数据
@@ -113,6 +488,13 @@ def get_image_info(file_path: str) -> Tuple[Optional[Tuple[int, int]], Optional[
         tuple: ((width, height), channels) 或 (None, None)
     """
     try:
+        # 检查是否为TIFF/GRD格式
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in ['.tif', '.tiff', '.grd']:
+            size, channels, _ = get_tiff_info(file_path)
+            return size, channels
+        
+        # 使用PIL读取普通图像
         img = Image.open(file_path)
         width, height = img.size
         # 获取通道数
@@ -149,7 +531,7 @@ def read_tiff_downsampled(
                或 (None, None, None, 1)
     """
     try:
-        ds = gdal.Open(file_path)
+        ds = _open_gdal_dataset(file_path)
         if ds is None:
             return None, None, None, 1
         
@@ -259,7 +641,7 @@ def read_tiff_region(
         区域图像数据，或None
     """
     try:
-        ds = gdal.Open(file_path)
+        ds = _open_gdal_dataset(file_path)
         if ds is None:
             return None
         
@@ -302,7 +684,7 @@ def read_tiff_pixel(file_path: str, x: int, y: int) -> Optional[Union[float, np.
         像素值（单波段返回标量，多波段返回数组），或None
     """
     try:
-        ds = gdal.Open(file_path)
+        ds = _open_gdal_dataset(file_path)
         if ds is None:
             return None
         
@@ -410,7 +792,7 @@ def check_tiff_needs_overview(file_path: str, threshold: int = 4096) -> Tuple[bo
         tuple: (是否需要金字塔, 宽度, 高度)
     """
     try:
-        ds = gdal.Open(file_path)
+        ds = _open_gdal_dataset(file_path)
         if ds is None:
             return False, 0, 0
         
@@ -790,6 +1172,99 @@ def read_h5_dataset(
         print(f"读取h5数据集失败 {file_path}/{dataset_name}: {e}")
         traceback.print_exc()
         return None, None
+
+
+def read_h5_dataset_downsampled(
+    file_path: str, 
+    dataset_name: str,
+    max_size: int = 2048,
+    frame_index: Optional[int] = None
+) -> Tuple[Optional[np.ndarray], Optional[Tuple[int, int]], int]:
+    """
+    读取HDF5数据集并降采样（使用切片读取实现高效降采样）
+    
+    小于max_size的图像直接返回原始数据(downsample_factor=1)
+    
+    Args:
+        file_path: HDF5文件路径
+        dataset_name: 数据集名称
+        max_size: 最大边长（像素），默认2048
+        frame_index: 如果是3D时序数据，指定要读取的帧索引
+        
+    Returns:
+        tuple: (数据, 原始尺寸(width, height), 降采样因子) 或 (None, None, 1)
+    """
+    try:
+        with h5py.File(file_path, 'r') as h5f:
+            if dataset_name not in h5f:
+                return None, None, 1
+            
+            dataset = h5f[dataset_name]
+            
+            # 确定数据形状
+            if dataset.ndim == 2:
+                height, width = dataset.shape
+                is_3d = False
+            elif dataset.ndim == 3:
+                if frame_index is not None:
+                    # 指定帧索引
+                    height, width = dataset.shape[1], dataset.shape[2]
+                    is_3d = True
+                elif dataset.shape[0] < dataset.shape[1] and dataset.shape[0] < dataset.shape[2]:
+                    # 多波段图像 (bands, height, width)
+                    height, width = dataset.shape[1], dataset.shape[2]
+                    is_3d = False
+                    is_multiband = True
+                else:
+                    # 默认取第一帧
+                    height, width = dataset.shape[1], dataset.shape[2]
+                    is_3d = True
+                    frame_index = 0
+            else:
+                return None, None, 1
+            
+            original_size = (width, height)
+            
+            # 计算是否需要降采样
+            max_dim = max(width, height)
+            if max_dim <= max_size:
+                # 不需要降采样，直接读取全部数据
+                if dataset.ndim == 2:
+                    data = dataset[:].astype(np.float32)
+                elif dataset.ndim == 3:
+                    if frame_index is not None:
+                        data = dataset[frame_index, :, :].astype(np.float32)
+                    elif dataset.shape[0] < dataset.shape[1] and dataset.shape[0] < dataset.shape[2]:
+                        # 多波段 -> (height, width, bands)
+                        data = np.moveaxis(dataset[:], 0, -1).astype(np.float32)
+                    else:
+                        data = dataset[0, :, :].astype(np.float32)
+                return data, original_size, 1
+            
+            # 需要降采样 - 使用切片读取
+            downsample_factor = int(np.ceil(max_dim / max_size))
+            
+            # 使用切片跳行跳列读取
+            if dataset.ndim == 2:
+                data = dataset[::downsample_factor, ::downsample_factor].astype(np.float32)
+            elif dataset.ndim == 3:
+                if frame_index is not None:
+                    # 指定帧
+                    data = dataset[frame_index, ::downsample_factor, ::downsample_factor].astype(np.float32)
+                elif dataset.shape[0] < dataset.shape[1] and dataset.shape[0] < dataset.shape[2]:
+                    # 多波段 (bands, height, width) -> 取所有波段但降采样空间维度
+                    data = dataset[:, ::downsample_factor, ::downsample_factor].astype(np.float32)
+                    data = np.moveaxis(data, 0, -1)  # -> (height, width, bands)
+                else:
+                    # 默认第一帧
+                    data = dataset[0, ::downsample_factor, ::downsample_factor].astype(np.float32)
+            
+            return data, original_size, downsample_factor
+            
+    except Exception as e:
+        print(f"降采样读取h5数据集失败 {file_path}/{dataset_name}: {e}")
+        traceback.print_exc()
+        return None, None, 1
 
 
 def read_h5_timeseries_metadata(file_path: str) -> Tuple[Optional[List[str]], Optional[Tuple[int, int, int]], int]:

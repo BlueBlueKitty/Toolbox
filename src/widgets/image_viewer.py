@@ -73,12 +73,9 @@ class ImageViewer(QGraphicsView):
         # 当前colormap
         self.current_colormap = 'gray'
         
-        # 可用的colormap列表
-        self.available_colormaps = [
-            'gray', 'viridis', 'plasma', 'inferno', 'magma', 'cividis',
-            'jet', 'hot', 'cool', 'spring', 'summer', 'autumn', 'winter',
-            'bone', 'copper', 'pink', 'hsv', 'twilight', 'terrain', 'ocean'
-        ]
+        # 当前的colormap名称和反向设置
+        self.current_colormap = 'gray'
+        self.colormap_reversed = False
         
         # 设置场景属性
         self.setRenderHint(QPainter.Antialiasing, False)  # 禁用抗锯齿
@@ -101,6 +98,14 @@ class ImageViewer(QGraphicsView):
         
         # Nodata值
         self.nodata_value = None
+        
+        # 地理变换信息
+        self.geotransform = None
+        self.projection = None
+        
+        # 渲染设置
+        self.render_settings = None  # 来自RenderSettingsWidget的设置字典
+        self.colormap_reversed = False  # colormap是否反向
         
         # 启用鼠标跟踪以捕捉移动事件
         self.setMouseTracking(True)
@@ -134,17 +139,18 @@ class ImageViewer(QGraphicsView):
         self._update_display()
         
     def _normalize_array(self, arr):
-        """将数组归一化到0-255范围"""
+        """将数组归一化到0-255范围（注释：此函数主要用于非渲染设置模式）"""
         if arr.dtype == np.uint8:
             return arr
         
-        # 对于浮点数组，归一化到0-255
+        # 对于浮点数组，保持float32精度直到最后
         arr_min = np.nanmin(arr)
         arr_max = np.nanmax(arr)
         
         if arr_max - arr_min == 0:
             return np.zeros_like(arr, dtype=np.uint8)
         
+        # 最终转uint8
         normalized = ((arr - arr_min) / (arr_max - arr_min) * 255).astype(np.uint8)
         return normalized
     
@@ -159,23 +165,64 @@ class ImageViewer(QGraphicsView):
         
         arr = self.image_array.copy()
         
-        # 处理不同维度的数组
-        if arr.ndim == 2:
-            # 2D灰度图像
-            display_arr, alpha_channel = self._apply_colormap(arr)
-        elif arr.ndim == 3:
-            if arr.shape[2] == 3:
-                # RGB图像
-                display_arr = self._normalize_array(arr)
-                alpha_channel = None
-            elif arr.shape[2] == 1:
-                # 单波段
-                display_arr, alpha_channel = self._apply_colormap(arr[:, :, 0])
+        # 如果有渲染设置，使用渲染设置处理
+        if self.render_settings is not None:
+            from .render_settings_widget import apply_render_settings
+            display_mode = self.render_settings.get('display_mode', '灰度')
+            
+            # 应用渲染设置（传递geotransform、projection和降采样因子用于hillshade计算）
+            processed = apply_render_settings(arr, self.render_settings, self.nodata_value,
+                                             self.geotransform, self.projection, self.downsample_factor)
+            
+            # 创建alpha通道
+            if arr.ndim == 2:
+                alpha_channel = self._create_alpha_channel(arr)
+            elif arr.ndim == 3:
+                # 使用第一个波段创建alpha
+                if display_mode == 'RGB' and arr.shape[2] >= 3:
+                    r, g, b = self.render_settings.get('rgb_bands', (1, 2, 3))
+                    # RGB模式下，任何一个通道是nodata都透明
+                    alpha_channel = np.full(arr.shape[:2], 255, dtype=np.uint8)
+                    for band_idx in [r-1, g-1, b-1]:
+                        if band_idx < arr.shape[2]:
+                            band_data = arr[:, :, band_idx]
+                            invalid = ~np.isfinite(band_data)
+                            if self.nodata_value is not None:
+                                invalid = invalid | (band_data == self.nodata_value)
+                            alpha_channel[invalid] = 0
+                else:
+                    band = self.render_settings.get('gray_band', 1)
+                    band = min(band, arr.shape[2]) - 1
+                    alpha_channel = self._create_alpha_channel(arr[:, :, band])
             else:
-                # 多波段图像，显示第一个波段
-                display_arr, alpha_channel = self._apply_colormap(arr[:, :, 0])
+                alpha_channel = None
+            
+            # 应用colormap（如果是灰度模式）
+            if processed.ndim == 2:
+                display_arr, _ = self._apply_colormap_to_normalized(processed)
+            else:
+                # RGB模式，processed是float32 (0.0-1.0)，需要转成uint8
+                display_arr = (processed * 255).astype(np.uint8)
+                alpha_channel = None  # RGB模式不使用colormap
         else:
-            raise ValueError(f"不支持的数组维度: {arr.ndim}")
+            # 原有逻辑
+            # 处理不同维度的数组
+            if arr.ndim == 2:
+                # 2D灰度图像
+                display_arr, alpha_channel = self._apply_colormap(arr)
+            elif arr.ndim == 3:
+                if arr.shape[2] == 3:
+                    # RGB图像
+                    display_arr = self._normalize_array(arr)
+                    alpha_channel = None
+                elif arr.shape[2] == 1:
+                    # 单波段
+                    display_arr, alpha_channel = self._apply_colormap(arr[:, :, 0])
+                else:
+                    # 多波段图像，显示第一个波段
+                    display_arr, alpha_channel = self._apply_colormap(arr[:, :, 0])
+            else:
+                raise ValueError(f"不支持的数组维度: {arr.ndim}")
         
         # 转换为QImage，禁用平滑插值以显示栅格边界
         height, width = display_arr.shape[:2]
@@ -203,11 +250,24 @@ class ImageViewer(QGraphicsView):
         # 创建QPixmap并添加到场景
         pixmap = QPixmap.fromImage(qimage)
         self.image_item = QGraphicsPixmapItem(pixmap)
-        # 禁用平滑变换，显示栅格边界
-        self.image_item.setTransformationMode(Qt.FastTransformation)
+        # 根据设置决定变换模式
+        smooth_display = self.render_settings.get('smooth_display', False) if self.render_settings else False
+        if smooth_display:
+            self.image_item.setTransformationMode(Qt.SmoothTransformation)
+        else:
+            self.image_item.setTransformationMode(Qt.FastTransformation)
         self.scene.addItem(self.image_item)
         
         # 注意：不在这里调用fit_in_view，让调用者在合适的时机调用
+    
+    def _create_alpha_channel(self, arr):
+        """创建alpha通道"""
+        alpha_channel = np.full(arr.shape, 255, dtype=np.uint8)
+        invalid_mask = ~np.isfinite(arr)
+        if self.nodata_value is not None:
+            invalid_mask = invalid_mask | (arr == self.nodata_value)
+        alpha_channel[invalid_mask] = 0
+        return alpha_channel
         
     def _apply_colormap(self, arr):
         """应用colormap到2D数组，返回RGB数组和alpha通道"""
@@ -224,9 +284,9 @@ class ImageViewer(QGraphicsView):
             
         alpha_channel[invalid_mask] = 0  # 这些像素设为完全透明
         
-        # 对非Nodata像素进行归一化
+        # 对非Nodata像素进行归一化（保持float32精度）
         valid_mask = alpha_channel > 0
-        normalized = np.zeros_like(arr, dtype=np.uint8)
+        normalized = np.zeros_like(arr, dtype=np.float32)
         
         if np.any(valid_mask):
             valid_data = arr[valid_mask]
@@ -236,17 +296,43 @@ class ImageViewer(QGraphicsView):
                 arr_max = np.max(valid_data)
                 
                 if arr_max > arr_min:
-                    normalized[valid_mask] = ((valid_data - arr_min) / (arr_max - arr_min) * 255).astype(np.uint8)
+                    # 归一化到0.0-1.0，保持float32精度
+                    normalized[valid_mask] = ((valid_data - arr_min) / (arr_max - arr_min)).astype(np.float32)
+        
+        # 应用colormap反向
+        if self.colormap_reversed:
+            normalized[valid_mask] = 1.0 - normalized[valid_mask]
         
         if self.current_colormap == 'gray' or not MATPLOTLIB_AVAILABLE:
-            return normalized, alpha_channel
+            # 灰度模式，这里才转成uint8
+            gray_uint8 = (normalized * 255).astype(np.uint8)
+            return gray_uint8, alpha_channel
         
-        # 使用matplotlib的colormap
+        # 使用matplotlib的colormap（直接使用float32的normalized，不需要再除以255）
         cmap = cm.get_cmap(self.current_colormap)
-        # 归一化到0-1
-        norm_arr = normalized.astype(float) / 255.0
+        # 应用colormap（normalized已经是0-1范围）
+        rgba = cmap(normalized)
+        # 转换为0-255的RGB
+        rgb = (rgba[:, :, :3] * 255).astype(np.uint8)
+        
+        return rgb, alpha_channel
+    
+    def _apply_colormap_to_normalized(self, normalized_arr):
+        """对已归一化的数组应用colormap（用于渲染设置模式）
+        normalized_arr: float32 (0.0-1.0)范围的数组
+        """
+        alpha_channel = np.full(normalized_arr.shape, 255, dtype=np.uint8)
+        alpha_channel[normalized_arr == 0] = 0  # 假设0为无效值
+        
+        if self.current_colormap == 'gray' or not MATPLOTLIB_AVAILABLE:
+            # 灰度模式，这里转成uint8
+            gray_uint8 = (normalized_arr * 255).astype(np.uint8)
+            return gray_uint8, alpha_channel
+        
+        # 使用matplotlib的colormap（normalized_arr已经是0.0-1.0范围）
+        cmap = cm.get_cmap(self.current_colormap)
         # 应用colormap
-        rgba = cmap(norm_arr)
+        rgba = cmap(normalized_arr)
         # 转换为0-255的RGB
         rgb = (rgba[:, :, :3] * 255).astype(np.uint8)
         
@@ -254,8 +340,25 @@ class ImageViewer(QGraphicsView):
     
     def set_colormap(self, colormap_name):
         """设置colormap"""
-        if colormap_name in self.available_colormaps:
-            self.current_colormap = colormap_name
+        self.current_colormap = colormap_name
+        self._update_display()
+    
+    def set_colormap_reversed(self, reversed):
+        """设置colormap是否反向"""
+        self.colormap_reversed = reversed
+        if self.image_array is not None:
+            self._update_display()
+    
+    def set_render_settings(self, settings):
+        """设置渲染设置
+        
+        Args:
+            settings: 渲染设置字典（从RenderSettingsWidget.get_all_settings()获取）
+        """
+        self.render_settings = settings
+        if settings:
+            self.colormap_reversed = settings.get('colormap_reversed', False)
+        if self.image_array is not None:
             self._update_display()
     
     def set_nodata_value(self, nodata_value):
@@ -267,6 +370,16 @@ class ImageViewer(QGraphicsView):
         self.nodata_value = nodata_value
         if self.image_array is not None:
             self._update_display()
+    
+    def set_geotransform(self, geotransform, projection=None):
+        """设置地理变换信息
+        
+        Args:
+            geotransform: GDAL地理变换参数
+            projection: 投影信息（WKT格式）
+        """
+        self.geotransform = geotransform
+        self.projection = projection
     
     def fit_in_view(self, delayed=False):
         """适应视图大小

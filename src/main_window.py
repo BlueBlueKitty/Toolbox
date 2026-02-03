@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QMainWindow, QApplication, QMessageBox, QDialog,
                                QWidget, QVBoxLayout, QGridLayout, QPushButton, QLabel,
                                QGroupBox, QScrollArea, QMenuBar, QMenu, QProgressDialog)
 from PySide6.QtGui import QIcon, QAction
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QSettings
 import sys
 import traceback
 
@@ -28,6 +28,12 @@ from src.version import __version__, APP_DISPLAY_NAME
 class MainWindow(QMainWindow):
     def __init__(self):
         super(MainWindow, self).__init__()
+        
+        # 初始化设置
+        self.settings = QSettings("Toolbox", "RemoteSensingToolbox")
+        
+        # 从设置中读取降采样尺寸，默认值为 2048
+        self.max_display_size = self.settings.value("display/max_display_size", 2048, type=int)
         
         # 设置窗口属性
         self.setWindowTitle("遥感工具箱")
@@ -52,6 +58,14 @@ class MainWindow(QMainWindow):
     def _create_menu_bar(self):
         """创建菜单栏"""
         menubar = self.menuBar()
+        
+        # 设置菜单
+        settings_menu = menubar.addMenu("设置")
+        
+        # 显示设置
+        display_settings_action = QAction("显示设置...", self)
+        display_settings_action.triggered.connect(self._on_display_settings)
+        settings_menu.addAction(display_settings_action)
         
         # 帮助菜单
         help_menu = menubar.addMenu("帮助")
@@ -262,7 +276,7 @@ class MainWindow(QMainWindow):
         """
         try:
             # 创建并显示图像局部查看器对话框
-            dialog = LocalImageViewerDialog(self)
+            dialog = LocalImageViewerDialog(self, max_display_size=self.max_display_size)
             dialog.exec()
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开图像局部查看器失败: {str(e)}")
@@ -274,7 +288,7 @@ class MainWindow(QMainWindow):
         """
         try:
             # 创建并显示像素时序查看器对话框
-            dialog = PixelTimeSeriesViewerDialog(self)
+            dialog = PixelTimeSeriesViewerDialog(self, max_display_size=self.max_display_size)
             dialog.exec()
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开像素时序查看器失败: {str(e)}")
@@ -471,6 +485,90 @@ class MainWindow(QMainWindow):
 <p>© 2026 Yibo Yuan. All Rights Reserved.</p>
 """
         QMessageBox.about(self, f"关于 {APP_DISPLAY_NAME}", about_text)
+    
+    def _on_display_settings(self):
+        """显示设置对话框"""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QSpinBox, QDialogButtonBox, QHBoxLayout, QCheckBox
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("显示设置")
+        dialog.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # 降采样尺寸设置
+        desc_label = QLabel(
+            "设置图像显示时的最大尺寸。\n"
+            "当图像超过此尺寸时，会自动降采样以提高性能。\n"
+            "较小的值可提高浏览速度，但会降低显示精度。"
+        )
+        desc_label.setWordWrap(True)
+        layout.addWidget(desc_label)
+        
+        layout.addSpacing(10)
+        
+        # 尺寸输入
+        size_layout = QHBoxLayout()
+        size_label = QLabel("最大显示尺寸（像素）:")
+        size_layout.addWidget(size_label)
+        
+        size_spinbox = QSpinBox()
+        size_spinbox.setRange(512, 8192)
+        size_spinbox.setSingleStep(256)
+        size_spinbox.setValue(self.max_display_size)
+        size_spinbox.setSuffix(" px")
+        size_spinbox.setMinimumWidth(120)
+        size_layout.addWidget(size_spinbox)
+        size_layout.addStretch()
+        
+        layout.addLayout(size_layout)
+        
+        layout.addSpacing(10)
+        
+        # 平滑显示设置
+        smooth_display = self.settings.value("display/smooth_display", False, type=bool)
+        smooth_check = QCheckBox("启用平滑显示（双线性插值）")
+        smooth_check.setChecked(smooth_display)
+        smooth_check.setToolTip(
+            "启用后，图像缩放时使用双线性插值，显示更平滑。\n"
+            "禁用后，显示栅格边界，适合查看像素细节。"
+        )
+        layout.addWidget(smooth_check)
+        
+        layout.addSpacing(10)
+        
+        # 提示信息
+        tip_label = QLabel(
+            "<i>提示：推荐值为 2048-4096。<br>"
+            "较大的值需要更多内存和计算资源。</i>"
+        )
+        tip_label.setStyleSheet("color: #7f8c8d;")
+        tip_label.setWordWrap(True)
+        layout.addWidget(tip_label)
+        
+        layout.addStretch()
+        
+        # 按钮
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        
+        if dialog.exec() == QDialog.Accepted:
+            self.max_display_size = size_spinbox.value()
+            smooth_display = smooth_check.isChecked()
+            # 保存设置到 QSettings
+            self.settings.setValue("display/max_display_size", self.max_display_size)
+            self.settings.setValue("display/smooth_display", smooth_display)
+            QMessageBox.information(
+                self, 
+                "设置已保存",
+                f"最大显示尺寸已设置为 {self.max_display_size} 像素\n"
+                f"平滑显示: {'已启用' if smooth_display else '已禁用'}\n\n"
+                "新设置将在下次打开图像时生效。"
+            )
 
 
 if __name__ == "__main__":
