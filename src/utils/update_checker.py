@@ -17,7 +17,7 @@ from packaging import version as pkg_version
 
 import requests
 
-from src.version import __version__, GITHUB_API_URL, APP_NAME
+from src.version import __version__, VERSION_JSON_URL, GITHUB_RELEASES_URL, APP_NAME, GITHUB_REPO
 
 
 class UpdateError(Exception):
@@ -48,6 +48,9 @@ class UpdateChecker:
         """
         检查是否有新版本可用
         
+        从仓库中的 version.json 文件读取版本信息（通过 raw.githubusercontent.com）
+        这种方式避免了 GitHub API 的速率限制问题。
+        
         Returns:
             如果有新版本，返回包含以下键的字典：
             - version: 新版本号
@@ -61,26 +64,28 @@ class UpdateChecker:
             NetworkError: 无法连接到 GitHub（如网络问题）
         """
         try:
+            # 从仓库的 version.json 文件读取版本信息
             response = requests.get(
-                GITHUB_API_URL,
-                timeout=self.TIMEOUT,
-                headers={'Accept': 'application/vnd.github.v3+json'}
+                VERSION_JSON_URL,
+                timeout=self.TIMEOUT
             )
             response.raise_for_status()
             
-            release_data = response.json()
-            self.latest_release_info = release_data
+            version_data = response.json()
+            self.latest_release_info = version_data
             
-            latest_version = release_data.get('tag_name', '').lstrip('v')
+            latest_version = version_data.get('version', '').lstrip('v')
             
             # 版本比较
             if self._is_newer_version(latest_version):
-                download_url = self._get_download_url_for_platform(release_data.get('assets', []))
+                # 获取当前平台对应的下载链接
+                download_url = self._get_download_url_for_platform_from_json(version_data)
+                
                 return {
                     'version': latest_version,
-                    'name': release_data.get('name', ''),
-                    'body': release_data.get('body', ''),
-                    'html_url': release_data.get('html_url', ''),
+                    'name': version_data.get('name', f'v{latest_version}'),
+                    'body': version_data.get('changelog', ''),
+                    'html_url': version_data.get('release_url', GITHUB_RELEASES_URL + '/latest'),
                     'download_url': download_url,
                 }
             
@@ -92,8 +97,10 @@ class UpdateChecker:
             raise NetworkError("无法连接到 GitHub，请检查网络连接。\n如果您在中国大陆，可能需要使用代理。")
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 404:
-                return None  # 没有 Release
-            raise NetworkError(f"GitHub API 请求失败: {e}")
+                raise NetworkError(f"未找到版本信息文件。\n请确保仓库中存在 version.json 文件。\n\n您可以访问：{GITHUB_RELEASES_URL}")
+            raise NetworkError(f"获取版本信息失败: HTTP {e.response.status_code}\n\n您可以访问：{GITHUB_RELEASES_URL}")
+        except ValueError as e:
+            raise UpdateError(f"版本信息文件格式错误: {e}")
         except Exception as e:
             raise UpdateError(f"检查更新时发生错误: {e}")
     
@@ -105,27 +112,22 @@ class UpdateChecker:
             # 如果版本解析失败，简单字符串比较
             return latest_version != self.current_version
     
-    def _get_download_url_for_platform(self, assets: list) -> Optional[str]:
-        """根据当前平台获取对应的下载链接"""
+    def _get_download_url_for_platform_from_json(self, version_data: dict) -> Optional[str]:
+        """从 version.json 数据中根据当前平台获取对应的下载链接"""
         system = platform.system().lower()
         
-        # 定义平台对应的文件后缀
+        # 从 downloads 字段获取平台对应的下载链接
+        downloads = version_data.get('downloads', {})
+        
         if system == 'windows':
-            extensions = ['.exe', '.msi']
+            return downloads.get('windows')
         elif system == 'linux':
-            extensions = ['.appimage', '.AppImage']
+            return downloads.get('linux')
         elif system == 'darwin':
-            extensions = ['.dmg', '.pkg']
-        else:
-            return None
+            return downloads.get('mac') or downloads.get('macos')
         
-        for asset in assets:
-            name = asset.get('name', '')
-            for ext in extensions:
-                if name.lower().endswith(ext.lower()):
-                    return asset.get('browser_download_url')
-        
-        return None
+        # 如果没有找到特定平台的下载链接，返回通用下载链接
+        return downloads.get('universal')
     
     def download_update(
         self, 
