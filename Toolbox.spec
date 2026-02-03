@@ -16,7 +16,6 @@ ONEFILE = os.environ.get('ONEFILE', '0') == '1'
 
 # --- 2. 资源路径配置 ---
 datas = [
-    ('src', 'src'),
     ('resources', 'resources'),
 ]
 
