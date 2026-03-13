@@ -8,6 +8,8 @@ from osgeo import __file__ as gdal_file
 IS_WINDOWS = sys.platform.startswith('win')
 # Linux 下开启 strip 以减小二进制体积
 STRIP = False if IS_WINDOWS else True
+# Windows 下禁用 UPX 以避免打包缓慢且大量 DLL 无法压缩 (CFG 保护)
+UPX_ENABLED = False if IS_WINDOWS else True
 # 动态确定名称：Windows 下为 Toolbox_win，Linux 下为 Toolbox_linux
 target_name = 'Toolbox_win' if IS_WINDOWS else 'Toolbox_linux'
 
@@ -93,7 +95,7 @@ if ONEFILE:
         debug=False,
         bootloader_ignore_signals=False,
         strip=STRIP,
-        upx=True,
+        upx=UPX_ENABLED,
         console=False,
         icon=[icon_path] if icon_path else None,
     )
@@ -108,7 +110,7 @@ else:
         debug=False,
         bootloader_ignore_signals=False,
         strip=STRIP,
-        upx=True,
+        upx=UPX_ENABLED,
         console=False,
         icon=[icon_path] if icon_path else None,
     )
@@ -118,6 +120,6 @@ else:
         a.binaries,
         a.datas,
         strip=False,
-        upx=True,
+        upx=UPX_ENABLED,
         name=target_name, # 这里是生成的文件夹名称：Toolbox_win 或 Toolbox_linux
     )
