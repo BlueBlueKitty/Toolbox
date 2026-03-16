@@ -9,8 +9,8 @@ import webbrowser
 from PySide6.QtWidgets import (QMainWindow, QApplication, QMessageBox, QDialog,
                                QWidget, QVBoxLayout, QGridLayout, QPushButton, QLabel,
                                QGroupBox, QScrollArea, QMenuBar, QMenu, QProgressDialog)
-from PySide6.QtGui import QIcon, QAction
-from PySide6.QtCore import Qt, QThread, Signal, QSettings
+from PySide6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor
+from PySide6.QtCore import Qt, QThread, Signal, QSettings, QTimer, QEvent
 import sys
 import traceback
 
@@ -23,6 +23,27 @@ from src.utils import tiff_boundary_to_vector
 from src.utils import AppImageInstaller
 from src.utils import UpdateChecker, UpdateError, NetworkError
 from src.version import __version__, APP_DISPLAY_NAME
+
+
+class UpdateCheckWorker(QThread):
+    update_found = Signal(dict)
+    no_update = Signal()
+    error_occurred = Signal(str, bool)
+
+    def run(self):
+        checker = UpdateChecker()
+        try:
+            update_info = checker.check_for_updates()
+            if update_info:
+                self.update_found.emit(update_info)
+            else:
+                self.no_update.emit()
+        except NetworkError as e:
+            self.error_occurred.emit(str(e), True)
+        except UpdateError as e:
+            self.error_occurred.emit(str(e), False)
+        except Exception as e:
+            self.error_occurred.emit(str(e), False)
 
 
 class MainWindow(QMainWindow):
@@ -56,6 +77,11 @@ class MainWindow(QMainWindow):
         # 检查是否需要安装 AppImage
         self._check_appimage_install()
 
+        # 自动检查更新（后台执行）
+        self._latest_update_info = None
+        self._update_worker = None
+        QTimer.singleShot(800, self._start_auto_update_check)
+
     def _create_menu_bar(self):
         """创建菜单栏"""
         menubar = self.menuBar()
@@ -70,11 +96,14 @@ class MainWindow(QMainWindow):
         
         # 帮助菜单
         help_menu = menubar.addMenu("帮助")
+        self.help_menu_action = help_menu.menuAction()
+        self._help_menu_text = "帮助"
+        self._init_help_menu_dot(menubar)
         
         # 检查更新
-        check_update_action = QAction("检查更新...", self)
-        check_update_action.triggered.connect(self._on_check_update)
-        help_menu.addAction(check_update_action)
+        self.check_update_action = QAction("检查更新...", self)
+        self.check_update_action.triggered.connect(self._on_check_update)
+        help_menu.addAction(self.check_update_action)
         
         help_menu.addSeparator()
         
@@ -336,6 +365,33 @@ class MainWindow(QMainWindow):
             # 静默失败，不影响主程序
             pass
 
+    def _init_help_menu_dot(self, menubar: QMenuBar):
+        """在菜单栏上覆盖一个小红点，避免图标吞文字"""
+        self.help_menu_dot = QLabel(menubar)
+        self.help_menu_dot.setFixedSize(8, 8)
+        self.help_menu_dot.setStyleSheet("background-color: #e74c3c; border-radius: 4px;")
+        self.help_menu_dot.setVisible(False)
+        self.help_menu_dot.raise_()
+        menubar.installEventFilter(self)
+
+    def _update_help_menu_dot_position(self):
+        if not getattr(self, "help_menu_action", None):
+            return
+        menubar = self.menuBar()
+        rect = menubar.actionGeometry(self.help_menu_action)
+        if rect.isNull():
+            self.help_menu_dot.setVisible(False)
+            return
+        x = rect.right() - 8
+        y = rect.top() + 4
+        self.help_menu_dot.move(x, y)
+
+    def eventFilter(self, obj, event):
+        if obj is self.menuBar() and event.type() in (QEvent.Resize, QEvent.Show, QEvent.LayoutRequest, QEvent.ActionChanged):
+            if getattr(self, "help_menu_dot", None):
+                self._update_help_menu_dot_position()
+        return super().eventFilter(obj, event)
+
     def _ask_install_appimage(self, installer):
         """询问用户是否安装 AppImage"""
         reply = QMessageBox.question(
@@ -380,8 +436,10 @@ class MainWindow(QMainWindow):
             self.statusBar().clearMessage()
             
             if update_info:
+                self._set_update_indicator(True, update_info)
                 self._show_update_dialog(update_info, checker)
             else:
+                self._set_update_indicator(False, None)
                 QMessageBox.information(
                     self, 
                     "检查更新", 
@@ -391,6 +449,70 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"检查更新时发生错误: {str(e)}")
             traceback.print_exc()
+
+    def _start_auto_update_check(self):
+        """启动自动检查更新（后台线程）"""
+        try:
+            self.statusBar().showMessage("正在检查更新...")
+            self._update_worker = UpdateCheckWorker()
+            self._update_worker.update_found.connect(self._on_auto_update_found)
+            self._update_worker.no_update.connect(self._on_auto_no_update)
+            self._update_worker.error_occurred.connect(self._on_auto_update_error)
+            self._update_worker.start()
+        except Exception:
+            # 自动检查失败不影响主程序
+            self.statusBar().clearMessage()
+
+    def _on_auto_update_found(self, update_info: dict):
+        self.statusBar().clearMessage()
+        self._set_update_indicator(True, update_info)
+        # 自动提示更新内容
+        checker = UpdateChecker()
+        self._show_update_dialog(update_info, checker)
+
+    def _on_auto_no_update(self):
+        self.statusBar().clearMessage()
+
+    def _on_auto_update_error(self, message: str, is_network: bool):
+        # 自动检查失败不打扰用户，仅在状态栏提示
+        self.statusBar().showMessage("自动检查更新失败")
+        QTimer.singleShot(5000, self.statusBar().clearMessage)
+
+    def _set_update_indicator(self, has_update: bool, update_info: dict | None):
+        """在菜单中显示/隐藏小红点提醒"""
+        if has_update:
+            red_dot = self._get_red_dot_icon()
+            self.check_update_action.setIcon(red_dot)
+            if hasattr(self, "help_menu_dot") and self.help_menu_dot:
+                self.help_menu_dot.setVisible(True)
+                self._update_help_menu_dot_position()
+            self.check_update_action.setText("检查更新...  (有新版本)")
+            if update_info:
+                version = update_info.get('version', '')
+                changelog = update_info.get('body', '')
+                tip = f"发现新版本 v{version}\n" + (changelog[:200] + ("..." if len(changelog) > 200 else ""))
+                self.check_update_action.setToolTip(tip)
+            self._latest_update_info = update_info
+        else:
+            self.check_update_action.setIcon(QIcon())
+            if hasattr(self, "help_menu_dot") and self.help_menu_dot:
+                self.help_menu_dot.setVisible(False)
+            self.check_update_action.setText("检查更新...")
+            self.check_update_action.setToolTip("")
+            self._latest_update_info = None
+
+    def _get_red_dot_icon(self) -> QIcon:
+        """生成小红点图标"""
+        size = 10
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setBrush(QColor("#e74c3c"))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(0, 0, size - 1, size - 1)
+        painter.end()
+        return QIcon(pixmap)
     
     def _show_update_dialog(self, update_info: dict, checker: UpdateChecker):
         """显示更新对话框"""

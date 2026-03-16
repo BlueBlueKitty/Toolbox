@@ -188,6 +188,10 @@ class UpdateChecker:
         Returns:
             True 如果启动成功（应用将退出以完成更新）
         """
+        # 检测是否有其他实例在运行，避免安装被占用
+        if self._has_other_instance_running():
+            raise UpdateError("检测到另一个 Toolbox 正在运行，请先关闭后再安装更新。")
+
         system = platform.system().lower()
         
         if system == 'windows':
@@ -240,3 +244,35 @@ chmod +x "{current_appimage}"
             raise
         except Exception as e:
             raise UpdateError(f"应用更新失败: {e}")
+
+    def _has_other_instance_running(self) -> bool:
+        """检查是否有其他 Toolbox 实例在运行（不包含当前进程）"""
+        system = platform.system().lower()
+        current_pid = os.getpid()
+        try:
+            if system == 'windows':
+                # 使用 PowerShell 获取进程 PID 列表
+                result = subprocess.run(
+                    ["powershell", "-Command", "Get-Process Toolbox_win -ErrorAction SilentlyContinue | Select-Object -Expand Id"],
+                    capture_output=True,
+                    text=True
+                )
+                pids = [int(line.strip()) for line in result.stdout.splitlines() if line.strip().isdigit()]
+                return any(pid != current_pid for pid in pids)
+            elif system == 'linux':
+                # 使用 pgrep 获取 PID 列表（进程名为 Toolbox_linux 或 AppImage 名称）
+                patterns = ["Toolbox_linux"]
+                appimage_path = os.environ.get("APPIMAGE", "")
+                if appimage_path:
+                    patterns.append(os.path.basename(appimage_path))
+                pids = set()
+                for pattern in patterns:
+                    result = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
+                    for line in result.stdout.splitlines():
+                        if line.strip().isdigit():
+                            pids.add(int(line.strip()))
+                return any(pid != current_pid for pid in pids)
+        except Exception:
+            # 检测失败则不阻止更新
+            return False
+        return False

@@ -37,7 +37,7 @@ if hasattr(sys, "_MEIPASS"):
             os.environ["GDAL_DATA"] = p
             break
 else:
-    # 2. 开发环境下的路径设置（.venv虚拟环境）
+    # 2. 开发环境下的路径设置（.venv虚拟环境）ing
     # 检查虚拟环境中的 PROJ 数据路径
     venv_proj_candidates = [
         os.path.join(sys.prefix, "Lib", "site-packages", "osgeo", "data", "proj"),
