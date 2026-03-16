@@ -124,10 +124,10 @@ class TiffBoundarySettingsDialog(QDialog):
         main_layout.addWidget(coord_group)
         
         # 添加确定和取消按钮
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        main_layout.addWidget(buttons)
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self._on_accept_clicked)
+        self.button_box.rejected.connect(self.reject)
+        main_layout.addWidget(self.button_box)
         
         self.setLayout(main_layout)
         
@@ -223,6 +223,11 @@ class TiffBoundarySettingsDialog(QDialog):
     def update_file_extension(self):
         """已废弃，保留以兼容"""
         pass
+
+    def _on_accept_clicked(self):
+        """在窗口内部完成校验与转换，成功后再关闭窗口。"""
+        if self.execute_conversion():
+            self.accept()
 
     
     def get_settings(self):

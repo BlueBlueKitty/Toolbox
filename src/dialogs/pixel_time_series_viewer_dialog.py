@@ -496,11 +496,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         # 更新colorbar的数值范围
         if hasattr(self, 'colorbar_1'):
-            self.colorbar_1.set_range(settings['value_min'], settings['value_max'])
-            self.colorbar_1.set_colormap(self.colormap_combo.currentText(), settings['colormap_reversed'])
+            self._refresh_colorbar_range(1)
         if hasattr(self, 'colorbar_2'):
-            self.colorbar_2.set_range(settings['value_min'], settings['value_max'])
-            self.colorbar_2.set_colormap(self.colormap_combo.currentText(), settings['colormap_reversed'])
+            self._refresh_colorbar_range(2)
+
+        self._sync_selected_pixel_markers()
     
     def on_suggest_colormap(self, colormap_name):
         """接收建议的colormap并切换"""
@@ -521,6 +521,69 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 min_val = float(np.min(valid_data))
                 max_val = float(np.max(valid_data))
                 self.render_settings.set_image_stats(min_val, max_val)
+
+    def _clear_selected_pixel_state(self):
+        """清除当前选点及其标记。"""
+        self.selected_pixel = None
+        if hasattr(self, 'pixel_info_label'):
+            self.pixel_info_label.setText("请点击图像选择像素")
+        self._sync_selected_pixel_markers()
+
+    def _sync_selected_pixel_markers(self):
+        """在两个图像窗口同步选点标记。"""
+        for viewer_id in (1, 2):
+            viewer = getattr(self, f'image_viewer_{viewer_id}', None)
+            if viewer is None:
+                continue
+            if self.selected_pixel is None:
+                viewer.clear_selected_pixel()
+            else:
+                viewer.set_selected_pixel(*self.selected_pixel)
+
+    def _get_colorbar_data_range(self, viewer_id):
+        """获取指定窗口当前图像的有效数据范围。"""
+        data = getattr(self, f'_cached_image_{viewer_id}', None)
+        if data is None:
+            return None
+
+        settings = self.render_settings.get_all_settings()
+        display_mode = settings.get('display_mode', '灰度')
+
+        if data.ndim == 3:
+            if display_mode == 'RGB':
+                return None
+            band = min(settings.get('gray_band', 1), data.shape[2]) - 1
+            data = data[:, :, band]
+
+        valid_mask = np.isfinite(data)
+        if self.nodata_value is not None:
+            if np.isnan(self.nodata_value):
+                valid_mask = valid_mask & ~np.isnan(data)
+            else:
+                valid_mask = valid_mask & (data != self.nodata_value)
+
+        if not np.any(valid_mask):
+            return None
+
+        valid_data = data[valid_mask]
+        return float(np.min(valid_data)), float(np.max(valid_data))
+
+    def _refresh_colorbar_range(self, viewer_id):
+        """刷新指定窗口 colorbar 的显示范围。"""
+        colorbar = getattr(self, f'colorbar_{viewer_id}', None)
+        if colorbar is None:
+            return
+
+        settings = self.render_settings.get_all_settings()
+        data_range = self._get_colorbar_data_range(viewer_id)
+        if settings.get('auto_range', True) and data_range is not None:
+            vmin, vmax = data_range
+        else:
+            vmin = settings['value_min']
+            vmax = settings['value_max']
+
+        colorbar.set_range(vmin, vmax)
+        colorbar.set_colormap(self.colormap_combo.currentText(), settings['colormap_reversed'])
     
     def switch_image(self, viewer_id, direction):
         """切换图像
@@ -668,6 +731,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         # 确保图像居中显示（使用延迟模式）
         viewer.fit_in_view(delayed=True)
+        self._refresh_colorbar_range(viewer_id)
+        self._sync_selected_pixel_markers()
         
         # 更新滑块
         slider.blockSignals(True)
@@ -806,7 +871,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._cached_image_2 = None
             self._cached_index_2 = -1
             self._cached_original_size_2 = None
-            self.selected_pixel = None
+            self._clear_selected_pixel_state()
             
             # 生成文件名列表（用于显示）
             self.image_files = []
@@ -866,7 +931,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             # 清空之前的数据
             self.image_files = []
             self.date_list = []
-            self.selected_pixel = None
+            self._clear_selected_pixel_state()
             self.nodata_value = None
             
             # 重置转换标志
@@ -1156,7 +1221,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._cached_image_2 = None
             self._cached_index_2 = -1
             self._cached_original_size_2 = None
-            self.selected_pixel = None
+            self._clear_selected_pixel_state()
             self.date_list = []
             
             # 按文件名排序
@@ -1385,7 +1450,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         """像素点击事件处理"""
         self.selected_pixel = (x, y)
         self.pixel_info_label.setText(f"选中像素: ({x}, {y})")
-        
+        self._sync_selected_pixel_markers()
+
         # 绘制时序曲线
         self.update_time_series_plot()
     
@@ -1795,8 +1861,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
         if ok:
             if text.strip() == "":
                 # 取消Nodata设置
+                self.nodata_value = None
                 self.image_viewer_1.set_nodata_value(None)
                 self.image_viewer_2.set_nodata_value(None)
+                self._refresh_colorbar_range(1)
+                self._refresh_colorbar_range(2)
                 QMessageBox.information(self, "成功", "已取消Nodata值设置")
             else:
                 try:
@@ -1806,8 +1875,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     else:
                         nodata_value = float(text)
                     
+                    self.nodata_value = nodata_value
                     self.image_viewer_1.set_nodata_value(nodata_value)
                     self.image_viewer_2.set_nodata_value(nodata_value)
+                    self._refresh_colorbar_range(1)
+                    self._refresh_colorbar_range(2)
                     QMessageBox.information(self, "成功", f"已设置Nodata值为: {nodata_value}")
                 except ValueError:
                     QMessageBox.warning(self, "错误", "请输入有效的数字或'nan'！")
@@ -1863,6 +1935,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 同时更新另一个窗口的像素值，基于它当前缓存的图像
         other_viewer_id = 2 if viewer_id == 1 else 1
         other_pixel_label = getattr(self, f'pixel_value_label_{other_viewer_id}')
+        other_colorbar = getattr(self, f'colorbar_{other_viewer_id}', None)
         
         # 获取另一个窗口缓存的图像数据和原始尺寸
         other_cached_image = getattr(self, f'_cached_image_{other_viewer_id}')
@@ -1888,18 +1961,30 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 if isinstance(other_value, (int, float, np.integer, np.floating)):
                     if np.isnan(other_value) if isinstance(other_value, float) else False:
                         other_pixel_label.setText(f"像素值: ({x}, {y}) = NaN")
+                        if other_colorbar:
+                            other_colorbar.set_current_value(None)
                     else:
                         other_pixel_label.setText(f"像素值: ({x}, {y}) = {other_value:.6g}")
+                        if other_colorbar:
+                            other_colorbar.set_current_value(float(other_value))
                 elif isinstance(other_value, np.ndarray):
                     if other_value.ndim == 0:
                         other_pixel_label.setText(f"像素值: ({x}, {y}) = {other_value:.6g}")
+                        if other_colorbar:
+                            other_colorbar.set_current_value(float(other_value))
                     else:
                         value_str = ", ".join([f"{v:.6g}" for v in other_value])
                         other_pixel_label.setText(f"像素值: ({x}, {y}) = [{value_str}]")
+                        if other_colorbar:
+                            other_colorbar.set_current_value(None)
             else:
                 other_pixel_label.setText("像素值: -")  # 坐标超出范围
+                if other_colorbar:
+                    other_colorbar.set_current_value(None)
         else:
             other_pixel_label.setText("像素值: -")
+            if other_colorbar:
+                other_colorbar.set_current_value(None)
     
     def convert_to_db(self):
         """将显示的图像转换为dB (10*log10)"""

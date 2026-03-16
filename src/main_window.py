@@ -34,6 +34,7 @@ class MainWindow(QMainWindow):
         
         # 从设置中读取降采样尺寸，默认值为 2048
         self.max_display_size = self.settings.value("display/max_display_size", 2048, type=int)
+        self._open_tool_windows = set()
         
         # 设置窗口属性
         self.setWindowTitle("遥感工具箱")
@@ -275,9 +276,8 @@ class MainWindow(QMainWindow):
         图像局部查看器按钮点击事件
         """
         try:
-            # 创建并显示图像局部查看器对话框
             dialog = LocalImageViewerDialog(self, max_display_size=self.max_display_size)
-            dialog.exec()
+            self._show_tool_window(dialog)
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开图像局部查看器失败: {str(e)}")
             traceback.print_exc()
@@ -287,9 +287,8 @@ class MainWindow(QMainWindow):
         像素时序查看器按钮点击事件
         """
         try:
-            # 创建并显示像素时序查看器对话框
             dialog = PixelTimeSeriesViewerDialog(self, max_display_size=self.max_display_size)
-            dialog.exec()
+            self._show_tool_window(dialog)
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开像素时序查看器失败: {str(e)}")
             traceback.print_exc()
@@ -300,9 +299,7 @@ class MainWindow(QMainWindow):
         """
         try:
             dialog = TiffBoundarySettingsDialog(self)
-            result = dialog.exec()
-            if result == QDialog.Accepted:
-                dialog.execute_conversion()
+            self._show_tool_window(dialog)
         except Exception as e:
             QMessageBox.critical(self, "错误", f"发生异常: {str(e)}")
             traceback.print_exc()
@@ -312,12 +309,20 @@ class MainWindow(QMainWindow):
         DEM数据获取按钮点击事件
         """
         try:
-            # 创建并显示DEM数据获取对话框
             dialog = DEMAcquisitionDialog(self)
-            dialog.exec()
+            self._show_tool_window(dialog)
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开DEM数据获取工具失败: {str(e)}")
             traceback.print_exc()
+
+    def _show_tool_window(self, dialog):
+        """以非模态方式显示工具窗口，并持有引用直到关闭。"""
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        self._open_tool_windows.add(dialog)
+        dialog.destroyed.connect(lambda *_args, ref=dialog: self._open_tool_windows.discard(ref))
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _check_appimage_install(self):
         """检查 AppImage 运行状态并询问是否安装"""

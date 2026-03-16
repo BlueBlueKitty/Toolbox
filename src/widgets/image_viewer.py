@@ -6,10 +6,11 @@ Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 '''
 
 import numpy as np
-from PySide6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, 
-                               QMenu, QApplication)
+from PySide6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
+                               QGraphicsLineItem, QGraphicsEllipseItem, QMenu,
+                               QApplication)
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
-from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QCursor
+from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QCursor, QPen, QBrush
 
 try:
     import matplotlib.cm as cm
@@ -113,6 +114,10 @@ class ImageViewer(QGraphicsView):
         
         # 设置鼠标样式为箭头
         self.viewport().setCursor(Qt.ArrowCursor)
+
+        # 持久选点标记
+        self.selected_pixel = None
+        self._selected_pixel_items = []
     
     def set_image_from_array(self, image_array, original_size=None):
         """
@@ -257,6 +262,7 @@ class ImageViewer(QGraphicsView):
         else:
             self.image_item.setTransformationMode(Qt.FastTransformation)
         self.scene.addItem(self.image_item)
+        self._rebuild_selected_pixel_marker()
         
         # 注意：不在这里调用fit_in_view，让调用者在合适的时机调用
     
@@ -380,6 +386,77 @@ class ImageViewer(QGraphicsView):
         """
         self.geotransform = geotransform
         self.projection = projection
+
+    def set_selected_pixel(self, x, y):
+        """设置选中的原始像素坐标并显示标记。"""
+        self.selected_pixel = (int(x), int(y))
+        self._rebuild_selected_pixel_marker()
+
+    def clear_selected_pixel(self):
+        """清除选点标记。"""
+        self.selected_pixel = None
+        self._clear_selected_pixel_marker()
+
+    def _clear_selected_pixel_marker(self):
+        """移除当前选点标记图元。"""
+        for item in self._selected_pixel_items:
+            try:
+                if item.scene() is not None:
+                    self.scene.removeItem(item)
+            except RuntimeError:
+                pass
+        self._selected_pixel_items = []
+
+    def _rebuild_selected_pixel_marker(self):
+        """根据当前图像重建选点标记。"""
+        self._clear_selected_pixel_marker()
+
+        if self.selected_pixel is None or self.image_item is None or self.image_array is None:
+            return
+
+        x, y = self.selected_pixel
+        if not (0 <= x < self.original_width and 0 <= y < self.original_height):
+            return
+
+        display_x = (x + 0.5) / self.downsample_factor
+        display_y = (y + 0.5) / self.downsample_factor
+        if not (0 <= display_x <= self.image_array.shape[1] and 0 <= display_y <= self.image_array.shape[0]):
+            return
+
+        marker_half = max(4.0, min(8.0, 6.0 / max(self.downsample_factor, 1e-6)))
+        circle_radius = max(2.5, marker_half * 0.6)
+
+        outer_pen = QPen(QColor(255, 255, 255), 2)
+        outer_pen.setCosmetic(True)
+        inner_pen = QPen(QColor(220, 20, 60), 1)
+        inner_pen.setCosmetic(True)
+
+        line_segments = [
+            (display_x - marker_half, display_y, display_x + marker_half, display_y),
+            (display_x, display_y - marker_half, display_x, display_y + marker_half),
+        ]
+
+        for x1, y1, x2, y2 in line_segments:
+            outer_line = QGraphicsLineItem(x1, y1, x2, y2)
+            outer_line.setPen(outer_pen)
+            outer_line.setParentItem(self.image_item)
+            self._selected_pixel_items.append(outer_line)
+
+            inner_line = QGraphicsLineItem(x1, y1, x2, y2)
+            inner_line.setPen(inner_pen)
+            inner_line.setParentItem(self.image_item)
+            self._selected_pixel_items.append(inner_line)
+
+        circle = QGraphicsEllipseItem(
+            display_x - circle_radius,
+            display_y - circle_radius,
+            circle_radius * 2,
+            circle_radius * 2,
+        )
+        circle.setPen(inner_pen)
+        circle.setBrush(QBrush(Qt.NoBrush))
+        circle.setParentItem(self.image_item)
+        self._selected_pixel_items.append(circle)
     
     def fit_in_view(self, delayed=False):
         """适应视图大小

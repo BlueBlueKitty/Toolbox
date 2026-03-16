@@ -213,6 +213,7 @@ function Create-NSISScript {
 ; ${APP_NAME} Installer
 
 !include "MUI2.nsh"
+!include "LogicLib.nsh"
 
 ; 基本信息
 Name "${APP_NAME}"
@@ -241,8 +242,39 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "English"
 
+Function EnsureToolboxNotRunning
+    ; Detect running old version process
+    nsExec::ExecToStack 'cmd /C tasklist /FI "IMAGENAME eq Toolbox_win.exe" | find /I "Toolbox_win.exe" >nul'
+    Pop `$0
+
+    `${If} `$0 == 0
+        MessageBox MB_ICONEXCLAMATION|MB_YESNO "检测到旧版本 ${APP_NAME} 正在运行。`$`r`$`n`$`r`$`n是否现在关闭旧版本并继续安装？" IDYES close_old_version IDNO cancel_install
+
+        close_old_version:
+            nsExec::ExecToStack 'cmd /C taskkill /IM Toolbox_win.exe /F'
+            Pop `$1
+            Sleep 1000
+
+            ; Verify process is closed before file copy
+            nsExec::ExecToStack 'cmd /C tasklist /FI "IMAGENAME eq Toolbox_win.exe" | find /I "Toolbox_win.exe" >nul'
+            Pop `$2
+            `${If} `$2 == 0
+                MessageBox MB_ICONSTOP "无法自动关闭正在运行的 ${APP_NAME}，请手动关闭后重新安装。"
+                Abort
+            `${EndIf}
+
+            Goto done
+
+        cancel_install:
+            Abort
+    `${EndIf}
+
+    done:
+FunctionEnd
+
 ; 安装部分
 Section "安装 ${APP_NAME}" SecMain
+    Call EnsureToolboxNotRunning
     SetOutPath `$INSTDIR
     
     ; 复制所有文件
@@ -332,11 +364,11 @@ function Create-Installer {
     # 创建 NSIS 脚本
     $nsisScript = Create-NSISScript
     
-    # 运行 NSIS
-    & $nsisPath $nsisScript
+    # 运行 NSIS（明确按 UTF-8 解析脚本，避免中文字符导致编码错误）
+    & $nsisPath "/INPUTCHARSET" "UTF8" $nsisScript
     
     if ($LASTEXITCODE -eq 0) {
-        Write-Success "安装程序创建完成: dist\${APP_NAME}-${APP_VERSION}-Setup.exe"
+        Write-Success "安装程序创建完成: dist\${APP_NAME}-${APP_VERSION}-x86_64-Setup.exe"
     }
     else {
         Write-Warn "NSIS 编译失败，请检查脚本"
