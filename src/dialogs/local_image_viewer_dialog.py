@@ -12,7 +12,8 @@ from pathlib import Path
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QFileDialog, QLabel, QMessageBox, QSplitter, 
                                QGroupBox, QButtonGroup, QRadioButton, QListWidget,
-                               QDialogButtonBox, QInputDialog, QComboBox, QFrame)
+                               QDialogButtonBox, QInputDialog, QComboBox, QFrame,
+                               QCheckBox)
 from PySide6.QtCore import Qt, QSettings
 
 # 配置文件路径
@@ -84,6 +85,10 @@ class LocalImageViewerDialog(QDialog):
         
         # dB转换标志
         self._converted_to_db = False   # 是否已转换为dB
+
+        # 拟合曲线显示开关（持久化）
+        settings = get_settings()
+        self.show_fit_curve = settings.value("show_fit_curve", True, type=bool)
         
         # 地理信息
         self.geotransform = None  # GDAL地理变换参数
@@ -155,6 +160,11 @@ class LocalImageViewerDialog(QDialog):
         self.clear_btn = QPushButton("清除绘制")
         self.clear_btn.clicked.connect(self.clear_drawing)
         control_layout1.addWidget(self.clear_btn)
+
+        self.fit_curve_check = QCheckBox("拟合曲线")
+        self.fit_curve_check.setChecked(self.show_fit_curve)
+        self.fit_curve_check.toggled.connect(self.on_fit_curve_toggled)
+        control_layout1.addWidget(self.fit_curve_check)
         
         control_layout1.addStretch()
         
@@ -658,6 +668,29 @@ class LocalImageViewerDialog(QDialog):
             self.figure.clear()
             self.canvas.draw()
             self.chart_info_label.setText("请绘制矩形或折线以查看数据")
+
+    def on_fit_curve_toggled(self, checked):
+        """拟合曲线开关切换"""
+        self.show_fit_curve = checked
+        settings = get_settings()
+        settings.setValue("show_fit_curve", checked)
+        self._refresh_analysis_chart()
+
+    def _refresh_analysis_chart(self):
+        """根据当前绘制状态刷新分析图"""
+        if self.image_data is None:
+            return
+
+        mode_id = self.mode_group.checkedId() if hasattr(self, 'mode_group') else 0
+        current_rect = getattr(self.image_viewer, 'current_rect', None)
+        polyline_points = getattr(self.image_viewer, 'polyline_points', None)
+
+        if mode_id == 1 and current_rect is not None:
+            self.on_rect_drawn(None)
+        elif mode_id == 2 and polyline_points and len(polyline_points) >= 2:
+            self.on_polyline_drawn(None)
+        else:
+            self.show_image_histogram()
     
     def show_image_histogram(self):
         """显示整个图像的直方图"""
@@ -896,6 +929,166 @@ class LocalImageViewerDialog(QDialog):
                 self.hover_line.set_visible(False)
                 self.canvas.draw_idle()
     
+    def _compute_histogram_spec(self, values, bins=128, low_pct=1.0, high_pct=99.0):
+        """参考 HSBA 直方图规格：固定 bins + 百分位范围。"""
+        flat = np.asarray(values, dtype=np.float64).ravel()
+        flat = flat[np.isfinite(flat)]
+        if flat.size == 0:
+            return None
+        
+        low = float(np.percentile(flat, low_pct))
+        high = float(np.percentile(flat, high_pct))
+        if not np.isfinite(low) or not np.isfinite(high) or low >= high:
+            low = float(np.min(flat))
+            high = float(np.max(flat))
+        if not np.isfinite(low) or not np.isfinite(high) or low >= high:
+            return None
+        
+        bin_edges = np.linspace(low, high, bins + 1, dtype=np.float64)
+        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+        return {
+            "bins": bins,
+            "value_range": (low, high),
+            "bin_edges": bin_edges,
+            "bin_centers": bin_centers,
+            "bin_width": float(bin_edges[1] - bin_edges[0]),
+        }
+    
+    def _compute_histogram(self, values, spec):
+        """在固定 bins/range 下计算直方图及密度。"""
+        flat = np.asarray(values, dtype=np.float64).ravel()
+        flat = flat[np.isfinite(flat)]
+        if flat.size == 0:
+            return None
+        
+        counts, _ = np.histogram(flat, bins=spec["bin_edges"])
+        counts = counts.astype(np.float64)
+        total = max(float(np.sum(counts)), 1.0)
+        density = counts / (total * spec["bin_width"])
+        return {
+            "counts": counts,
+            "density": density,
+        }
+    
+    def _gaussian_kernel(self, sigma, radius=None):
+        if sigma <= 0:
+            return np.array([1.0], dtype=np.float64)
+        if radius is None:
+            radius = int(max(1, round(3.0 * sigma)))
+        x = np.arange(-radius, radius + 1, dtype=np.float64)
+        kernel = np.exp(-0.5 * (x / float(sigma)) ** 2)
+        kernel_sum = float(np.sum(kernel))
+        if kernel_sum > 0:
+            kernel /= kernel_sum
+        return kernel
+    
+    def _smooth_1d(self, y, sigma):
+        """高斯平滑（参考 HSBA 的直方图平滑）。"""
+        arr = np.asarray(y, dtype=np.float64)
+        if arr.size == 0:
+            return arr
+        kernel = self._gaussian_kernel(sigma)
+        pad = len(kernel) // 2
+        padded = np.pad(arr, (pad, pad), mode="reflect")
+        return np.convolve(padded, kernel, mode="valid")
+    
+    def _smooth_1d_with_nans(self, y, sigma):
+        """在含 NaN 的序列上做高斯平滑。"""
+        arr = np.asarray(y, dtype=np.float64)
+        if arr.size == 0:
+            return arr
+        valid = np.isfinite(arr)
+        if not np.any(valid):
+            return np.full_like(arr, np.nan)
+        kernel = self._gaussian_kernel(sigma)
+        pad = len(kernel) // 2
+        data = np.where(valid, arr, 0.0)
+        weight = valid.astype(np.float64)
+        data_padded = np.pad(data, (pad, pad), mode="reflect")
+        weight_padded = np.pad(weight, (pad, pad), mode="reflect")
+        smooth_data = np.convolve(data_padded, kernel, mode="valid")
+        smooth_weight = np.convolve(weight_padded, kernel, mode="valid")
+        with np.errstate(invalid="ignore", divide="ignore"):
+            smooth = smooth_data / smooth_weight
+        smooth[smooth_weight <= 1e-6] = np.nan
+        return smooth
+    
+    def _fit_gmm_on_histogram(self, centers, counts, n_components=2, max_iter=200, tol=1e-5):
+        """在固定直方图上做简单 GMM-EM 拟合（参考 HSBA 的思路）。"""
+        x = np.asarray(centers, dtype=np.float64)
+        w = np.asarray(counts, dtype=np.float64)
+        if x.size == 0 or w.size == 0 or x.size != w.size:
+            return None
+        if np.sum(w) <= 0:
+            return None
+        
+        # 量化初始化：分位数做均值，整体方差做初始 std
+        total = float(np.sum(w))
+        cdf = np.cumsum(w) / total
+        quantiles = np.linspace(0.1, 0.9, n_components)
+        means = np.interp(quantiles, cdf, x)
+        std_global = float(np.sqrt(np.average((x - np.average(x, weights=w)) ** 2, weights=w)))
+        stds = np.full(n_components, max(std_global, 1e-3), dtype=np.float64)
+        weights = np.full(n_components, 1.0 / n_components, dtype=np.float64)
+        
+        prev_ll = -np.inf
+        for _ in range(max_iter):
+            # E-step
+            pdfs = []
+            for k in range(n_components):
+                std = max(float(stds[k]), 1e-6)
+                norm = 1.0 / (std * np.sqrt(2.0 * np.pi))
+                pdf = norm * np.exp(-0.5 * ((x - means[k]) / std) ** 2)
+                pdfs.append(weights[k] * pdf)
+            pdfs = np.vstack(pdfs)  # (k, n)
+            sum_pdfs = np.sum(pdfs, axis=0)
+            sum_pdfs = np.maximum(sum_pdfs, 1e-12)
+            resp = pdfs / sum_pdfs
+            
+            # M-step (weighted by counts)
+            weighted_resp = resp * w
+            nk = np.sum(weighted_resp, axis=1)
+            nk = np.maximum(nk, 1e-12)
+            weights = nk / total
+            means = np.sum(weighted_resp * x, axis=1) / nk
+            variances = np.sum(weighted_resp * (x - means[:, None]) ** 2, axis=1) / nk
+            stds = np.sqrt(np.maximum(variances, 1e-6))
+            
+            # Log-likelihood
+            ll = float(np.sum(w * np.log(sum_pdfs)))
+            if abs(ll - prev_ll) < tol:
+                break
+            prev_ll = ll
+        
+        # 输出拟合曲线（密度）
+        mixture = np.zeros_like(x, dtype=np.float64)
+        for k in range(n_components):
+            std = max(float(stds[k]), 1e-6)
+            norm = 1.0 / (std * np.sqrt(2.0 * np.pi))
+            mixture += weights[k] * norm * np.exp(-0.5 * ((x - means[k]) / std) ** 2)
+        return {
+            "weights": weights,
+            "means": means,
+            "stds": stds,
+            "mixture": mixture,
+        }
+    
+    def _select_gmm_fit(self, centers, counts, target_density):
+        """在 2/3 峰中选择更接近直方图密度的拟合。"""
+        best = None
+        best_sse = None
+        for n_components in (2, 3):
+            if len(centers) < n_components * 4:
+                continue
+            fit = self._fit_gmm_on_histogram(centers, counts, n_components=n_components)
+            if fit is None:
+                continue
+            sse = float(np.sum((fit["mixture"] - target_density) ** 2))
+            if best_sse is None or sse < best_sse:
+                best = fit
+                best_sse = sse
+        return best
+    
     def plot_histogram(self, data_list):
         """绘制直方图（使用填充折线图）"""
         self.figure.clear()
@@ -903,6 +1096,7 @@ class LocalImageViewerDialog(QDialog):
         
         # 绘制每个波段的直方图
         colors = ['red', 'green', 'blue', 'cyan', 'magenta', 'yellow']
+        x_ranges = []
         
         for i, data in enumerate(data_list):
             if len(data) == 0:
@@ -916,29 +1110,84 @@ class LocalImageViewerDialog(QDialog):
             color = colors[i % len(colors)]
             label = f'波段{i+1}' if len(data_list) > 1 else '像素值'
             
-            # 计算直方图（使用更多的bins使x间隔更细）
-            counts, bins = np.histogram(finite_data, bins=200)
-            bin_centers = (bins[:-1] + bins[1:]) / 2
+            # 参考 HSBA：固定 bins + 百分位范围，计算密度直方图
+            spec = self._compute_histogram_spec(finite_data, bins=128, low_pct=1.0, high_pct=99.0)
+            if spec is None:
+                continue
+            hist = self._compute_histogram(finite_data, spec)
+            if hist is None:
+                continue
+            counts = hist["counts"]
+            density = hist["density"]
+            bin_centers = spec["bin_centers"]
+            bin_width = spec["bin_width"]
+            x_ranges.append(spec["value_range"])
             
-            # 绘制填充折线图
-            ax.fill_between(bin_centers, counts, alpha=0.5, color=color, label=label)
-            ax.plot(bin_centers, counts, color=color, linewidth=2)
+            # 绘制密度直方图（更平滑）
+            ax.bar(
+                bin_centers,
+                density,
+                width=bin_width,
+                color=color,
+                alpha=0.55,
+                label=f'{label}直方图'
+            )
+            
+            # 绘制平滑后的经验曲线
+            smooth_density = self._smooth_1d(density, sigma=1.0)
+            ax.plot(
+                bin_centers,
+                smooth_density,
+                color=color,
+                linewidth=1.6,
+                alpha=0.9,
+                label=f'{label}平滑'
+            )
+            
+            # 拟合 GMM 曲线（2/3 峰中择优）
+            if self.show_fit_curve:
+                fit = self._select_gmm_fit(bin_centers, counts, smooth_density)
+                if fit is not None:
+                    ax.plot(
+                        bin_centers,
+                        fit["mixture"],
+                        color='black',
+                        linewidth=2.2,
+                        alpha=0.9,
+                        label=f'{label}拟合'
+                    )
+        
+        if x_ranges:
+            x_min = min(r[0] for r in x_ranges)
+            x_max = max(r[1] for r in x_ranges)
+            if x_max > x_min:
+                ax.set_xlim(x_min, x_max)
         
         ax.set_xlabel('像素值')
-        ax.set_ylabel('频数')
+        ax.set_ylabel('密度')
         ax.set_title('矩形区域像素值直方图')
-        ax.legend()
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend()
         ax.grid(True, alpha=0.3)
         
         self.figure.tight_layout()
         self.canvas.draw()
         
-        self.chart_info_label.setText(f"直方图: 共{sum(len(d) for d in data_list)}个像素")
+        if self.show_fit_curve:
+            self.chart_info_label.setText(f"直方图(平滑+拟合): 共{sum(len(d) for d in data_list)}个像素")
+        else:
+            self.chart_info_label.setText(f"直方图(平滑): 共{sum(len(d) for d in data_list)}个像素")
     
     def plot_polyline(self, values, points):
         """绘制折线图（改进版：平滑曲线+折点标记+填充）"""
         self.figure.clear()
         ax = self.figure.add_subplot(111)
+        
+        if not values:
+            self.canvas.draw()
+            self.chart_info_label.setText("折线图: 无有效数据")
+            return
         
         indices = list(range(len(values)))
         
@@ -968,8 +1217,24 @@ class LocalImageViewerDialog(QDialog):
                     valid_values.append(v)
             
             # 绘制填充曲线
-            ax.fill_between(valid_indices, valid_values, alpha=0.3, color='blue', label='像素值')
-            ax.plot(valid_indices, valid_values, color='blue', linewidth=1)
+            ax.fill_between(valid_indices, valid_values, alpha=0.3, color='red', label='像素值')
+            ax.plot(valid_indices, valid_values, color='red', linewidth=1)
+            
+            # 平滑拟合曲线（参考 HSBA 的平滑思路）
+            series = np.full(len(values), np.nan, dtype=np.float64)
+            for idx, val in zip(valid_indices, valid_values, strict=False):
+                series[idx] = float(val)
+            smooth_series = self._smooth_1d_with_nans(series, sigma=2.0)
+            smooth_valid = np.isfinite(smooth_series)
+            if self.show_fit_curve and np.any(smooth_valid):
+                ax.plot(
+                    np.arange(len(values))[smooth_valid],
+                    smooth_series[smooth_valid],
+                    color='black',
+                    linewidth=2.0,
+                    alpha=0.9,
+                    label='拟合'
+                )
             
             # 标记折点
             corner_x = [i for i in corner_indices if i in valid_indices]
@@ -999,6 +1264,22 @@ class LocalImageViewerDialog(QDialog):
                 ax.plot(valid_indices, valid_values, color=color, linewidth=1, 
                        label=f'波段{band_idx+1}')
                 
+                # 平滑拟合曲线
+                series = np.full(len(values), np.nan, dtype=np.float64)
+                for idx, val in zip(valid_indices, valid_values, strict=False):
+                    series[idx] = float(val)
+                smooth_series = self._smooth_1d_with_nans(series, sigma=2.0)
+                smooth_valid = np.isfinite(smooth_series)
+                if self.show_fit_curve and np.any(smooth_valid):
+                    ax.plot(
+                        np.arange(len(values))[smooth_valid],
+                        smooth_series[smooth_valid],
+                        color='black',
+                        linewidth=2.0,
+                        alpha=0.9,
+                        label=f'波段{band_idx+1}拟合'
+                    )
+                
                 # 标记折点
                 corner_x = [i for i in corner_indices if i in valid_indices]
                 corner_y = [valid_values[valid_indices.index(i)] for i in corner_x]
@@ -1023,6 +1304,22 @@ class LocalImageViewerDialog(QDialog):
                 ax.fill_between(gray_indices, gray_values, alpha=0.15, color='black')
                 ax.plot(gray_indices, gray_values, color='black', linewidth=1, 
                        linestyle='--', alpha=0.7, label='灰度值')
+                
+                # 平滑灰度曲线
+                gray_series = np.full(len(values), np.nan, dtype=np.float64)
+                for idx, val in zip(gray_indices, gray_values, strict=False):
+                    gray_series[idx] = float(val)
+                smooth_gray = self._smooth_1d_with_nans(gray_series, sigma=2.0)
+                smooth_valid = np.isfinite(smooth_gray)
+                if self.show_fit_curve and np.any(smooth_valid):
+                    ax.plot(
+                        np.arange(len(values))[smooth_valid],
+                        smooth_gray[smooth_valid],
+                        color='black',
+                        linewidth=2.0,
+                        alpha=0.95,
+                        label='灰度拟合'
+                    )
                 
                 # 标记折点
                 corner_x = [i for i in corner_indices if i in gray_indices]

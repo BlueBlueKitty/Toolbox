@@ -27,17 +27,21 @@ if (Test-Path $VERSION_FILE) {
         # 分别匹配单引号和双引号
         if ($lineText -match "=\s*'([^']+)'") {
             $APP_VERSION = $matches[1]
-        } elseif ($lineText -match '=\s*"([^"]+)"') {
+        }
+        elseif ($lineText -match '=\s*"([^"]+)"') {
             $APP_VERSION = $matches[1]
-        } else {
+        }
+        else {
             $APP_VERSION = "0.0.0"
             Write-Host "[WARN] 无法从 version.py 解析版本号，使用默认版本" -ForegroundColor Yellow
         }
-    } else {
+    }
+    else {
         $APP_VERSION = "0.0.0"
         Write-Host "[WARN] version.py 中未找到 __version__" -ForegroundColor Yellow
     }
-} else {
+}
+else {
     $APP_VERSION = "0.0.0"
     Write-Host "[WARN] 未找到 version.py，使用默认版本" -ForegroundColor Yellow
 }
@@ -248,7 +252,7 @@ Function EnsureToolboxNotRunning
     Pop `$0
 
     `${If} `$0 == 0
-        MessageBox MB_ICONEXCLAMATION|MB_YESNO "检测到旧版本 ${APP_NAME} 正在运行。`$`r`$`n`$`r`$`n是否现在关闭旧版本并继续安装？" IDYES close_old_version IDNO cancel_install
+        MessageBox MB_ICONEXCLAMATION|MB_YESNO "检测到旧版本 ${APP_NAME} 正在运行。`$\n`$\n是否现在关闭旧版本并继续安装？" IDYES close_old_version IDNO cancel_install
 
         close_old_version:
             nsExec::ExecToStack 'cmd /C taskkill /IM Toolbox_win.exe /F'
@@ -400,14 +404,14 @@ function Show-Summary {
             Write-Host $dirPath -ForegroundColor Cyan
             Write-Host ("总大小: {0:N2} MB" -f $size)
         
-        $installerPath = Join-Path $DIST_DIR "${APP_NAME}-${APP_VERSION}-x86_64-Setup.exe"
-        if (Test-Path $installerPath) {
-            $installerSize = (Get-Item $installerPath).Length / 1MB
-            Write-Host ""
-            Write-Host "安装程序: " -NoNewline
-            Write-Host $installerPath -ForegroundColor Cyan
-            Write-Host ("大小: {0:N2} MB" -f $installerSize)
-        }
+            $installerPath = Join-Path $DIST_DIR "${APP_NAME}-${APP_VERSION}-x86_64-Setup.exe"
+            if (Test-Path $installerPath) {
+                $installerSize = (Get-Item $installerPath).Length / 1MB
+                Write-Host ""
+                Write-Host "安装程序: " -NoNewline
+                Write-Host $installerPath -ForegroundColor Cyan
+                Write-Host ("大小: {0:N2} MB" -f $installerSize)
+            }
         }
     }
     
