@@ -3,5 +3,5 @@
 from .tiff_boundary_settings_dialog import TiffBoundarySettingsDialog
 from .pixel_time_series_viewer_dialog import PixelTimeSeriesViewerDialog
 from .local_image_viewer_dialog import LocalImageViewerDialog
-from .dem_acquisition_dialog import DEMAcquisitionDialog
+from .raster_acquisition_dialog import DEMAcquisitionDialog, RasterDataAcquisitionDialog
 from .gamma_dialogs import GammaFormatSelectorWidget, GammaSingleFileDialog, GammaTimeSeriesDialog

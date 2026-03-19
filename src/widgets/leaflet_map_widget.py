@@ -213,7 +213,7 @@ class LeafletMapWidget(QWidget):
                 {'south': 30, 'north': 40, 'west': 100, 'east': 110, 
                  'color': '#e74c3c', 'label': '选择区域'},
                 {'south': 31, 'north': 39, 'west': 101, 'east': 109, 
-                 'color': '#27ae60', 'label': 'DEM范围'}
+                 'color': '#27ae60', 'label': '栅格范围'}
             ]
         """
         if self.web_view:

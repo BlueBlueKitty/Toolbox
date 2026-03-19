@@ -218,7 +218,7 @@ class LocalDEMProcessor:
     def merge_dem_tiles(input_files: List[str], output_path: str) -> bool:
         """合并多个DEM瓦片"""
         if not GDAL_AVAILABLE:
-            print("GDAL未安装，无法合并DEM")
+            print("GDAL未安装，无法合并栅格")
             return False
         
         if len(input_files) == 1:
@@ -235,7 +235,7 @@ class LocalDEMProcessor:
             gdal.Warp(output_path, input_files, options=options)
             return True
         except Exception as e:
-            print(f"合并DEM失败: {e}")
+            print(f"合并栅格失败: {e}")
             return False
     
     @staticmethod
@@ -248,7 +248,7 @@ class LocalDEMProcessor:
         将DEM裁剪并重采样至与参考栅格相同的范围、分辨率和坐标系
         """
         if not GDAL_AVAILABLE:
-            print("GDAL未安装，无法裁剪DEM")
+            print("GDAL未安装，无法裁剪栅格")
             return False
         
         try:
@@ -308,7 +308,7 @@ class LocalDEMProcessor:
             是否成功
         """
         if not GDAL_AVAILABLE:
-            print("GDAL未安装，无法裁剪DEM")
+            print("GDAL未安装，无法裁剪栅格")
             return False
         
         try:

@@ -16,7 +16,7 @@ import traceback
 
 # 导入自定义对话框
 from src.dialogs import (TiffBoundarySettingsDialog, PixelTimeSeriesViewerDialog,
-                         LocalImageViewerDialog, DEMAcquisitionDialog)
+                         LocalImageViewerDialog, RasterDataAcquisitionDialog)
 
 # 导入工具函数
 from src.utils import tiff_boundary_to_vector
@@ -262,8 +262,8 @@ class MainWindow(QMainWindow):
         self.button_tiff_boundary_to_vector.clicked.connect(self.on_button_tiff_boundary_to_vector_click)
         raster_tools_layout.addWidget(self.button_tiff_boundary_to_vector, 0, 0)
         
-        # DEM数据获取按钮
-        self.button_dem_acquisition = QPushButton("DEM数据获取")
+        # 栅格数据获取按钮
+        self.button_dem_acquisition = QPushButton("栅格数据获取工具")
         self.button_dem_acquisition.setMinimumHeight(50)
         self.button_dem_acquisition.setStyleSheet("""
             QPushButton {
@@ -335,13 +335,13 @@ class MainWindow(QMainWindow):
     
     def on_button_dem_acquisition_click(self):
         """
-        DEM数据获取按钮点击事件
+        栅格数据获取工具按钮点击事件
         """
         try:
-            dialog = DEMAcquisitionDialog(self)
+            dialog = RasterDataAcquisitionDialog(self)
             self._show_tool_window(dialog)
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"打开DEM数据获取工具失败: {str(e)}")
+            QMessageBox.critical(self, "错误", f"打开栅格数据获取工具失败: {str(e)}")
             traceback.print_exc()
 
     def _show_tool_window(self, dialog):

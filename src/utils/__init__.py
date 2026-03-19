@@ -6,6 +6,23 @@ Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 '''
 
 from .dem_utils import LocalDEMProcessor, calculate_area_km2
+from .raster_source_config import (
+    LocalRasterSourceConfig,
+    OnlineRasterSourceConfig,
+    RasterSourceConfigManager,
+    LAT_FORMAT_OPTIONS,
+    LON_FORMAT_OPTIONS,
+    COORD_LOCATION_OPTIONS,
+    ANCHOR_OPTIONS,
+    ZIP_STRATEGY_OPTIONS,
+)
+from .raster_utils import (
+    LocalRasterProcessor,
+    RasterSourceAutoDetector,
+    RasterTileNaming,
+    RasterSourceTestResult,
+    build_rule_preview,
+)
 from .opentopography_client import (
     OpenTopographyClient, 
     DATASETS_CONFIG, 
@@ -89,6 +106,19 @@ from .update_checker import UpdateChecker, UpdateError, NetworkError
 
 __all__ = [
     'LocalDEMProcessor',
+    'LocalRasterSourceConfig',
+    'OnlineRasterSourceConfig',
+    'RasterSourceConfigManager',
+    'LAT_FORMAT_OPTIONS',
+    'LON_FORMAT_OPTIONS',
+    'COORD_LOCATION_OPTIONS',
+    'ANCHOR_OPTIONS',
+    'ZIP_STRATEGY_OPTIONS',
+    'LocalRasterProcessor',
+    'RasterSourceAutoDetector',
+    'RasterTileNaming',
+    'RasterSourceTestResult',
+    'build_rule_preview',
     'calculate_area_km2',
     'OpenTopographyClient',
     'DATASETS_CONFIG',
