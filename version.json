@@ -1,11 +1,11 @@
 {
-  "version": "1.3.0",
-  "name": "v1.3.0版本, 主界面支持同时启动多个子功能窗口",
-  "changelog": "修复像素时序查看器的colorbar的显示bug, 主界面支持同时启动多个子功能窗口\n\n目前已有功能: \n1、TIFF 边界转矢量\n2、像素时序查看器\n3、图像局部查看器\n4、栅格数据获取工具",
-  "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.3.0",
+  "version": "1.4.0",
+  "name": "v1.4.0版本, 栅格数据获取工具可自定义配置本地数据源",
+  "changelog": "DEM数据获取改名为栅格数据获取工具，不仅仅可以下载DEM，还可以下载各种栅格数据\n且支持自定义本地数据源配置，未来计划支持更多的在线数据源，如ASF哨兵数据等，敬请期待！！\n\n目前已有功能: \n1、TIFF 边界转矢量\n2、像素时序查看器\n3、图像局部查看器\n4、栅格数据获取工具",
+  "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.4.0",
   "downloads": {
-    "windows": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.3.0/Toolbox-1.3.0-x86_64-Setup.exe",
-    "linux": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.3.0/Toolbox-1.3.0-x86_64.AppImage"
+    "windows": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.4.0/Toolbox-1.4.0-x86_64-Setup.exe",
+    "linux": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.4.0/Toolbox-1.4.0-x86_64.AppImage"
   },
-  "published_at": "2026-02-03T00:00:00Z"
+  "published_at": "2026-03-19T00:00:00Z"
 }
