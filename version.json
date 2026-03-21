@@ -4,8 +4,8 @@
   "changelog": "栅格数据获取工具支持根据GAMMA par文件确定矢量范围，以后就可以很方便地为地理编码准备DEM数据了！\n\n目前已有功能: \n1、TIFF 边界转矢量\n2、像素时序查看器\n3、图像局部查看器\n4、栅格数据获取工具",
   "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.5.0",
   "downloads": {
-    "windows": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.5.2/Toolbox-1.5.2-x86_64-Setup.exe",
-    "linux": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.5.2/Toolbox-1.5.2-x86_64.AppImage"
+    "windows": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.5.0/Toolbox-1.5.0-x86_64-Setup.exe",
+    "linux": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.5.0/Toolbox-1.5.0-x86_64.AppImage"
   },
-  "published_at": "2026-03-21T21:52:18+08:00"
+  "published_at": "2026-03-21T22:00:42+08:00"
 }
