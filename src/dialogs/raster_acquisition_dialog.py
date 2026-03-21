@@ -674,25 +674,35 @@ class RasterDataAcquisitionDialog(QDialog):
             QMessageBox.warning(self, "提示", "无法从 GAMMA par 文件提取范围。")
             return
         west, south, east, north = result
-        self.gamma_bounds = (south, north, west, east)
+        expanded_west = max(-180.0, west - 0.1)
+        expanded_south = max(-90.0, south - 0.1)
+        expanded_east = min(180.0, east + 0.1)
+        expanded_north = min(90.0, north + 0.1)
+        self.gamma_bounds = (expanded_south, expanded_north, expanded_west, expanded_east)
         summary_text = (
-            f"边界(WGS84): 西={west:.4f}, 东={east:.4f}, 南={south:.4f}, 北={north:.4f}\n"
-            f"四角: UL({corners['UL'][1]:.2f}, {corners['UL'][0]:.2f})  "
-            f"UR({corners['UR'][1]:.2f}, {corners['UR'][0]:.2f})  "
-            f"LR({corners['LR'][1]:.2f}, {corners['LR'][0]:.2f})  "
-            f"LL({corners['LL'][1]:.2f}, {corners['LL'][0]:.2f})"
+            f"边界(WGS84，已向外扩大 0.1°): 西={expanded_west:.4f}, 东={expanded_east:.4f}, "
+            f"南={expanded_south:.4f}, 北={expanded_north:.4f}\n"
+            f"提示: 当前显示和后续获取使用的是扩大后的范围\n"
+            # f"四角: UL({corners['UL'][1]:.2f}, {corners['UL'][0]:.2f})  "
+            # f"UR({corners['UR'][1]:.2f}, {corners['UR'][0]:.2f})  "
+            # f"LR({corners['LR'][1]:.2f}, {corners['LR'][0]:.2f})  "
+            # f"LL({corners['LL'][1]:.2f}, {corners['LL'][0]:.2f})"
         )
         detail_text = (
-            f"边界(WGS84): 西={west:.6f}, 东={east:.6f}, 南={south:.6f}, 北={north:.6f}\n"
-            f"UL=({corners['UL'][1]:.6f}, {corners['UL'][0]:.6f})\n"
-            f"UR=({corners['UR'][1]:.6f}, {corners['UR'][0]:.6f})\n"
-            f"LR=({corners['LR'][1]:.6f}, {corners['LR'][0]:.6f})\n"
-            f"LL=({corners['LL'][1]:.6f}, {corners['LL'][0]:.6f})"
+            f"原始边界(WGS84): 西={west:.6f}, 东={east:.6f}, 南={south:.6f}, 北={north:.6f}\n"
+            f"扩大后边界(WGS84，四周各 0.1°): 西={expanded_west:.6f}, 东={expanded_east:.6f}, "
+            f"南={expanded_south:.6f}, 北={expanded_north:.6f}\n"
+            # f"UL=({corners['UL'][1]:.6f}, {corners['UL'][0]:.6f})\n"
+            # f"UR=({corners['UR'][1]:.6f}, {corners['UR'][0]:.6f})\n"
+            # f"LR=({corners['LR'][1]:.6f}, {corners['LR'][0]:.6f})\n"
+            # f"LL=({corners['LL'][1]:.6f}, {corners['LL'][0]:.6f})"
         )
         self.gamma_par_info_label.setText(summary_text)
         self.gamma_par_info_label.setToolTip(detail_text)
-        self.gamma_par_area_label.setText(f"区域面积: {calculate_area_km2(south, north, west, east):.2f} km²")
-        self._show_bounds_on_map(south, north, west, east)
+        self.gamma_par_area_label.setText(
+            f"区域面积(扩大后): {calculate_area_km2(expanded_south, expanded_north, expanded_west, expanded_east):.2f} km²"
+        )
+        self._show_bounds_on_map(expanded_south, expanded_north, expanded_west, expanded_east)
 
     def _set_file_bounds(self, result, vector):
         west, south, east, north = result

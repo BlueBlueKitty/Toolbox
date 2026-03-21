@@ -6,7 +6,7 @@ Description: 版本信息定义
 Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved. 
 '''
 
-__version__ = '1.4.0'
+__version__ = '1.5.0'
 __author__ = 'Yibo Yuan'
 __email__ = '2633669459@qq.com'
 

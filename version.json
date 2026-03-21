@@ -1,7 +1,7 @@
 {
-  "version": "1.4.0",
-  "name": "v1.4.0版本, 栅格数据获取工具可自定义配置本地数据源",
-  "changelog": "DEM数据获取改名为栅格数据获取工具，不仅仅可以下载DEM，还可以下载各种栅格数据\n且支持自定义本地数据源配置，未来计划支持更多的在线数据源，如ASF哨兵数据等，敬请期待！！\n\n目前已有功能: \n1、TIFF 边界转矢量\n2、像素时序查看器\n3、图像局部查看器\n4、栅格数据获取工具",
+  "version": "1.5.0",
+  "name": "v1.5.0版本, 栅格数据获取工具支持导入GAMMA par文件",
+  "changelog": "栅格数据获取工具支持根据GAMMA par文件确定矢量范围，以后就可以很方便地为地理编码准备DEM数据了！\n\n目前已有功能: \n1、TIFF 边界转矢量\n2、像素时序查看器\n3、图像局部查看器\n4、栅格数据获取工具",
   "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.4.0",
   "downloads": {
     "windows": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.4.0/Toolbox-1.4.0-x86_64-Setup.exe",
