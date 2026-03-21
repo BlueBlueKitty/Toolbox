@@ -73,16 +73,29 @@
   <img src="imgs/local.png" alt="图像局部查看器">
 </p>
 
-### 4. 栅格数据获取工具（已完成）
+### 4. 栅格数据获取工具
 
 可根据研究区范围从本地或在线数据源获取栅格数据
+
+**特点：**
+
+1. 在范围导入时支持
 
 **使用方法：**
 
 1. 点击主界面"栅格数据获取工具"按钮
+2. 选择区域选择方式：
+
+- **地图绘制**： 在地图上手动绘制区域
+- **手动输入**： 手动输入经纬度坐标
+- **行政区划**： 选择中国的省、市、县
+- **矢量文件**： 支持导入多种格式的矢量文件
+- **TIF文件**： 根据TIF文件的角点确定边界，导出时支持将栅格数据裁剪重采样至与TIF文件同样的地理范围和分辨率
+- **GAMMA par文件**： 根据GAMMA的SLC或者MLI的par文件确定矢量范围，并自动往外扩大0.1度范围，方便为地理编码准备DEM数据
+
 2. 选择数据获取方式：
-   - **在线获取**：选择在线数据源，配置 OpenTopography API Key，绘制或输入研究区范围，选择数据集后下载
-   - **本地获取**：选择本地栅格数据源，绘制或输入研究区范围，自动查找、拼接、裁剪瓦片
+   - **本地获取**：支持自定义配置本地栅格数据源，自动查找、拼接、裁剪本地栅格数据
+   - **在线获取**：选择在线数据源，支持OpenTopography，未来计划支持更多的在线数据
 3. 设置输出路径和文件名
 4. 点击"开始处理"获取栅格数据
 
@@ -220,8 +233,6 @@ uv sync
 python main.py
 ```
 
-
-
 ## 项目打包
 
 本项目支持 Windows 和 Linux 平台的打包，分别生成安装程序和 AppImage。
@@ -258,6 +269,26 @@ sudo apt install -y \
 # 确保已安装 Python 虚拟环境和所有项目依赖
 ```
 
+## 自动发布
+
+项目已配置基于 GitHub Actions 的自动发布流程：
+
+1. Windows 在 GitHub Actions 云端直接调用 `build_win.ps1` 构建安装包。
+2. Linux 在 GitHub Actions 云端通过 `docker/linux-release.Dockerfile` 构建固定环境，再调用 `build_linux.sh` 生成 AppImage。
+3. 推送形如 `v1.4.1` 的 Git tag 后，会自动创建 GitHub Release 并上传 Windows/Linux 两个平台产物。
+
+本地一键发版命令：
+
+```powershell
+.\scripts\publish_release.ps1
+```
+
+执行前请确保：
+
+1. `src/version.py` 和 `version.json` 中的版本号一致。
+2. 当前 Git 工作区是干净状态。
+3. `version.json` 里的 `name` 和 `changelog` 已经写好本次发布说明。
+
 ### Windows 打包
 
 使用 `build_win.ps1` 脚本进行打包，**默认会创建 NSIS 安装程序**：
@@ -277,6 +308,7 @@ sudo apt install -y \
 ```
 
 **输出文件：**
+
 - `dist/Toolbox-{版本号}-x86_64-Setup.exe` - **NSIS 安装程序**（推荐分发）
 
 ### Linux 打包
@@ -295,6 +327,7 @@ chmod +x build_linux.sh
 ```
 
 **输出文件：**
+
 - `dist/Toolbox-{版本号}-x86_64.AppImage` - AppImage 可执行文件
 
 **运行 AppImage：**
@@ -313,7 +346,6 @@ chmod +x dist/Toolbox-*.AppImage
 2. **Qt 库兼容性**：打包脚本已处理 GTK 和 Qt 插件冲突问题
 3. **测试**：打包后请在干净的系统环境中测试，确保所有依赖都已正确打包
 4. **Windows NSIS**：如果未安装 NSIS，脚本会跳过安装程序创建，但仍会生成 ZIP 压缩包
-
 
 ## 许可证
 
