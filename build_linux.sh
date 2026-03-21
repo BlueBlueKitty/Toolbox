@@ -281,7 +281,7 @@ create_appimage() {
     mkdir -p "${DIST_DIR}"
     
     # 使用 appimagetool 生成 AppImage
-    ARCH=x86_64 "${BUILD_DIR}/${APPIMAGE_TOOL}" "${APPDIR}" "${DIST_DIR}/${APP_NAME}-${APP_VERSION}-x86_64.AppImage"
+    ARCH=x86_64 "${BUILD_DIR}/${APPIMAGE_TOOL}" --appimage-extract-and-run "${APPDIR}" "${DIST_DIR}/${APP_NAME}-${APP_VERSION}-x86_64.AppImage"
     
     # 设置可执行权限
     chmod +x "${DIST_DIR}/${APP_NAME}-${APP_VERSION}-x86_64.AppImage"

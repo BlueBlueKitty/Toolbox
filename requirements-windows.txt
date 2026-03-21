@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Windows 平台单独使用预编译 GDAL wheel，避免 CI 中源码编译失败。
+# 该 wheel 来自 cgohlke/geospatial-wheels 的 GitHub Releases。
+https://github.com/cgohlke/geospatial-wheels/releases/download/v2025.1.20/GDAL-3.10.1-cp310-cp310-win_amd64.whl

@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# Linux 平台的 GDAL 由系统包提供：
+# python3-gdal
+# gdal-bin
+# libgdal-dev

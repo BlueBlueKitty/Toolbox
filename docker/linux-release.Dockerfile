@@ -25,8 +25,19 @@ RUN apt-get update && apt-get install -y \
     libgl1 \
     libegl1 \
     libxkbcommon0 \
+    libxkbcommon-x11-0 \
+    libxkbfile1 \
     libdbus-1-3 \
     libnss3 \
+    libasound2 \
+    libcups2 \
+    libpulse0 \
+    libatk1.0-0 \
+    libcairo2 \
+    libgdk-pixbuf-2.0-0 \
+    libgtk-3-0 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
     libx11-xcb1 \
     libxcb-cursor0 \
     libxcb-icccm4 \
