@@ -1,13 +1,8 @@
-FROM ubuntu:20.04
+FROM python:3.10-bullseye
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-dev \
-    python3-venv \
-    python3-pip \
-    python3-gdal \
     gdal-bin \
     libgdal-dev \
     proj-bin \
@@ -34,7 +29,7 @@ RUN apt-get update && apt-get install -y \
     libpulse0 \
     libatk1.0-0 \
     libcairo2 \
-    libgdk-pixbuf2.0-0 \
+    libgdk-pixbuf-2.0-0 \
     libgtk-3-0 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
