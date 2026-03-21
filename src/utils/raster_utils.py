@@ -269,16 +269,33 @@ class LocalRasterProcessor:
         return LocalDEMProcessor.merge_dem_tiles(input_files, output_path)
 
     @staticmethod
-    def clip_to_bounds(input_path: str, output_path: str, south: float, north: float, west: float, east: float) -> bool:
+    def clip_to_bounds(
+        input_path: str,
+        output_path: str,
+        south: float,
+        north: float,
+        west: float,
+        east: float,
+        resample_method: str = "双线性插值",
+    ) -> bool:
         from .dem_utils import LocalDEMProcessor
 
-        return LocalDEMProcessor.clip_to_bounds(input_path, output_path, south, north, west, east)
+        return LocalDEMProcessor.clip_to_bounds(
+            input_path, output_path, south, north, west, east, resample_method=resample_method
+        )
 
     @staticmethod
-    def clip_and_resample_to_reference(input_path: str, reference_path: str, output_path: str) -> bool:
+    def clip_and_resample_to_reference(
+        input_path: str,
+        reference_path: str,
+        output_path: str,
+        resample_method: str = "双线性插值",
+    ) -> bool:
         from .dem_utils import LocalDEMProcessor
 
-        return LocalDEMProcessor.clip_and_resample_to_reference(input_path, reference_path, output_path)
+        return LocalDEMProcessor.clip_and_resample_to_reference(
+            input_path, reference_path, output_path, resample_method=resample_method
+        )
 
 
 class RasterSourceAutoDetector:
@@ -372,7 +389,7 @@ class RasterSourceAutoDetector:
             longitude_format=longitude_format,
             coord_location=coord_location,
             zip_raster_strategy="自动优先选择名称包含 DEM",
-            allow_missing_tiles=True,
+            allow_missing_tiles=False,
             description="由样例文件自动识别生成",
             builtin=False,
             sample_path=sample_path,

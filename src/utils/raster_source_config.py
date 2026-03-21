@@ -22,6 +22,15 @@ ZIP_STRATEGY_OPTIONS = [
     "自动优先选择 .tif",
     "自动选择第一个可读栅格",
 ]
+RESAMPLE_METHOD_OPTIONS = [
+    "双线性插值",
+    "最邻近",
+    "三次卷积",
+    "三次样条",
+    "Lanczos",
+    "平均值",
+    "众数",
+]
 
 
 def get_user_config_dir() -> Path:
@@ -53,7 +62,8 @@ class LocalRasterSourceConfig:
     longitude_format: str = "E000"
     coord_location: str = "文件名中"
     zip_raster_strategy: str = "自动优先选择名称包含 DEM"
-    allow_missing_tiles: bool = True
+    resample_method: str = "双线性插值"
+    allow_missing_tiles: bool = False
     description: str = ""
     builtin: bool = False
     last_test_point: Optional[Tuple[float, float]] = None
@@ -83,7 +93,8 @@ class LocalRasterSourceConfig:
             longitude_format=data.get("longitude_format", "E000"),
             coord_location=data.get("coord_location", "文件名中"),
             zip_raster_strategy=data.get("zip_raster_strategy", "自动优先选择名称包含 DEM"),
-            allow_missing_tiles=bool(data.get("allow_missing_tiles", True)),
+            resample_method=data.get("resample_method", "双线性插值"),
+            allow_missing_tiles=bool(data.get("allow_missing_tiles", False)),
             description=data.get("description", ""),
             builtin=bool(data.get("builtin", False)),
             last_test_point=tuple(data["last_test_point"]) if data.get("last_test_point") else None,
@@ -134,7 +145,8 @@ def build_default_local_sources() -> List[LocalRasterSourceConfig]:
             longitude_format="E000",
             coord_location="文件名中",
             zip_raster_strategy="自动选择第一个可读栅格",
-            allow_missing_tiles=True,
+            resample_method="双线性插值",
+            allow_missing_tiles=False,
             description="默认 SRTM 全球高程瓦片配置",
             builtin=True,
         ),
@@ -152,7 +164,8 @@ def build_default_local_sources() -> List[LocalRasterSourceConfig]:
             longitude_format="E000_00",
             coord_location="文件夹名和文件名中",
             zip_raster_strategy="自动优先选择名称包含 DEM",
-            allow_missing_tiles=True,
+            resample_method="双线性插值",
+            allow_missing_tiles=False,
             description="默认 Copernicus DEM 瓦片配置",
             builtin=True,
         ),
@@ -233,7 +246,7 @@ class RasterSourceConfigManager:
             merged = dict(default_item)
             merged.update(current)
             return merged
-        mutable_keys = {"root_dir", "allow_missing_tiles", "description", "last_test_point", "sample_path"}
+        mutable_keys = {"root_dir", "resample_method", "allow_missing_tiles", "description", "last_test_point", "sample_path"}
         merged = dict(default_item)
         for key in mutable_keys:
             if key in current:
@@ -329,6 +342,7 @@ class RasterSourceConfigManager:
             default = next((item for item in build_default_local_sources() if item.name == config.name), None)
             if default:
                 default.root_dir = config.root_dir
+                default.resample_method = config.resample_method
                 default.allow_missing_tiles = config.allow_missing_tiles
                 default.description = config.description
                 default.last_test_point = config.last_test_point

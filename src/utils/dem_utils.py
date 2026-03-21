@@ -23,6 +23,27 @@ except ImportError:
     osr = None
 
 
+def _resolve_resample_alg(method: str):
+    if not GDAL_AVAILABLE:
+        return None
+    mapping = {
+        "双线性插值": gdal.GRA_Bilinear,
+        "最邻近": gdal.GRA_NearestNeighbour,
+        "三次卷积": gdal.GRA_Cubic,
+        "三次样条": gdal.GRA_CubicSpline,
+        "Lanczos": gdal.GRA_Lanczos,
+        "平均值": gdal.GRA_Average,
+        "众数": gdal.GRA_Mode,
+        "bilinear": gdal.GRA_Bilinear,
+        "nearest": gdal.GRA_NearestNeighbour,
+        "cubic": gdal.GRA_Cubic,
+        "cubicspline": gdal.GRA_CubicSpline,
+        "average": gdal.GRA_Average,
+        "mode": gdal.GRA_Mode,
+    }
+    return mapping.get((method or "").strip(), gdal.GRA_Bilinear)
+
+
 def calculate_area_km2(south: float, north: float, west: float, east: float) -> float:
     """
     计算区域面积（平方公里）
@@ -242,7 +263,8 @@ class LocalDEMProcessor:
     def clip_and_resample_to_reference(
         dem_path: str, 
         reference_path: str, 
-        output_path: str
+        output_path: str,
+        resample_method: str = "双线性插值",
     ) -> bool:
         """
         将DEM裁剪并重采样至与参考栅格相同的范围、分辨率和坐标系
@@ -272,7 +294,7 @@ class LocalDEMProcessor:
                 width=ref_cols,
                 height=ref_rows,
                 dstSRS=ref_proj,
-                resampleAlg=gdal.GRA_Bilinear,
+                resampleAlg=_resolve_resample_alg(resample_method),
                 dstNodata=-9999
             )
             
@@ -291,7 +313,8 @@ class LocalDEMProcessor:
         south: float,
         north: float,
         west: float,
-        east: float
+        east: float,
+        resample_method: str = "双线性插值",
     ) -> bool:
         """
         将DEM裁剪至指定的经纬度范围
@@ -316,7 +339,7 @@ class LocalDEMProcessor:
                 format='GTiff',
                 outputBounds=[west, south, east, north],
                 dstSRS='EPSG:4326',
-                resampleAlg=gdal.GRA_Bilinear,
+                resampleAlg=_resolve_resample_alg(resample_method),
                 dstNodata=-9999
             )
             

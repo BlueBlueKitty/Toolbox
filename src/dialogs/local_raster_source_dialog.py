@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from src.utils import (
     ANCHOR_OPTIONS, COORD_LOCATION_OPTIONS, LAT_FORMAT_OPTIONS, LON_FORMAT_OPTIONS,
     LocalRasterProcessor, LocalRasterSourceConfig, RasterSourceAutoDetector,
-    RasterSourceConfigManager, ZIP_STRATEGY_OPTIONS, build_rule_preview,
+    RasterSourceConfigManager, ZIP_STRATEGY_OPTIONS, RESAMPLE_METHOD_OPTIONS, build_rule_preview,
 )
 
 
@@ -122,6 +122,7 @@ class LocalRasterSourceConfigDialog(QDialog):
         self.archive_ext_edit = QLineEdit(".zip")
         self.raster_ext_edit = QLineEdit(".tif")
         self.zip_strategy_combo = QComboBox(); self.zip_strategy_combo.addItems(ZIP_STRATEGY_OPTIONS)
+        self.resample_method_combo = QComboBox(); self.resample_method_combo.addItems(RESAMPLE_METHOD_OPTIONS)
         self.allow_missing_checkbox = QCheckBox("缺失瓦片时继续处理")
 
         entries = [
@@ -142,8 +143,10 @@ class LocalRasterSourceConfigDialog(QDialog):
             rule_grid.addWidget(self._label_with_tip(text, tip), row, col)
             rule_grid.addWidget(widget, row, col + 1)
             self._builtin_rule_widgets.append(widget)
-        rule_grid.addWidget(self._label_with_tip("缺失处理", "勾选后，即使部分瓦片缺失，仍继续拼接已有瓦片。"), 5, 0)
-        rule_grid.addWidget(self.allow_missing_checkbox, 5, 1)
+        rule_grid.addWidget(self._label_with_tip("插值方式", "用于裁剪/重采样输出时的插值算法，默认双线性插值。"), 5, 0)
+        rule_grid.addWidget(self.resample_method_combo, 5, 1)
+        rule_grid.addWidget(self._label_with_tip("缺失处理", "勾选后，即使部分瓦片缺失，仍继续拼接已有瓦片。"), 5, 2)
+        rule_grid.addWidget(self.allow_missing_checkbox, 5, 3)
         right_layout.addWidget(rule_group)
 
         template_group = QGroupBox("路径规则")
@@ -193,7 +196,7 @@ class LocalRasterSourceConfigDialog(QDialog):
         for widget in [self.name_edit, self.root_dir_edit, self.archive_ext_edit, self.raster_ext_edit, self.path_rule_edit]:
             widget.textChanged.connect(self._on_form_changed)
         self.description_edit.textChanged.connect(self._on_form_changed)
-        for combo in [self.anchor_combo, self.lat_format_combo, self.lon_format_combo, self.coord_location_combo, self.is_archive_combo, self.zip_strategy_combo]:
+        for combo in [self.anchor_combo, self.lat_format_combo, self.lon_format_combo, self.coord_location_combo, self.is_archive_combo, self.zip_strategy_combo, self.resample_method_combo]:
             combo.currentIndexChanged.connect(self._on_form_changed)
         self.lat_interval_spin.valueChanged.connect(self._on_form_changed)
         self.lon_interval_spin.valueChanged.connect(self._on_form_changed)
@@ -294,6 +297,7 @@ class LocalRasterSourceConfigDialog(QDialog):
         self.archive_ext_edit.setText(config.archive_extension)
         self.raster_ext_edit.setText(config.raster_extension)
         self.zip_strategy_combo.setCurrentText(config.zip_raster_strategy)
+        self.resample_method_combo.setCurrentText(config.resample_method)
         self.allow_missing_checkbox.setChecked(config.allow_missing_tiles)
         self.path_rule_edit.setText(config.relative_path_template)
         self._tile_token_template = config.tile_token_template or "{lat}{lon}"
@@ -331,6 +335,7 @@ class LocalRasterSourceConfigDialog(QDialog):
             longitude_format=self.lon_format_combo.currentText(),
             coord_location=self.coord_location_combo.currentText(),
             zip_raster_strategy=self.zip_strategy_combo.currentText(),
+            resample_method=self.resample_method_combo.currentText(),
             allow_missing_tiles=self.allow_missing_checkbox.isChecked(),
             description=self.description_edit.toPlainText().strip(),
             builtin=builtin,

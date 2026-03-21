@@ -270,33 +270,58 @@ class OpenTopographyClient:
         
         return filepath
     
-    def validate_api_key(self) -> bool:
+    def validate_api_key(
+        self,
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+        is_running: Optional[Callable[[], bool]] = None,
+    ) -> bool:
         """
         验证API密钥是否有效
         通过发送一个小范围请求来测试
         """
+        def _emit(percent: int, message: str):
+            if progress_callback:
+                progress_callback(percent, message)
+
         try:
+            if is_running and not is_running():
+                raise OpenTopographyError("测试已取消")
+            _emit(10, "正在准备 API 测试请求...")
             params = {
                 'demtype': 'SRTMGL3',
                 'south': 50.0,
-                'north': 50.01,
+                'north': 50.005,
                 'west': 14.35,
-                'east': 14.36,
+                'east': 14.355,
                 'outputFormat': 'GTiff',
                 'API_Key': self.api_key
             }
-            
+            _emit(35, "正在连接 OpenTopography 服务...")
             response = self.session.get(
                 f"{self.BASE_URL}/globaldem",
                 params=params,
-                timeout=30,
-                stream=True
+                timeout=(8, 20),
+                stream=False
             )
-            
+            if is_running and not is_running():
+                raise OpenTopographyError("测试已取消")
+            _emit(80, f"服务器已响应（HTTP {response.status_code}），正在校验结果...")
+            if response.status_code == 200:
+                _emit(100, "测试通过：API key 可用。")
+                return True
+            if response.status_code == 401:
+                _emit(100, "测试失败：API key 无效或认证失败。")
+                return False
+            if response.status_code == 400:
+                lower_text = (response.text or "").lower()
+                if "selected area is too small" in lower_text or "area is too small" in lower_text:
+                    _emit(100, "测试通过：API key 可用（测试区域过小，服务已正常返回）。")
+                    return True
+            self._check_response(response)
             return response.status_code == 200
-            
         except AuthenticationError:
             return False
+        except requests.exceptions.RequestException as exc:
+            raise OpenTopographyError(f"网络请求失败: {exc}")
         except Exception:
-            # 其他错误可能是网络问题，不一定是API密钥问题
-            return True
+            raise

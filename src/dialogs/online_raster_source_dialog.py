@@ -4,14 +4,38 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog,
-    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QTextEdit,
+    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QProgressDialog, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
 from src.utils import DATASETS_CONFIG, OnlineRasterSourceConfig, OpenTopographyClient, RasterSourceConfigManager
+
+
+class OnlineSourceApiTestWorker(QThread):
+    progress_updated = Signal(int, str)
+    test_completed = Signal(bool, str)
+
+    def __init__(self, api_key: str):
+        super().__init__()
+        self.api_key = api_key
+        self.is_running = True
+
+    def run(self):
+        try:
+            client = OpenTopographyClient(self.api_key)
+            ok = client.validate_api_key(
+                progress_callback=lambda p, msg: self.progress_updated.emit(p, msg),
+                is_running=lambda: self.is_running,
+            )
+            self.test_completed.emit(ok, "测试通过：API key 可用。" if ok else "测试失败：API key 无效或认证失败。")
+        except Exception as exc:
+            self.test_completed.emit(False, f"测试失败：{exc}")
+
+    def stop(self):
+        self.is_running = False
 
 
 class OnlineRasterSourceConfigDialog(QDialog):
@@ -22,6 +46,8 @@ class OnlineRasterSourceConfigDialog(QDialog):
         self.current_original_name = None
         self.current_config = None
         self._dirty = False
+        self._test_worker = None
+        self._test_progress_dialog = None
 
         self.setWindowTitle("在线数据源配置管理")
         self.resize(760, 480)
@@ -258,11 +284,35 @@ class OnlineRasterSourceConfigDialog(QDialog):
         if not config.api_key:
             self.test_result_edit.setPlainText("请先填写 API key。")
             return
-        try:
-            ok = OpenTopographyClient(config.api_key).validate_api_key()
-            self.test_result_edit.setPlainText("测试通过：API key 可用。" if ok else "测试失败：API key 可能无效。")
-        except Exception as exc:
-            self.test_result_edit.setPlainText(f"测试失败：{exc}")
+        if self._test_worker and self._test_worker.isRunning():
+            self.test_result_edit.setPlainText("测试进行中，请稍候...")
+            return
+        self._test_progress_dialog = QProgressDialog("准备测试在线数据源...", "取消", 0, 100, self)
+        self._test_progress_dialog.setWindowTitle("测试在线数据源")
+        self._test_progress_dialog.setWindowModality(Qt.WindowModal)
+        self._test_progress_dialog.setAutoClose(False)
+        self._test_progress_dialog.setAutoReset(False)
+        self._test_progress_dialog.setValue(0)
+        self._test_progress_dialog.show()
+        self._test_worker = OnlineSourceApiTestWorker(config.api_key)
+        self._test_worker.progress_updated.connect(self._on_test_progress)
+        self._test_worker.test_completed.connect(self._on_test_completed)
+        self._test_progress_dialog.canceled.connect(self._test_worker.stop)
+        self._test_worker.start()
+        self.test_result_edit.setPlainText("正在测试，请稍候...")
+
+    def _on_test_progress(self, progress: int, message: str):
+        if self._test_progress_dialog:
+            self._test_progress_dialog.setLabelText(message)
+            self._test_progress_dialog.setValue(max(0, min(progress, 100)))
+
+    def _on_test_completed(self, ok: bool, message: str):
+        if self._test_progress_dialog:
+            self._test_progress_dialog.setValue(100)
+            self._test_progress_dialog.close()
+            self._test_progress_dialog = None
+        self._test_worker = None
+        self.test_result_edit.setPlainText(message)
 
     def _mark_dirty(self):
         self._dirty = True
@@ -284,6 +334,8 @@ class OnlineRasterSourceConfigDialog(QDialog):
         return True
 
     def closeEvent(self, event):
+        if self._test_worker and self._test_worker.isRunning():
+            self._test_worker.stop()
         if not self._confirm_discard_if_needed():
             event.ignore()
             return

@@ -15,6 +15,7 @@ from .raster_source_config import (
     COORD_LOCATION_OPTIONS,
     ANCHOR_OPTIONS,
     ZIP_STRATEGY_OPTIONS,
+    RESAMPLE_METHOD_OPTIONS,
 )
 from .raster_utils import (
     LocalRasterProcessor,
@@ -33,6 +34,8 @@ from .opentopography_client import (
 from .file_handler import (
     extract_bounding_box_from_vector, 
     extract_bounding_box_from_raster,
+    extract_bounding_box_from_gamma_par,
+    extract_gamma_par_corners,
     get_raster_info,
     get_vector_layer_info,
     get_supported_vector_extensions,
@@ -114,6 +117,7 @@ __all__ = [
     'COORD_LOCATION_OPTIONS',
     'ANCHOR_OPTIONS',
     'ZIP_STRATEGY_OPTIONS',
+    'RESAMPLE_METHOD_OPTIONS',
     'LocalRasterProcessor',
     'RasterSourceAutoDetector',
     'RasterTileNaming',
@@ -127,6 +131,8 @@ __all__ = [
     'RateLimitError',
     'extract_bounding_box_from_vector',
     'extract_bounding_box_from_raster',
+    'extract_bounding_box_from_gamma_par',
+    'extract_gamma_par_corners',
     'get_raster_info',
     'get_vector_layer_info',
     'get_supported_vector_extensions',

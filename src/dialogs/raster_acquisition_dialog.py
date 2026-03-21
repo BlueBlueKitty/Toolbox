@@ -15,7 +15,7 @@ from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
     QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-    QPushButton, QRadioButton, QSplitter, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
+    QPushButton, QProgressDialog, QRadioButton, QSplitter, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from src.dialogs.local_raster_source_dialog import LocalRasterSourceConfigDialog
@@ -24,6 +24,7 @@ from src.utils import (
     DATASETS_CONFIG, LocalRasterProcessor, OpenTopographyClient, OpenTopographyError,
     RasterSourceConfigManager, build_rule_preview, calculate_area_km2,
     extract_bounding_box_from_raster, extract_bounding_box_from_vector,
+    extract_bounding_box_from_gamma_par, extract_gamma_par_corners,
     AdministrativeBoundarySelector, ADMIN_BOUNDARY_AVAILABLE,
 )
 
@@ -82,13 +83,37 @@ class OnlineRasterDownloadWorker(QThread):
         self.is_running = False
 
 
+class OnlineSourceTestWorker(QThread):
+    progress_updated = Signal(int, str)
+    test_completed = Signal(bool, str)
+
+    def __init__(self, api_key: str):
+        super().__init__()
+        self.api_key = api_key
+        self.is_running = True
+
+    def run(self):
+        try:
+            client = OpenTopographyClient(self.api_key)
+            ok = client.validate_api_key(
+                progress_callback=lambda p, msg: self.progress_updated.emit(p, msg),
+                is_running=lambda: self.is_running,
+            )
+            self.test_completed.emit(ok, "API key 测试通过。" if ok else "API key 无效或认证失败。")
+        except Exception as exc:
+            self.test_completed.emit(False, f"测试失败: {exc}")
+
+    def stop(self):
+        self.is_running = False
+
+
 class LocalRasterWorker(QThread):
     progress_updated = Signal(int, str)
     process_completed = Signal(str)
     error_occurred = Signal(str)
     files_found = Signal(list)
 
-    def __init__(self, source_config, south, north, west, east, output_path, clip_to_bounds=False, reference_tif=None):
+    def __init__(self, source_config, south, north, west, east, output_path, clip_to_bounds=False, reference_tif=None, resample_method="双线性插值"):
         super().__init__()
         self.source_config = source_config
         self.south = south
@@ -98,6 +123,7 @@ class LocalRasterWorker(QThread):
         self.output_path = output_path
         self.clip_to_bounds = clip_to_bounds
         self.reference_tif = reference_tif
+        self.resample_method = resample_method
         self.is_running = True
 
     def run(self):
@@ -124,9 +150,13 @@ class LocalRasterWorker(QThread):
                 self.error_occurred.emit("栅格合并失败")
                 return
             if self.reference_tif and os.path.exists(self.reference_tif):
-                ok = processor.clip_and_resample_to_reference(temp_merged, self.reference_tif, self.output_path)
+                ok = processor.clip_and_resample_to_reference(
+                    temp_merged, self.reference_tif, self.output_path, resample_method=self.resample_method
+                )
             elif self.clip_to_bounds:
-                ok = processor.clip_to_bounds(temp_merged, self.output_path, self.south, self.north, self.west, self.east)
+                ok = processor.clip_to_bounds(
+                    temp_merged, self.output_path, self.south, self.north, self.west, self.east, resample_method=self.resample_method
+                )
             else:
                 ok = processor.merge_tiles([temp_merged], self.output_path)
             try:
@@ -151,18 +181,24 @@ class RasterDataAcquisitionDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("栅格数据获取工具")
-        self.resize(1040, 660)
+        self.resize(1180, 700)
+        self.setMinimumWidth(1120)
 
         self.config_manager = RasterSourceConfigManager()
         self.settings = QSettings(str(self.config_manager.config_dir / "raster_acquisition.ini"), QSettings.IniFormat)
         self.download_worker = None
         self.local_worker = None
+        self.online_test_worker = None
+        self.online_test_progress_dialog = None
         self.reference_tif_path = None
-        self.file_bounds = None
+        self.vector_bounds = None
+        self.tif_bounds = None
+        self.gamma_bounds = None
         self.saved_map_bounds = None
         self.admin_selector = None
         self._last_vector_dir = self.settings.value("last_vector_dir", "")
         self._last_tif_dir = self.settings.value("last_tif_dir", "")
+        self._last_gamma_par_dir = self.settings.value("last_gamma_par_dir", "")
         self._last_output_dir = self.settings.value("last_output_dir", "")
 
         self._create_ui()
@@ -190,6 +226,7 @@ class RasterDataAcquisitionDialog(QDialog):
         self.splitter.addWidget(left)
 
         right = QWidget()
+        right.setMinimumWidth(520)
         right_layout = QVBoxLayout(right)
         right_layout.addWidget(self._create_region_group())
         right_layout.addWidget(self._create_source_group())
@@ -208,6 +245,8 @@ class RasterDataAcquisitionDialog(QDialog):
         button_row.addWidget(close_btn)
         right_layout.addLayout(button_row)
         self.splitter.addWidget(right)
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 4)
 
     def _create_region_group(self):
         group = QGroupBox("区域选择")
@@ -240,6 +279,8 @@ class RasterDataAcquisitionDialog(QDialog):
         self.region_tab.addTab(self._create_admin_tab(), "行政区划")
         self.region_tab.addTab(self._create_file_tab("矢量文件", self._browse_vector_file, "vector"), "矢量文件")
         self.region_tab.addTab(self._create_file_tab("TIF文件", self._browse_tif_file, "tif"), "TIF文件")
+        self.region_tab.addTab(self._create_file_tab("GAMMA par文件", self._browse_gamma_par_file, "gamma"), "GAMMA par文件")
+        self.region_tab.currentChanged.connect(self._on_region_tab_changed)
         layout.addWidget(self.region_tab)
         return group
 
@@ -273,16 +314,29 @@ class RasterDataAcquisitionDialog(QDialog):
             self.vector_file_edit = edit
             self.vector_info_label = QLabel("边界坐标: --")
             self.vector_area_label = QLabel("区域面积: -- km²")
-        else:
+        elif file_type == "tif":
             self.tif_file_edit = edit
             self.tif_info_label = QLabel("边界坐标(WGS84): --")
             self.tif_area_label = QLabel("区域面积: -- km²")
+        else:
+            self.gamma_par_file_edit = edit
+            self.gamma_par_info_label = QLabel("边界坐标(WGS84): --")
+            self.gamma_par_area_label = QLabel("区域面积: -- km²")
+            self.gamma_par_info_label.setWordWrap(True)
+            self.gamma_par_area_label.setWordWrap(True)
         row.addWidget(QLabel(label_text)); row.addWidget(edit)
         btn = QPushButton("浏览"); btn.clicked.connect(browse_handler)
         row.addWidget(btn)
         left.addLayout(row)
-        left.addWidget(self.vector_info_label if file_type == "vector" else self.tif_info_label)
-        left.addWidget(self.vector_area_label if file_type == "vector" else self.tif_area_label)
+        if file_type == "vector":
+            left.addWidget(self.vector_info_label)
+            left.addWidget(self.vector_area_label)
+        elif file_type == "tif":
+            left.addWidget(self.tif_info_label)
+            left.addWidget(self.tif_area_label)
+        else:
+            left.addWidget(self.gamma_par_info_label)
+            left.addWidget(self.gamma_par_area_label)
         layout.addLayout(left, 1)
         frame = QFrame(); frame.setFixedSize(120, 80); frame.setStyleSheet("border:1px dashed #777;")
         frame_layout = QVBoxLayout(frame); frame_layout.addWidget(QLabel("拖放文件到此处"))
@@ -441,17 +495,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self._update_online_summary()
 
     def _load_settings(self):
-        self.merge_only_checkbox.setChecked(self.settings.value("merge_only", True, type=bool))
-        self.clip_to_bounds_checkbox.setChecked(self.settings.value("clip_to_bounds", False, type=bool))
-        self.resample_to_tif_checkbox.setChecked(self.settings.value("resample_to_tif", False, type=bool))
+        # 输出选项不持久化：每次打开都回到默认“仅合并瓦片”
+        self.merge_only_checkbox.setChecked(True)
+        self.clip_to_bounds_checkbox.setChecked(False)
+        self.resample_to_tif_checkbox.setChecked(False)
+        self._update_resample_option_state()
 
     def _save_settings(self):
         self.settings.setValue("last_vector_dir", self._last_vector_dir)
         self.settings.setValue("last_tif_dir", self._last_tif_dir)
+        self.settings.setValue("last_gamma_par_dir", self._last_gamma_par_dir)
         self.settings.setValue("last_output_dir", self._last_output_dir)
-        self.settings.setValue("merge_only", self.merge_only_checkbox.isChecked())
-        self.settings.setValue("clip_to_bounds", self.clip_to_bounds_checkbox.isChecked())
-        self.settings.setValue("resample_to_tif", self.resample_to_tif_checkbox.isChecked())
         self.config_manager.set_ui_state_value("source_mode", "local" if self.local_radio.isChecked() else "online")
         self.config_manager.set_ui_state_value("selected_local_source", self.local_source_combo.currentText())
         self.config_manager.set_ui_state_value("selected_online_source", self.online_source_combo.currentText())
@@ -466,6 +520,8 @@ class RasterDataAcquisitionDialog(QDialog):
             f"经纬度间隔: {source.latitude_interval} x {source.longitude_interval}\n"
             f"命名锚点: {source.naming_anchor}\n"
             f"是否压缩包: {'是' if source.is_archive else '否'}\n"
+            f"插值方式: {source.resample_method}\n"
+            f"缺失瓦片继续处理: {'是' if source.allow_missing_tiles else '否'}\n"
             f"规则预览: {build_rule_preview(source)}"
         )
 
@@ -490,21 +546,21 @@ class RasterDataAcquisitionDialog(QDialog):
         # 输出选项允许先选，真正执行时再按数据源判断是否生效
         self.merge_only_checkbox.setEnabled(True)
         self.clip_to_bounds_checkbox.setEnabled(True)
-        self.resample_to_tif_checkbox.setEnabled(self.reference_tif_path is not None)
+        self._update_resample_option_state()
 
     def _open_local_config(self):
+        previous_name = self.local_source_combo.currentText()
         dialog = LocalRasterSourceConfigDialog(self, manager=self.config_manager, selected_name=self.local_source_combo.currentText())
-        if dialog.exec():
-            self._load_sources()
-            if dialog.selected_name:
-                self.local_source_combo.setCurrentText(dialog.selected_name)
+        dialog.exec()
+        self._load_sources()
+        self.local_source_combo.setCurrentText(dialog.selected_name or previous_name)
 
     def _open_online_config(self):
+        previous_name = self.online_source_combo.currentText()
         dialog = OnlineRasterSourceConfigDialog(self, manager=self.config_manager, selected_name=self.online_source_combo.currentText())
-        if dialog.exec():
-            self._load_sources()
-            if dialog.selected_name:
-                self.online_source_combo.setCurrentText(dialog.selected_name)
+        dialog.exec()
+        self._load_sources()
+        self.online_source_combo.setCurrentText(dialog.selected_name or previous_name)
 
     def _test_local_source(self):
         source = self.config_manager.get_local_source(self.local_source_combo.currentText())
@@ -525,13 +581,43 @@ class RasterDataAcquisitionDialog(QDialog):
         if not source.api_key:
             QMessageBox.warning(self, "提示", "当前在线数据源未配置 API key")
             return
-        try:
-            ok = OpenTopographyClient(source.api_key).validate_api_key()
-            message = "API key 测试通过。" if ok else "API key 可能无效。"
-        except Exception as exc:
-            message = f"测试失败: {exc}"
-        QMessageBox.information(self, "测试结果", message)
-        self.log(f"在线数据源测试: {source.name} -> {message}")
+        if self.online_test_worker and self.online_test_worker.isRunning():
+            QMessageBox.information(self, "提示", "在线数据源测试正在进行，请稍候。")
+            return
+        self.online_test_progress_dialog = QProgressDialog("准备测试在线数据源...", "取消", 0, 100, self)
+        self.online_test_progress_dialog.setWindowTitle("测试在线数据源")
+        self.online_test_progress_dialog.setWindowModality(Qt.WindowModal)
+        self.online_test_progress_dialog.setAutoClose(False)
+        self.online_test_progress_dialog.setAutoReset(False)
+        self.online_test_progress_dialog.setValue(0)
+        self.online_test_progress_dialog.show()
+
+        self.online_test_worker = OnlineSourceTestWorker(source.api_key)
+        self.online_test_worker.progress_updated.connect(self._on_online_test_progress)
+        self.online_test_worker.test_completed.connect(
+            lambda ok, message, source_name=source.name: self._on_online_test_finished(source_name, ok, message)
+        )
+        self.online_test_progress_dialog.canceled.connect(self.online_test_worker.stop)
+        self.online_test_worker.start()
+        self.log(f"开始测试在线数据源: {source.name}")
+
+    def _on_online_test_progress(self, progress: int, message: str):
+        if self.online_test_progress_dialog:
+            self.online_test_progress_dialog.setLabelText(message)
+            self.online_test_progress_dialog.setValue(max(0, min(progress, 100)))
+        self.log(f"[测试 {progress}%] {message}")
+
+    def _on_online_test_finished(self, source_name: str, ok: bool, message: str):
+        if self.online_test_progress_dialog:
+            self.online_test_progress_dialog.setValue(100)
+            self.online_test_progress_dialog.close()
+            self.online_test_progress_dialog = None
+        self.online_test_worker = None
+        self.log(f"在线数据源测试: {source_name} -> {message}")
+        if ok:
+            QMessageBox.information(self, "测试结果", message)
+        else:
+            QMessageBox.warning(self, "测试结果", message)
 
     def _browse_output_file(self):
         file_path, _ = QFileDialog.getSaveFileName(self, "保存栅格文件", self._last_output_dir, "GeoTIFF (*.tif)")
@@ -553,6 +639,12 @@ class RasterDataAcquisitionDialog(QDialog):
             return
         self._load_tif_file(file_path)
 
+    def _browse_gamma_par_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "选择 GAMMA par 文件", self._last_gamma_par_dir, "PAR文件 (*.par);;所有文件 (*.*)")
+        if not file_path:
+            return
+        self._load_gamma_par_file(file_path)
+
     def _load_vector_file(self, file_path: str):
         self._last_vector_dir = os.path.dirname(file_path)
         self.vector_file_edit.setText(file_path)
@@ -571,15 +663,46 @@ class RasterDataAcquisitionDialog(QDialog):
             QMessageBox.warning(self, "提示", "无法提取 TIF 范围")
             return
         self._set_file_bounds(result, vector=False)
-        self.resample_to_tif_checkbox.setEnabled(True)
+        self._update_resample_option_state()
+
+    def _load_gamma_par_file(self, file_path: str):
+        self._last_gamma_par_dir = os.path.dirname(file_path)
+        self.gamma_par_file_edit.setText(file_path)
+        result = extract_bounding_box_from_gamma_par(file_path)
+        corners = extract_gamma_par_corners(file_path)
+        if not result or not corners:
+            QMessageBox.warning(self, "提示", "无法从 GAMMA par 文件提取范围。")
+            return
+        west, south, east, north = result
+        self.gamma_bounds = (south, north, west, east)
+        summary_text = (
+            f"边界(WGS84): 西={west:.4f}, 东={east:.4f}, 南={south:.4f}, 北={north:.4f}\n"
+            f"四角: UL({corners['UL'][1]:.2f}, {corners['UL'][0]:.2f})  "
+            f"UR({corners['UR'][1]:.2f}, {corners['UR'][0]:.2f})  "
+            f"LR({corners['LR'][1]:.2f}, {corners['LR'][0]:.2f})  "
+            f"LL({corners['LL'][1]:.2f}, {corners['LL'][0]:.2f})"
+        )
+        detail_text = (
+            f"边界(WGS84): 西={west:.6f}, 东={east:.6f}, 南={south:.6f}, 北={north:.6f}\n"
+            f"UL=({corners['UL'][1]:.6f}, {corners['UL'][0]:.6f})\n"
+            f"UR=({corners['UR'][1]:.6f}, {corners['UR'][0]:.6f})\n"
+            f"LR=({corners['LR'][1]:.6f}, {corners['LR'][0]:.6f})\n"
+            f"LL=({corners['LL'][1]:.6f}, {corners['LL'][0]:.6f})"
+        )
+        self.gamma_par_info_label.setText(summary_text)
+        self.gamma_par_info_label.setToolTip(detail_text)
+        self.gamma_par_area_label.setText(f"区域面积: {calculate_area_km2(south, north, west, east):.2f} km²")
+        self._show_bounds_on_map(south, north, west, east)
 
     def _set_file_bounds(self, result, vector):
         west, south, east, north = result
-        self.file_bounds = (south, north, west, east)
+        bounds = (south, north, west, east)
         if vector:
+            self.vector_bounds = bounds
             self.vector_info_label.setText(f"边界: 西={west:.6f}, 东={east:.6f}, 南={south:.6f}, 北={north:.6f}")
             self.vector_area_label.setText(f"区域面积: {calculate_area_km2(south, north, west, east):.2f} km²")
         else:
+            self.tif_bounds = bounds
             self.tif_info_label.setText(f"边界(WGS84): 西={west:.6f}, 东={east:.6f}, 南={south:.6f}, 北={north:.6f}")
             self.tif_area_label.setText(f"区域面积: {calculate_area_km2(south, north, west, east):.2f} km²")
         self._show_bounds_on_map(south, north, west, east)
@@ -608,13 +731,52 @@ class RasterDataAcquisitionDialog(QDialog):
         elif sender is self.clip_to_bounds_checkbox and self.clip_to_bounds_checkbox.isChecked():
             self.merge_only_checkbox.setChecked(False); self.resample_to_tif_checkbox.setChecked(False)
         elif sender is self.resample_to_tif_checkbox and self.resample_to_tif_checkbox.isChecked():
+            if not self._can_use_resample_option():
+                self.resample_to_tif_checkbox.setChecked(False)
+                self.merge_only_checkbox.setChecked(True)
+                return
             self.merge_only_checkbox.setChecked(False); self.clip_to_bounds_checkbox.setChecked(False)
         elif not any([self.merge_only_checkbox.isChecked(), self.clip_to_bounds_checkbox.isChecked(), self.resample_to_tif_checkbox.isChecked()]):
             self.merge_only_checkbox.setChecked(True)
 
+    def _tab_offset(self) -> int:
+        return 1 if WEBENGINE_AVAILABLE and self.map_widget else 0
+
+    def _vector_tab_index(self) -> int:
+        return 2 + self._tab_offset()
+
+    def _tif_tab_index(self) -> int:
+        return 3 + self._tab_offset()
+
+    def _gamma_tab_index(self) -> int:
+        return 4 + self._tab_offset()
+
+    def _is_tif_region_selected(self) -> bool:
+        return self.region_tab.currentIndex() == self._tif_tab_index()
+
+    def _can_use_resample_option(self) -> bool:
+        if not self.reference_tif_path or not os.path.exists(self.reference_tif_path):
+            QMessageBox.warning(self, "提示", "请先导入有效的 TIF 文件后再使用“裁剪重采样至相同范围和分辨率”。")
+            return False
+        if not self._is_tif_region_selected():
+            QMessageBox.warning(self, "提示", "“裁剪重采样至相同范围和分辨率”仅在区域选择为“TIF文件”时可用。")
+            return False
+        return True
+
+    def _update_resample_option_state(self):
+        enabled = self.reference_tif_path is not None and os.path.exists(self.reference_tif_path) and self._is_tif_region_selected()
+        self.resample_to_tif_checkbox.setEnabled(enabled)
+        if not enabled and self.resample_to_tif_checkbox.isChecked():
+            self.resample_to_tif_checkbox.setChecked(False)
+            if not self.clip_to_bounds_checkbox.isChecked():
+                self.merge_only_checkbox.setChecked(True)
+
+    def _on_region_tab_changed(self, _index: int):
+        self._update_resample_option_state()
+
     def _get_region_bounds(self) -> Optional[Tuple[float, float, float, float]]:
         current = self.region_tab.currentIndex()
-        offset = 1 if WEBENGINE_AVAILABLE and self.map_widget else 0
+        offset = self._tab_offset()
         if WEBENGINE_AVAILABLE and self.map_widget and current == 0:
             if self.saved_map_bounds:
                 return self.saved_map_bounds
@@ -644,14 +806,26 @@ class RasterDataAcquisitionDialog(QDialog):
                 return None
             west, south, east, north = boundary
             return south, north, west, east
-        if current in (2 + offset, 3 + offset):
-            if not self.file_bounds:
+        if current == 2 + offset:
+            if not self.vector_bounds:
                 QMessageBox.warning(self, "提示", "请先导入范围文件")
                 return None
-            return self.file_bounds
+            return self.vector_bounds
+        if current == 3 + offset:
+            if not self.tif_bounds:
+                QMessageBox.warning(self, "提示", "请先导入范围文件")
+                return None
+            return self.tif_bounds
+        if current == 4 + offset:
+            if not self.gamma_bounds:
+                QMessageBox.warning(self, "提示", "请先导入范围文件")
+                return None
+            return self.gamma_bounds
         return None
 
     def start_acquisition(self):
+        if self.resample_to_tif_checkbox.isChecked() and not self._can_use_resample_option():
+            return
         bounds = self._get_region_bounds()
         if not bounds:
             return
@@ -666,13 +840,23 @@ class RasterDataAcquisitionDialog(QDialog):
             if not source:
                 QMessageBox.warning(self, "提示", "请选择本地数据源")
                 return
-            self.local_worker = LocalRasterWorker(source, south, north, west, east, output_path, clip_to_bounds=self.clip_to_bounds_checkbox.isChecked(), reference_tif=self.reference_tif_path if self.resample_to_tif_checkbox.isChecked() else None)
+            self.local_worker = LocalRasterWorker(
+                source,
+                south,
+                north,
+                west,
+                east,
+                output_path,
+                clip_to_bounds=self.clip_to_bounds_checkbox.isChecked(),
+                reference_tif=self.reference_tif_path if self.resample_to_tif_checkbox.isChecked() else None,
+                resample_method=source.resample_method,
+            )
             self.local_worker.progress_updated.connect(self._on_progress_updated)
             self.local_worker.process_completed.connect(self._on_completed)
             self.local_worker.error_occurred.connect(self._on_error)
             self.local_worker.files_found.connect(self._on_files_found)
             self.local_worker.start()
-            self.log(f"开始处理本地栅格数据源: {source.name}")
+            self.log(f"开始处理本地栅格数据源: {source.name}（插值方式: {source.resample_method}）")
         else:
             source = self.config_manager.get_online_source(self.online_source_combo.currentText())
             if not source or not source.api_key:
@@ -742,7 +926,7 @@ class RasterDataAcquisitionDialog(QDialog):
             urls = event.mimeData().urls()
             if urls:
                 path = urls[0].toLocalFile().lower()
-                if any(path.endswith(ext) for ext in [".shp", ".geojson", ".json", ".kml", ".kmz", ".gpkg", ".tif", ".tiff"]):
+                if any(path.endswith(ext) for ext in [".shp", ".geojson", ".json", ".kml", ".kmz", ".gpkg", ".tif", ".tiff", ".par"]):
                     event.acceptProposedAction()
                     return
         event.ignore()
@@ -757,17 +941,19 @@ class RasterDataAcquisitionDialog(QDialog):
             return
         file_path = urls[0].toLocalFile()
         ext = os.path.splitext(file_path)[1].lower()
-        has_map = WEBENGINE_AVAILABLE and self.map_widget
-        vector_tab = 3 if has_map else 2
-        tif_tab = 4 if has_map else 3
         if ext in [".shp", ".geojson", ".json", ".kml", ".kmz", ".gpkg"]:
             self._load_vector_file(file_path)
-            self.region_tab.setCurrentIndex(vector_tab)
+            self.region_tab.setCurrentIndex(self._vector_tab_index())
             event.acceptProposedAction()
             return
         if ext in [".tif", ".tiff"]:
             self._load_tif_file(file_path)
-            self.region_tab.setCurrentIndex(tif_tab)
+            self.region_tab.setCurrentIndex(self._tif_tab_index())
+            event.acceptProposedAction()
+            return
+        if ext == ".par":
+            self._load_gamma_par_file(file_path)
+            self.region_tab.setCurrentIndex(self._gamma_tab_index())
             event.acceptProposedAction()
             return
         event.ignore()
@@ -778,12 +964,14 @@ class RasterDataAcquisitionDialog(QDialog):
         sb.setValue(sb.maximum())
 
     def closeEvent(self, event):
+        if self.online_test_worker and self.online_test_worker.isRunning():
+            self.online_test_worker.stop()
         self._save_settings()
         super().closeEvent(event)
 
     def showEvent(self, event):
         super().showEvent(event)
-        QTimer.singleShot(100, lambda: self.splitter.setSizes([620, 420]))
+        QTimer.singleShot(100, lambda: self.splitter.setSizes([700, 480]))
 
 
 DEMAcquisitionDialog = RasterDataAcquisitionDialog

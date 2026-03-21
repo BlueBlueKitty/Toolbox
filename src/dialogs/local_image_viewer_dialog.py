@@ -108,6 +108,12 @@ class LocalImageViewerDialog(QDialog):
             
             # 同时更新图像统计信息（最大最小值）
             self._update_image_stats_to_render_settings()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            event.ignore()
+            return
+        super().keyPressEvent(event)
         
     def _create_ui(self):
         """创建用户界面"""

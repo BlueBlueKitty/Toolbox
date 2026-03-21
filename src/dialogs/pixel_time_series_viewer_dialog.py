@@ -174,6 +174,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         # 创建UI
         self._create_ui()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            event.ignore()
+            return
+        super().keyPressEvent(event)
         
     def _create_ui(self):
         """创建用户界面"""
