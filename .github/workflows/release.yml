@@ -64,10 +64,12 @@ jobs:
             -w /workspace \
             toolbox-linux-builder \
             bash -lc '
-              python3 -m venv .venv --system-site-packages
+              python3.10 -m venv .venv
               source .venv/bin/activate
               python -m pip install --upgrade pip setuptools wheel
               python -m pip install -r requirements-linux.txt
+              GDAL_VERSION=$(gdal-config --version)
+              python -m pip install "gdal==${GDAL_VERSION}.*"
               chmod +x scripts/build_linux.sh
               ./scripts/build_linux.sh --clean
             '

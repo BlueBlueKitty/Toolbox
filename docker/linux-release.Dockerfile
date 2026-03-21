@@ -1,20 +1,24 @@
-FROM ubuntu:22.04
+FROM ubuntu:20.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-dev \
+    software-properties-common \
+    ca-certificates \
+    gnupg \
+    curl \
+    && add-apt-repository ppa:deadsnakes/ppa -y \
+    && apt-get update && apt-get install -y \
+    python3.10 \
+    python3.10-dev \
+    python3.10-venv \
     python3-pip \
-    python3-venv \
-    python3-gdal \
     gdal-bin \
     libgdal-dev \
     proj-bin \
     libproj-dev \
     build-essential \
     wget \
-    curl \
     git \
     file \
     desktop-file-utils \
@@ -58,7 +62,6 @@ RUN apt-get update && apt-get install -y \
     libxi6 \
     libxrandr2 \
     libxtst6 \
-    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
