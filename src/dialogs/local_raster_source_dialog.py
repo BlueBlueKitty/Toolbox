@@ -209,10 +209,23 @@ class LocalRasterSourceConfigDialog(QDialog):
         layout.setSpacing(4)
         label = QLabel(text)
         info = QToolButton()
-        info.setText("🛈")
+        info.setText("i")
         info.setAutoRaise(True)
         info.setToolTip(tip)
-        info.setStyleSheet("QToolButton { color: #2d6cdf; font-weight: bold; border: none; }")
+        info.setFixedSize(16, 16)
+        info.setStyleSheet(
+            "QToolButton {"
+            " color: #2d6cdf;"
+            " font-weight: bold;"
+            " border: 1px solid #2d6cdf;"
+            " border-radius: 8px;"
+            " background: #eef4ff;"
+            " padding: 0px;"
+            "}"
+            "QToolButton:hover {"
+            " background: #dbe8ff;"
+            "}"
+        )
         layout.addWidget(label)
         layout.addWidget(info)
         layout.addStretch()
