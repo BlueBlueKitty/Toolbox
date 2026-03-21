@@ -165,12 +165,34 @@ function Build-WithPyInstaller {
     
     # 运行 PyInstaller，并将完整日志写入文件，便于在 CI 中排查失败原因
     $pyinstallerLog = Join-Path $BUILD_DIR "pyinstaller-windows.log"
+    $pyinstallerErrLog = Join-Path $BUILD_DIR "pyinstaller-windows.stderr.log"
     if (-not (Test-Path $BUILD_DIR)) {
         New-Item -ItemType Directory -Path $BUILD_DIR | Out-Null
     }
+    if (Test-Path $pyinstallerLog) {
+        Remove-Item $pyinstallerLog -Force
+    }
+    if (Test-Path $pyinstallerErrLog) {
+        Remove-Item $pyinstallerErrLog -Force
+    }
 
-    python -m PyInstaller --clean --noconfirm Toolbox.spec 2>&1 | Tee-Object -FilePath $pyinstallerLog
-    $pyinstallerExitCode = $LASTEXITCODE
+    $process = Start-Process `
+        -FilePath "python" `
+        -ArgumentList "-m", "PyInstaller", "--clean", "--noconfirm", "Toolbox.spec" `
+        -WorkingDirectory $SCRIPT_DIR `
+        -RedirectStandardOutput $pyinstallerLog `
+        -RedirectStandardError $pyinstallerErrLog `
+        -NoNewWindow `
+        -PassThru `
+        -Wait
+
+    if (Test-Path $pyinstallerLog) {
+        Get-Content $pyinstallerLog | Write-Host
+    }
+    if (Test-Path $pyinstallerErrLog) {
+        Get-Content $pyinstallerErrLog | Tee-Object -FilePath $pyinstallerLog -Append | Write-Host
+    }
+    $pyinstallerExitCode = $process.ExitCode
     
     # 检查构建产物是否存在
     $expectedOutput = if ($OneFile) { 
