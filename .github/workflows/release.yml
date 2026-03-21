@@ -88,6 +88,9 @@ jobs:
       - build-linux
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
@@ -100,8 +103,28 @@ jobs:
           name: linux-release
           path: release-assets
 
+      - name: Read release metadata from version.json
+        id: version_meta
+        shell: python
+        run: |
+          import os
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("version.json").read_text(encoding="utf-8"))
+          name = data.get("name") or f'v{data["version"]}'
+          body = data.get("changelog") or ""
+
+          github_output = Path(os.environ["GITHUB_OUTPUT"])
+          with github_output.open("a", encoding="utf-8") as fh:
+              fh.write(f"release_name={name}\n")
+              fh.write("release_body<<EOF\n")
+              fh.write(body)
+              fh.write("\nEOF\n")
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: release-assets/*
-          generate_release_notes: true
+          name: ${{ steps.version_meta.outputs.release_name }}
+          body: ${{ steps.version_meta.outputs.release_body }}
