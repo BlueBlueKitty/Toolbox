@@ -1,7 +1,7 @@
 #!/bin/bash
 #-----------------------------------------------------------------------------
 # Linux 构建脚本 - 生成 AppImage
-# 用法: ./build_linux.sh [--onefile] [--clean]
+# 用法: ./scripts/build_linux.sh [--onefile] [--clean]
 #   --onefile: 使用 PyInstaller 单文件模式（不推荐用于 AppImage）
 #   --clean:   清理之前的构建产物
 #-----------------------------------------------------------------------------
@@ -20,7 +20,8 @@ APP_NAME="Toolbox"
 APP_ID="com.toolbox.app"
 
 # 路径定义（必须先于版本号读取）
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "${SCRIPT_PATH_DIR}/.." && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
 DIST_DIR="${SCRIPT_DIR}/dist"
 APPDIR="${BUILD_DIR}/AppDir"

@@ -273,8 +273,8 @@ sudo apt install -y \
 
 项目已配置基于 GitHub Actions 的自动发布流程：
 
-1. Windows 在 GitHub Actions 云端直接调用 `build_win.ps1` 构建安装包。
-2. Linux 在 GitHub Actions 云端通过 `docker/linux-release.Dockerfile` 构建固定环境，再调用 `build_linux.sh` 生成 AppImage。
+1. Windows 在 GitHub Actions 云端直接调用 `scripts/build_win.ps1` 构建安装包。
+2. Linux 在 GitHub Actions 云端通过 `docker/linux-release.Dockerfile` 构建固定环境，再调用 `scripts/build_linux.sh` 生成 AppImage。
 3. 推送形如 `v1.4.1` 的 Git tag 后，会自动创建 GitHub Release 并上传 Windows/Linux 两个平台产物。
 
 本地一键发版命令：
@@ -289,22 +289,39 @@ sudo apt install -y \
 2. 当前 Git 工作区是干净状态。
 3. `version.json` 里的 `name` 和 `changelog` 已经写好本次发布说明。
 
+推荐发版步骤：
+
+1. 修改 [src/version.py](./src/version.py) 中的 `__version__`，例如改成 `1.5.2`。
+2. 修改 [version.json](./version.json) 中的 `version`、`name` 和 `changelog`，并确保 `version` 与 `src/version.py` 一致。
+3. 在项目根目录执行：
+
+```powershell
+.\scripts\publish_release.ps1
+```
+
+这个脚本会自动：
+
+1. 更新 `version.json` 中的 `release_url`、下载链接和 `published_at`。
+2. 提交 `version.json`。
+3. 创建并推送形如 `v1.5.2` 的 Git tag。
+4. 触发 GitHub Actions 自动构建 Windows 和 Linux 安装包并发布 Release。
+
 ### Windows 打包
 
-使用 `build_win.ps1` 脚本进行打包，**默认会创建 NSIS 安装程序**：
+使用 `scripts/build_win.ps1` 脚本进行打包，**默认会创建 NSIS 安装程序**：
 
 ```powershell
 # 基本打包（目录模式 + NSIS 安装程序）
-.\build_win.ps1
+.\scripts\build_win.ps1
 
 # 清理后重新打包
-.\build_win.ps1 -Clean
+.\scripts\build_win.ps1 -Clean
 
 # 单文件模式（不创建安装程序）
-.\build_win.ps1 -OneFile
+.\scripts\build_win.ps1 -OneFile
 
 # 禁用 NSIS 安装程序创建
-.\build_win.ps1 -CreateInstaller:$false
+.\scripts\build_win.ps1 -CreateInstaller:$false
 ```
 
 **输出文件：**
@@ -313,17 +330,17 @@ sudo apt install -y \
 
 ### Linux 打包
 
-使用 `build_linux.sh` 脚本生成 AppImage：
+使用 `scripts/build_linux.sh` 脚本生成 AppImage：
 
 ```bash
 # 给脚本添加执行权限
-chmod +x build_linux.sh
+chmod +x scripts/build_linux.sh
 
 # 执行打包
-./build_linux.sh
+./scripts/build_linux.sh
 
 # 清理后重新打包
-./build_linux.sh --clean
+./scripts/build_linux.sh --clean
 ```
 
 **输出文件：**

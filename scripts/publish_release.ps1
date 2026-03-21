@@ -30,7 +30,9 @@ function Update-VersionJson {
     $json.release_url = "https://github.com/$Repo/releases/tag/$tag"
     $json.downloads.windows = "https://github.com/$Repo/releases/download/$tag/Toolbox-$Version-x86_64-Setup.exe"
     $json.downloads.linux = "https://github.com/$Repo/releases/download/$tag/Toolbox-$Version-x86_64.AppImage"
-    $json.published_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $chinaTimeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById("China Standard Time")
+    $publishedAt = [System.TimeZoneInfo]::ConvertTime((Get-Date), $chinaTimeZone)
+    $json.published_at = $publishedAt.ToString("yyyy-MM-ddTHH:mm:sszzz")
 
     $json | ConvertTo-Json -Depth 10 | Set-Content $versionJsonPath -Encoding UTF8
 }

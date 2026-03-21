@@ -1,6 +1,6 @@
 ﻿#-----------------------------------------------------------------------------
 # Windows 构建脚本 - 生成 exe
-# 用法: .\build_win.ps1 [-OneFile] [-Clean] [-CreateInstaller]
+# 用法: .\scripts\build_win.ps1 [-OneFile] [-Clean] [-CreateInstaller]
 #   -OneFile:        使用 PyInstaller 单文件模式
 #   -Clean:          清理之前的构建产物
 #   -CreateInstaller: 使用 NSIS 创建安装程序
@@ -18,7 +18,8 @@ $APP_NAME = "Toolbox"
 $APP_PUBLISHER = "Yibo Yuan"
 
 # 从 src/version.py 动态读取版本号
-$VERSION_FILE = Join-Path $PSScriptRoot "src\version.py"
+$PROJECT_ROOT = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$VERSION_FILE = Join-Path $PROJECT_ROOT "src\version.py"
 if (Test-Path $VERSION_FILE) {
     # 使用 Select-String 避免复杂的正则转义
     $versionLine = Select-String -Path $VERSION_FILE -Pattern "__version__" | Select-Object -First 1
@@ -47,9 +48,9 @@ else {
 }
 
 # 路径定义
-$SCRIPT_DIR = $PSScriptRoot
-$BUILD_DIR = Join-Path $SCRIPT_DIR "build"
-$DIST_DIR = Join-Path $SCRIPT_DIR "dist"
+$SCRIPT_DIR = $PROJECT_ROOT
+$BUILD_DIR = Join-Path $PROJECT_ROOT "build"
+$DIST_DIR = Join-Path $PROJECT_ROOT "dist"
 $OUTPUT_DIR = Join-Path $DIST_DIR "Toolbox_win"
 
 # 颜色输出函数
@@ -81,7 +82,7 @@ function Write-Error-Custom {
 # 显示帮助
 if ($Help) {
     Write-Host @"
-用法: .\build_win.ps1 [选项]
+用法: .\scripts\build_win.ps1 [选项]
 
 选项:
   -OneFile          使用 PyInstaller 单文件模式（生成单个 exe 文件）
@@ -90,10 +91,10 @@ if ($Help) {
   -Help             显示此帮助信息
 
 示例:
-  .\build_win.ps1                    # 默认目录模式打包
-  .\build_win.ps1 -OneFile           # 单文件模式打包
-  .\build_win.ps1 -Clean             # 清理后打包
-  .\build_win.ps1 -CreateInstaller   # 打包并创建安装程序
+  .\scripts\build_win.ps1                    # 默认目录模式打包
+  .\scripts\build_win.ps1 -OneFile           # 单文件模式打包
+  .\scripts\build_win.ps1 -Clean             # 清理后打包
+  .\scripts\build_win.ps1 -CreateInstaller   # 打包并创建安装程序
 "@
     exit 0
 }
@@ -162,14 +163,14 @@ function Build-WithPyInstaller {
         Write-Info "使用目录模式"
     }
     
-    # 运行 PyInstaller
-    # 注意：在某些情况下 GDAL 可能导致退出码异常，但不影响构建结果
-    try {
-        python -m PyInstaller --clean --noconfirm Toolbox.spec 2>&1 | Write-Host
+    # 运行 PyInstaller，并将完整日志写入文件，便于在 CI 中排查失败原因
+    $pyinstallerLog = Join-Path $BUILD_DIR "pyinstaller-windows.log"
+    if (-not (Test-Path $BUILD_DIR)) {
+        New-Item -ItemType Directory -Path $BUILD_DIR | Out-Null
     }
-    catch {
-        # 忽略 GDAL 相关的异常
-    }
+
+    python -m PyInstaller --clean --noconfirm Toolbox.spec 2>&1 | Tee-Object -FilePath $pyinstallerLog
+    $pyinstallerExitCode = $LASTEXITCODE
     
     # 检查构建产物是否存在
     $expectedOutput = if ($OneFile) { 
@@ -183,6 +184,13 @@ function Build-WithPyInstaller {
         Write-Success "PyInstaller 打包完成"
     }
     else {
+        if (Test-Path $pyinstallerLog) {
+            Write-Warn "PyInstaller 未生成预期输出，以下为日志末尾 80 行："
+            Get-Content $pyinstallerLog | Select-Object -Last 80 | Write-Host
+        }
+        if ($pyinstallerExitCode -ne 0) {
+            Write-Warn "PyInstaller 退出码: $pyinstallerExitCode"
+        }
         Write-Error-Custom "PyInstaller 打包失败：未找到输出文件 $expectedOutput"
     }
 }
@@ -319,7 +327,7 @@ Section "Uninstall"
 SectionEnd
 "@
     
-    $nsisPath = Join-Path $SCRIPT_DIR "installer.nsi"
+    $nsisPath = Join-Path $PSScriptRoot "installer.nsi"
     $nsisScript | Out-File -FilePath $nsisPath -Encoding UTF8
     
     Write-Info "NSIS 脚本已创建: $nsisPath"
@@ -360,7 +368,7 @@ function Create-Installer {
     Write-Info "找到 NSIS: $nsisPath"
     
     # 创建 LICENSE 文件（如果不存在）
-    $licensePath = Join-Path $SCRIPT_DIR "LICENSE"
+    $licensePath = Join-Path $PROJECT_ROOT "LICENSE"
     if (-not (Test-Path $licensePath)) {
         "MIT License`n`nCopyright (c) 2025 ${APP_PUBLISHER}`n`nPermission is hereby granted..." | Out-File -FilePath $licensePath -Encoding UTF8
     }

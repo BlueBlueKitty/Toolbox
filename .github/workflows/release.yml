@@ -35,7 +35,7 @@ jobs:
 
       - name: Build Windows package
         shell: powershell
-        run: .\build_win.ps1 -Clean -CreateInstaller
+        run: .\scripts\build_win.ps1 -Clean -CreateInstaller
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -68,8 +68,8 @@ jobs:
               source .venv/bin/activate
               python -m pip install --upgrade pip setuptools wheel
               python -m pip install -r requirements-linux.txt
-              chmod +x build_linux.sh
-              ./build_linux.sh --clean
+              chmod +x scripts/build_linux.sh
+              ./scripts/build_linux.sh --clean
             '
 
       - name: Upload Linux artifacts
