@@ -251,19 +251,19 @@ function Create-NSISScript {
 
 ; 基本信息
 Name "${APP_NAME}"
-OutFile "dist\${APP_NAME}-${APP_VERSION}-x86_64-Setup.exe"
+OutFile "..\dist\${APP_NAME}-${APP_VERSION}-x86_64-Setup.exe"
 InstallDir "`$PROGRAMFILES64\${APP_NAME}"
 InstallDirRegKey HKLM "Software\${APP_NAME}" "Install_Dir"
 RequestExecutionLevel admin
 
 ; 界面设置
 !define MUI_ABORTWARNING
-!define MUI_ICON "resources\toolbox.ico"
-!define MUI_UNICON "resources\toolbox.ico"
+!define MUI_ICON "..\resources\toolbox.ico"
+!define MUI_UNICON "..\resources\toolbox.ico"
 
 ; 安装页面
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "LICENSE"
+!insertmacro MUI_PAGE_LICENSE "..\LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -312,7 +312,7 @@ Section "安装 ${APP_NAME}" SecMain
     SetOutPath `$INSTDIR
     
     ; 复制所有文件
-    File /r "dist\Toolbox_win\*.*"
+    File /r "..\dist\Toolbox_win\*.*"
     
     ; 写入卸载信息
     WriteRegStr HKLM "Software\${APP_NAME}" "Install_Dir" "`$INSTDIR"
