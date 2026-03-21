@@ -204,6 +204,9 @@ create_appdir() {
     rm -f "${APPDIR}/_internal/libgtk-3.so"*
     rm -f "${APPDIR}/_internal/libgdk_pixbuf-2.0.so"*
     rm -f "${APPDIR}/_internal/libgdk-3.so"*
+
+    # 使用目标系统的 Mesa/GBM 图形栈，避免打包进来的 libgbm 与宿主机驱动符号不兼容
+    rm -f "${APPDIR}/_internal/libgbm.so"*
     
     success "GTK 相关文件已移除"
     
