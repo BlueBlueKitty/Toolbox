@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsPixmapIte
                                QGraphicsLineItem, QGraphicsEllipseItem, QMenu,
                                QApplication)
 from PySide6.QtCore import Qt, Signal, QPointF, QRectF
-from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QCursor, QPen, QBrush
+from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QCursor, QPen, QBrush, QTransform
 
 try:
     import matplotlib.cm as cm
@@ -103,6 +103,8 @@ class ImageViewer(QGraphicsView):
         # 地理变换信息
         self.geotransform = None
         self.projection = None
+        self.scene_world_rect = None
+        self.image_world_rect = None
         
         # 渲染设置
         self.render_settings = None  # 来自RenderSettingsWidget的设置字典
@@ -142,6 +144,57 @@ class ImageViewer(QGraphicsView):
             self.downsample_factor = 1.0
         
         self._update_display()
+
+    def set_scene_mapping(self, scene_world_rect=None, image_world_rect=None):
+        """
+        设置图像在场景中的摆放范围。
+
+        Args:
+            scene_world_rect: 整个场景范围 (x, y, width, height)
+            image_world_rect: 当前图像范围 (x, y, width, height)
+        """
+        self.scene_world_rect = scene_world_rect
+        self.image_world_rect = image_world_rect
+        if self.image_array is not None:
+            self._update_display()
+
+    def capture_view_state(self):
+        """捕获当前视图状态。"""
+        return {
+            'transform': self.transform(),
+            'h_value': self.horizontalScrollBar().value(),
+            'v_value': self.verticalScrollBar().value(),
+        }
+
+    def restore_view_state(self, state):
+        """恢复视图状态。"""
+        if not state:
+            return
+
+        self.is_syncing = True
+        self.setTransform(state['transform'])
+        self.horizontalScrollBar().setValue(state['h_value'])
+        self.verticalScrollBar().setValue(state['v_value'])
+        self.is_syncing = False
+
+    def _get_current_scene_rect(self):
+        """获取当前应使用的场景范围。"""
+        if self.scene_world_rect is not None:
+            x, y, width, height = self.scene_world_rect
+            return QRectF(x, y, width, height)
+        if self.image_item is not None:
+            return self.image_item.sceneBoundingRect()
+        return QRectF()
+
+    def _map_scene_to_item(self, scene_pos):
+        """将场景坐标映射为图像项坐标。"""
+        if self.image_item is None:
+            return None
+
+        item_pos = self.image_item.mapFromScene(scene_pos)
+        if self.image_item.boundingRect().contains(item_pos):
+            return item_pos
+        return None
         
     def _normalize_array(self, arr):
         """将数组归一化到0-255范围（注释：此函数主要用于非渲染设置模式）"""
@@ -262,6 +315,17 @@ class ImageViewer(QGraphicsView):
         else:
             self.image_item.setTransformationMode(Qt.FastTransformation)
         self.scene.addItem(self.image_item)
+
+        if self.image_world_rect is not None:
+            world_x, world_y, world_w, world_h = self.image_world_rect
+            scale_x = world_w / max(width, 1)
+            scale_y = world_h / max(height, 1)
+            self.image_item.setPos(world_x, world_y)
+            self.image_item.setTransform(QTransform.fromScale(scale_x, scale_y))
+
+        scene_rect = self._get_current_scene_rect()
+        if not scene_rect.isNull():
+            self.scene.setSceneRect(scene_rect)
         self._rebuild_selected_pixel_marker()
         
         # 注意：不在这里调用fit_in_view，让调用者在合适的时机调用
@@ -471,9 +535,12 @@ class ImageViewer(QGraphicsView):
             return
         
         if self.image_item:
-            # 确保场景矩形已更新
-            self.scene.setSceneRect(self.image_item.boundingRect())
-            self.fitInView(self.image_item, Qt.KeepAspectRatio)
+            scene_rect = self._get_current_scene_rect()
+            self.scene.setSceneRect(scene_rect)
+            if self.scene_world_rect is not None:
+                self.fitInView(scene_rect, Qt.KeepAspectRatio)
+            else:
+                self.fitInView(self.image_item, Qt.KeepAspectRatio)
             self.current_zoom = 1.0
     
     def zoom_in(self):
@@ -507,8 +574,8 @@ class ImageViewer(QGraphicsView):
             scene_pos = self.mapToScene(event.pos())
             
             # 转换为图像坐标
-            if self.image_item.contains(scene_pos):
-                item_pos = self.image_item.mapFromScene(scene_pos)
+            item_pos = self._map_scene_to_item(scene_pos)
+            if item_pos is not None:
                 # 转换为原始图像坐标（考虑降采样）
                 x = int(item_pos.x() * self.downsample_factor)
                 y = int(item_pos.y() * self.downsample_factor)
@@ -552,8 +619,8 @@ class ImageViewer(QGraphicsView):
             # 普通鼠标移动，更新像素值显示
             if self.image_item and self.image_array is not None:
                 scene_pos = self.mapToScene(event.pos())
-                if self.image_item.contains(scene_pos):
-                    item_pos = self.image_item.mapFromScene(scene_pos)
+                item_pos = self._map_scene_to_item(scene_pos)
+                if item_pos is not None:
                     # 转换为原始图像坐标（考虑降采样）
                     x = int(item_pos.x() * self.downsample_factor)
                     y = int(item_pos.y() * self.downsample_factor)

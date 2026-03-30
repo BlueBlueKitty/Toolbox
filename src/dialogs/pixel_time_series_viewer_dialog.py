@@ -9,6 +9,7 @@ import os
 import re
 import numpy as np
 from pathlib import Path
+from typing import Optional, Tuple
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                                QFileDialog, QLabel, QSlider, QComboBox, QMessageBox,
                                QSplitter, QGroupBox, QGridLayout, QCheckBox, QFormLayout,
@@ -101,7 +102,6 @@ from src.utils.gamma_file_process import (
 from src.utils.image_io import (
     read_tiff,
     read_tiff_downsampled,
-    read_tiff_pixel,
     get_tiff_info,
     read_image,
     read_image_downsampled,
@@ -116,6 +116,11 @@ from src.utils.image_io import (
     read_h5_timeseries_pixel,
     list_h5_datasets,
     read_h5_dataset,
+    build_coordinate_transform,
+    invert_geotransform,
+    get_raster_bounds_wgs84,
+    bounds_overlap,
+    lonlat_to_pixel,
 )
 
 
@@ -137,7 +142,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.current_image_index_1 = 0  # 窗口1当前显示的图像索引
         self.current_image_index_2 = 0  # 窗口2当前显示的图像索引
         self.selected_pixel = None  # 选中的像素坐标 (x, y)
+        self.selected_geo = None  # 选中的WGS84地理坐标 (lon, lat)
+        self.selected_viewer_id = None  # 最近一次选点来自哪个窗口
         self.nodata_value = None  # Nodata值
+        self._nodata_user_locked = False  # 是否使用用户手动指定的Nodata
         
         # 按需加载相关
         self.data_source_type = None  # 数据源类型：'folder' 或 'h5'
@@ -168,6 +176,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 地理信息
         self.geotransform = None  # GDAL地理变换参数
         self.projection = None  # 投影信息
+        self.image_metadata = []  # 每张影像的元数据（文件夹模式）
+        self.folder_sync_mode = 'rowcol'  # rowcol | geo | unavailable
+        self.folder_sync_message = ""
+        self.folder_scene_rect = None  # 统一场景范围（WGS84）
         
         # dB转换标志
         self._converted_to_db = False  # 是否已转换为dB
@@ -365,7 +377,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         setattr(self, f'image_viewer_{viewer_id}', viewer)
         
         # 连接像素点击信号
-        viewer.pixel_clicked.connect(self.on_pixel_clicked)
+        viewer.pixel_clicked.connect(lambda x, y: self.on_pixel_clicked(viewer_id, x, y))
         
         # 连接鼠标移动信号，用于更新colorbar
         viewer.mouse_moved.connect(lambda x, y, val: self.on_viewer_mouse_moved(viewer_id, x, y, val))
@@ -517,10 +529,14 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 使用第一个窗口的缓存图像
         if self._cached_image_1 is not None:
             arr = self._cached_image_1
+            nodata_value = self._get_effective_nodata_for_index(self.current_image_index_1)
             # 创建有效掩码
             valid_mask = np.isfinite(arr)
-            if self.nodata_value is not None:
-                valid_mask = valid_mask & (arr != self.nodata_value)
+            if nodata_value is not None:
+                if np.isnan(nodata_value):
+                    valid_mask = valid_mask & ~np.isnan(arr)
+                else:
+                    valid_mask = valid_mask & (arr != nodata_value)
             
             if np.any(valid_mask):
                 valid_data = arr[valid_mask]
@@ -531,6 +547,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
     def _clear_selected_pixel_state(self):
         """清除当前选点及其标记。"""
         self.selected_pixel = None
+        self.selected_geo = None
+        self.selected_viewer_id = None
         if hasattr(self, 'pixel_info_label'):
             self.pixel_info_label.setText("请点击图像选择像素")
         self._sync_selected_pixel_markers()
@@ -543,6 +561,18 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 continue
             if self.selected_pixel is None:
                 viewer.clear_selected_pixel()
+            elif self.data_source_type == 'folder' and self.folder_sync_mode == 'unavailable':
+                if viewer_id == self.selected_viewer_id:
+                    viewer.set_selected_pixel(*self.selected_pixel)
+                else:
+                    viewer.clear_selected_pixel()
+            elif self._uses_geo_sync() and self.selected_geo is not None:
+                current_index = getattr(self, f'current_image_index_{viewer_id}', 0)
+                pixel = self._map_lonlat_to_pixel(current_index, *self.selected_geo)
+                if pixel[0] is not None and self._is_pixel_in_bounds(current_index, *pixel):
+                    viewer.set_selected_pixel(*pixel)
+                else:
+                    viewer.clear_selected_pixel()
             else:
                 viewer.set_selected_pixel(*self.selected_pixel)
 
@@ -561,12 +591,13 @@ class PixelTimeSeriesViewerDialog(QDialog):
             band = min(settings.get('gray_band', 1), data.shape[2]) - 1
             data = data[:, :, band]
 
+        nodata_value = self._get_effective_nodata_for_index(getattr(self, f'current_image_index_{viewer_id}'))
         valid_mask = np.isfinite(data)
-        if self.nodata_value is not None:
-            if np.isnan(self.nodata_value):
+        if nodata_value is not None:
+            if np.isnan(nodata_value):
                 valid_mask = valid_mask & ~np.isnan(data)
             else:
-                valid_mask = valid_mask & (data != self.nodata_value)
+                valid_mask = valid_mask & (data != nodata_value)
 
         if not np.any(valid_mask):
             return None
@@ -590,6 +621,259 @@ class PixelTimeSeriesViewerDialog(QDialog):
 
         colorbar.set_range(vmin, vmax)
         colorbar.set_colormap(self.colormap_combo.currentText(), settings['colormap_reversed'])
+
+    def _clear_cached_images(self):
+        """清空两个窗口的图像缓存。"""
+        self._cached_image_1 = None
+        self._cached_index_1 = -1
+        self._cached_original_size_1 = None
+        self._cached_image_2 = None
+        self._cached_index_2 = -1
+        self._cached_original_size_2 = None
+
+    def _get_image_metadata(self, index) -> Optional[dict]:
+        """获取指定索引影像的元数据。"""
+        if 0 <= index < len(self.image_metadata):
+            return self.image_metadata[index]
+        return None
+
+    def _uses_geo_sync(self) -> bool:
+        """文件夹模式下是否启用地理坐标同步。"""
+        return self.data_source_type == 'folder' and self.folder_sync_mode == 'geo'
+
+    def _get_image_dimensions(self, index) -> Tuple[Optional[int], Optional[int]]:
+        """获取指定影像的原始尺寸 (width, height)。"""
+        if self.data_source_type == 'folder':
+            metadata = self._get_image_metadata(index)
+            if metadata is not None:
+                return metadata.get('width'), metadata.get('height')
+        elif self.data_source_type == 'gamma':
+            return self.gamma_width, self.gamma_height
+        elif self.image_shape is not None:
+            if len(self.image_shape) >= 2:
+                return self.image_shape[1], self.image_shape[0]
+        return None, None
+
+    def _build_folder_image_metadata(self, file_path) -> Optional[dict]:
+        """构建单张文件夹影像的元数据，不读取整幅数据。"""
+        ext = os.path.splitext(file_path)[1].lower()
+
+        if ext in ['.tif', '.tiff', '.grd']:
+            size_info, band_count, nodata_value = get_tiff_info(file_path)
+            geotransform, projection = get_geotransform(file_path)
+        else:
+            size_info, band_count = get_image_info(file_path)
+            nodata_value = None
+            geotransform, projection = None, None
+
+        if size_info is None:
+            return None
+
+        width, height = size_info
+        inv_geotransform = invert_geotransform(geotransform) if geotransform is not None else None
+        to_wgs84_transform = None
+        from_wgs84_transform = None
+        bounds_wgs84 = None
+
+        if geotransform is not None and inv_geotransform is not None:
+            to_wgs84_transform = build_coordinate_transform(
+                source_projection=projection,
+                target_epsg=4326,
+            )
+            from_wgs84_transform = build_coordinate_transform(
+                source_epsg=4326,
+                target_projection=projection,
+            )
+            bounds_wgs84 = get_raster_bounds_wgs84(
+                width,
+                height,
+                geotransform,
+                projection,
+                to_wgs84_transform=to_wgs84_transform,
+            )
+
+        scene_rect = None
+        if bounds_wgs84 is not None:
+            min_lon, min_lat, max_lon, max_lat = bounds_wgs84
+            scene_rect = (
+                min_lon,
+                -max_lat,
+                max_lon - min_lon,
+                max_lat - min_lat,
+            )
+
+        return {
+            'path': file_path,
+            'width': width,
+            'height': height,
+            'band_count': band_count,
+            'nodata_value': nodata_value,
+            'geotransform': geotransform,
+            'projection': projection,
+            'inv_geotransform': inv_geotransform,
+            'to_wgs84_transform': to_wgs84_transform,
+            'from_wgs84_transform': from_wgs84_transform,
+            'bounds_wgs84': bounds_wgs84,
+            'scene_rect': scene_rect,
+            'has_geo': geotransform is not None and inv_geotransform is not None,
+        }
+
+    def _get_effective_nodata_for_index(self, index):
+        """获取指定影像当前生效的Nodata值。"""
+        if self._nodata_user_locked:
+            return self.nodata_value
+
+        if self.data_source_type == 'folder':
+            metadata = self._get_image_metadata(index)
+            if metadata is not None:
+                return metadata.get('nodata_value')
+
+        return self.nodata_value
+
+    def _is_nodata_value(self, value, nodata_value) -> bool:
+        """判断值是否为Nodata。"""
+        if nodata_value is None or value is None:
+            return False
+
+        try:
+            if isinstance(value, np.ndarray):
+                if np.isnan(nodata_value):
+                    return bool(np.all(np.isnan(value)))
+                return bool(np.all(value == nodata_value))
+
+            if np.isnan(nodata_value):
+                return bool(np.isnan(value))
+            return bool(value == nodata_value)
+        except Exception:
+            return False
+
+    def _mask_nodata_value(self, value, nodata_value):
+        """将Nodata值转为NaN，便于绘图。"""
+        if value is None:
+            return np.nan
+
+        if isinstance(value, np.ndarray):
+            masked = value.astype(np.float32, copy=True)
+            if nodata_value is None:
+                return masked
+
+            if np.isnan(nodata_value):
+                masked[np.isnan(masked)] = np.nan
+            else:
+                masked[masked == nodata_value] = np.nan
+            return masked
+
+        if self._is_nodata_value(value, nodata_value):
+            return np.nan
+        return value
+
+    def _get_pixel_lonlat(self, index, x, y) -> Tuple[Optional[float], Optional[float]]:
+        """将指定影像中的像素坐标转换为WGS84经纬度（按像素中心）。"""
+        if self.data_source_type != 'folder':
+            if self.geotransform is None:
+                return None, None
+            return pixel_to_lonlat(x, y, self.geotransform, self.projection, use_pixel_center=True)
+
+        metadata = self._get_image_metadata(index)
+        if metadata is None or not metadata.get('has_geo'):
+            return None, None
+
+        return pixel_to_lonlat(
+            x,
+            y,
+            metadata['geotransform'],
+            metadata['projection'],
+            use_pixel_center=True,
+            to_wgs84_transform=metadata.get('to_wgs84_transform'),
+        )
+
+    def _map_lonlat_to_pixel(self, index, lon, lat) -> Tuple[Optional[int], Optional[int]]:
+        """将WGS84经纬度反算为指定影像的最近邻像素坐标。"""
+        metadata = self._get_image_metadata(index)
+        if metadata is None or not metadata.get('has_geo'):
+            return None, None
+
+        return lonlat_to_pixel(
+            lon,
+            lat,
+            metadata['geotransform'],
+            metadata['projection'],
+            inv_geotransform=metadata.get('inv_geotransform'),
+            from_wgs84_transform=metadata.get('from_wgs84_transform'),
+            nearest=True,
+        )
+
+    def _is_pixel_in_bounds(self, index, x, y) -> bool:
+        """判断像素坐标是否位于影像范围内。"""
+        width, height = self._get_image_dimensions(index)
+        if width is None or height is None or x is None or y is None:
+            return False
+        return 0 <= int(x) < int(width) and 0 <= int(y) < int(height)
+
+    def _set_colorbar_current_value(self, colorbar, value):
+        """更新colorbar当前值指示。"""
+        if colorbar is None:
+            return
+
+        if isinstance(value, (int, float, np.integer, np.floating)):
+            if not (np.isnan(value) if isinstance(value, float) else False):
+                colorbar.set_current_value(float(value))
+            else:
+                colorbar.set_current_value(None)
+        else:
+            colorbar.set_current_value(None)
+
+    def _format_pixel_label_text(self, x, y, value, lonlat=None, nodata_value=None) -> str:
+        """格式化像素值标签文本。"""
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return f"像素值: ({x}, {y}) = NaN"
+
+        if self._is_nodata_value(value, nodata_value):
+            text = f"像素值: ({x}, {y}) = NoData"
+        elif isinstance(value, (int, float, np.integer, np.floating)):
+            text = f"像素值: ({x}, {y}) = {value:.6g}"
+        elif isinstance(value, np.ndarray):
+            if value.ndim == 0:
+                text = f"像素值: ({x}, {y}) = {value:.6g}"
+            else:
+                value_str = ", ".join(
+                    "NaN" if np.isnan(v) else f"{v:.6g}" for v in value
+                )
+                text = f"像素值: ({x}, {y}) = [{value_str}]"
+        else:
+            text = f"像素值: ({x}, {y}) = {value}"
+
+        if lonlat is not None and lonlat[0] is not None and lonlat[1] is not None:
+            text += f" | 经纬度: ({lonlat[0]:.6f}, {lonlat[1]:.6f})"
+        return text
+
+    def _update_folder_scene_rect(self):
+        """根据所有文件夹影像更新统一场景范围。"""
+        scene_rects = [
+            metadata.get('scene_rect')
+            for metadata in self.image_metadata
+            if metadata.get('scene_rect') is not None
+        ]
+        if not scene_rects:
+            self.folder_scene_rect = None
+            return
+
+        min_x = min(rect[0] for rect in scene_rects)
+        min_y = min(rect[1] for rect in scene_rects)
+        max_x = max(rect[0] + rect[2] for rect in scene_rects)
+        max_y = max(rect[1] + rect[3] for rect in scene_rects)
+        self.folder_scene_rect = (min_x, min_y, max_x - min_x, max_y - min_y)
+
+    def _configure_viewer_scene_mapping(self, viewer, index):
+        """配置查看器的统一场景范围和当前图像摆放范围。"""
+        if self._uses_geo_sync():
+            metadata = self._get_image_metadata(index)
+            viewer.set_scene_mapping(
+                scene_world_rect=self.folder_scene_rect,
+                image_world_rect=metadata.get('scene_rect') if metadata is not None else None,
+            )
+        else:
+            viewer.set_scene_mapping(None, None)
     
     def switch_image(self, viewer_id, direction):
         """切换图像
@@ -603,7 +887,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         if 0 <= new_index < self.image_count:
             setattr(self, f'current_image_index_{viewer_id}', new_index)
-            self.show_image(viewer_id)
+            self.show_image(viewer_id, reset_view=False)
     
     def slider_changed(self, viewer_id, value):
         """滑块值改变
@@ -615,7 +899,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         current_index = getattr(self, f'current_image_index_{viewer_id}')
         if value != current_index:
             setattr(self, f'current_image_index_{viewer_id}', value)
-            self.show_image(viewer_id)
+            self.show_image(viewer_id, reset_view=False)
     
     def _get_image_data(self, index):
         """按需获取指定索引的图像数据（支持降采样）
@@ -660,9 +944,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
         if self._converted_to_db and image_data is not None:
             # 转换为dB
             data_copy = image_data.copy()
+            nodata_value = self._get_effective_nodata_for_index(index)
             
             # 处理nodata值：如果是GAMMA数据，保持nodata（0）不变
-            if self.is_gamma_timeseries or self.nodata_value == 0:
+            if self.is_gamma_timeseries or nodata_value == 0:
                 # 创建mask：标记nodata像素
                 nodata_mask = (data_copy == 0)
                 # 将<=0且不是nodata的值设为一个很小的正数
@@ -707,11 +992,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         return image_data, original_size
     
-    def show_image(self, viewer_id):
+    def show_image(self, viewer_id, reset_view=False):
         """显示指定查看器的当前图像
         
         Args:
             viewer_id: 查看器ID（1或2）
+            reset_view: 是否重置为适配全图视角
         """
         if self.image_count == 0:
             return
@@ -722,6 +1008,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         index_label = getattr(self, f'image_index_label_{viewer_id}')
         info_label = getattr(self, f'image_info_label_{viewer_id}')
         
+        previous_view_state = None if reset_view else viewer.capture_view_state()
+
         # 按需获取图像数据（包含原始尺寸）
         current_data, original_size = self._get_cached_image(viewer_id, current_index)
         
@@ -729,14 +1017,26 @@ class PixelTimeSeriesViewerDialog(QDialog):
             info_label.setText("图像加载失败")
             return
         
+        self._configure_viewer_scene_mapping(viewer, current_index)
+
         # 更新图像查看器（传递原始尺寸用于坐标映射）
         viewer.set_image_from_array(current_data, original_size=original_size)
+
+        current_metadata = self._get_image_metadata(current_index) if self.data_source_type == 'folder' else None
+        current_nodata = self._get_effective_nodata_for_index(current_index)
+        viewer.set_nodata_value(current_nodata)
+
+        # 设置当前影像自己的地理信息到图像查看器（用于hillshade计算）
+        if current_metadata is not None:
+            viewer.set_geotransform(current_metadata.get('geotransform'), current_metadata.get('projection'))
+        else:
+            viewer.set_geotransform(self.geotransform, self.projection)
         
-        # 设置地理信息到图像查看器（用于hillshade计算）
-        viewer.set_geotransform(self.geotransform, self.projection)
-        
-        # 确保图像居中显示（使用延迟模式）
-        viewer.fit_in_view(delayed=True)
+        # 首次加载或明确要求时才适配全图；切图时保留当前视角
+        if reset_view:
+            viewer.fit_in_view(delayed=True)
+        else:
+            viewer.restore_view_state(previous_view_state)
         self._refresh_colorbar_range(viewer_id)
         self._sync_selected_pixel_markers()
         
@@ -866,17 +1166,19 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.h5_start_index = start_index
             self.image_shape = (height, width)
             self.image_count = num_dates - start_index
+            self.geotransform = None
+            self.projection = None
+            self.image_metadata = []
+            self.folder_sync_mode = 'rowcol'
+            self.folder_sync_message = ""
+            self.folder_scene_rect = None
+            self._nodata_user_locked = False
             
             # 重置转换标志
             self._converted_to_db = False
             
             # 清空缓存
-            self._cached_image_1 = None
-            self._cached_index_1 = -1
-            self._cached_original_size_1 = None
-            self._cached_image_2 = None
-            self._cached_index_2 = -1
-            self._cached_original_size_2 = None
+            self._clear_cached_images()
             self._clear_selected_pixel_state()
             
             # 生成文件名列表（用于显示）
@@ -912,8 +1214,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
             # 显示第一张和第二张图像
             self.current_image_index_1 = 0
             self.current_image_index_2 = min(1, self.image_count - 1)
-            self.show_image(1)
-            self.show_image(2)
+            self.show_image(1, reset_view=True)
+            self.show_image(2, reset_view=True)
             
             # 启用转dB按钮
             self.to_db_btn.setEnabled(True)
@@ -936,115 +1238,116 @@ class PixelTimeSeriesViewerDialog(QDialog):
         try:
             # 清空之前的数据
             self.image_files = []
+            self.image_metadata = []
             self.date_list = []
             self._clear_selected_pixel_state()
+            self.selected_geo = None
+            self.selected_viewer_id = None
             self.nodata_value = None
+            self._nodata_user_locked = False
+            self.folder_sync_mode = 'rowcol'
+            self.folder_sync_message = ""
+            self.folder_scene_rect = None
             
             # 重置转换标志
             self._converted_to_db = False
             
             # 清空缓存
-            self._cached_image_1 = None
-            self._cached_index_1 = -1
-            self._cached_original_size_1 = None
-            self._cached_image_2 = None
-            self._cached_index_2 = -1
-            self._cached_original_size_2 = None
-            
-            # 使用降采样读取第一张图像以检查尺寸和波段数
-            first_image_data, first_nodata, first_original_size = self._read_image_downsampled(file_list[0])
-            if first_image_data is None:
-                QMessageBox.critical(self, "错误", f"无法读取第一张图像: {file_list[0]}")
-                return
-            
-            # 保存第一张图像的nodata值和形状（使用原始尺寸）
-            self.nodata_value = first_nodata
-            if first_original_size:
-                orig_w, orig_h = first_original_size
-                if first_image_data.ndim == 2:
-                    reference_shape = (orig_h, orig_w)
-                else:
-                    reference_shape = (orig_h, orig_w, first_image_data.shape[2])
-            else:
-                reference_shape = first_image_data.shape
-            self.image_shape = reference_shape
+            self._clear_cached_images()
             
             # 设置数据源类型
             self.data_source_type = 'folder'
             self.h5_file_path = None
             self.h5_start_index = 0
             
-            # 获取地理信息（从第一个文件）
-            if file_list:
-                self.geotransform, self.projection = get_geotransform(file_list[0])
-            else:
-                self.geotransform = None
-                self.projection = None
-            
-            # 验证所有图像的一致性（只检查文件是否可读，不加载全部数据）
-            inconsistent_files = []
+            # 逐张收集元数据，不再要求尺寸一致
+            unreadable_files = []
             valid_files = []
-            
+            metadata_list = []
+
             for file_path in file_list:
-                # 只检查文件是否存在和可读
                 if not os.path.exists(file_path):
-                    inconsistent_files.append(f"{os.path.basename(file_path)}: 文件不存在")
+                    unreadable_files.append(f"{os.path.basename(file_path)}: 文件不存在")
                     continue
-                
-                # 对于第一个文件，我们已经验证过了
-                if file_path == file_list[0]:
-                    valid_files.append(file_path)
-                    continue
-                
-                # 对于其他文件，快速检查尺寸（通过读取元数据而非全部数据）
+
                 try:
-                    ext = os.path.splitext(file_path)[1].lower()
-                    if ext in ['.tif', '.tiff']:
-                        # 使用高效的get_tiff_info获取尺寸
-                        size_info, band_count, nodata = get_tiff_info(file_path)
-                        if size_info is None:
-                            inconsistent_files.append(f"{os.path.basename(file_path)}: 读取失败")
-                            continue
-                        width, height = size_info
-                        
-                        # 检查尺寸一致性
-                        if reference_shape[0] != height or reference_shape[1] != width:
-                            inconsistent_files.append(
-                                f"{os.path.basename(file_path)}: 尺寸({width}x{height}) != 参考尺寸({reference_shape[1]}x{reference_shape[0]})"
-                            )
-                            continue
-                    else:
-                        # 对于非TIFF文件，使用高效的get_image_info获取尺寸
-                        size_info, channels = get_image_info(file_path)
-                        if size_info is None:
-                            inconsistent_files.append(f"{os.path.basename(file_path)}: 读取失败")
-                            continue
-                        img_width, img_height = size_info
-                        if reference_shape[0] != img_height or reference_shape[1] != img_width:
-                            inconsistent_files.append(
-                                f"{os.path.basename(file_path)}: 尺寸({img_width}x{img_height}) != 参考尺寸({reference_shape[1]}x{reference_shape[0]})"
-                            )
-                            continue
-                    
+                    metadata = self._build_folder_image_metadata(file_path)
+                    if metadata is None:
+                        unreadable_files.append(f"{os.path.basename(file_path)}: 元数据读取失败")
+                        continue
+
                     valid_files.append(file_path)
+                    metadata_list.append(metadata)
                 except Exception as e:
-                    inconsistent_files.append(f"{os.path.basename(file_path)}: {str(e)}")
+                    unreadable_files.append(f"{os.path.basename(file_path)}: {str(e)}")
                     continue
-            
-            # 如果有不一致的文件，提示用户
-            if inconsistent_files:
-                message = "以下文件与参考图像不一致，已跳过：\n" + "\n".join(inconsistent_files[:10])
-                if len(inconsistent_files) > 10:
-                    message += f"\n... 还有 {len(inconsistent_files) - 10} 个文件"
+
+            if unreadable_files:
+                message = "以下文件读取失败，已跳过：\n" + "\n".join(unreadable_files[:10])
+                if len(unreadable_files) > 10:
+                    message += f"\n... 还有 {len(unreadable_files) - 10} 个文件"
                 QMessageBox.warning(self, "警告", message)
-            
+
             if not valid_files:
                 QMessageBox.critical(self, "错误", "没有成功加载任何图像！")
                 return
-            
-            # 只保存文件路径，不加载数据
+
+            first_metadata = metadata_list[0]
+            self.nodata_value = first_metadata.get('nodata_value')
+            band_count = first_metadata.get('band_count') or 1
+            if band_count > 1:
+                self.image_shape = (first_metadata['height'], first_metadata['width'], band_count)
+            else:
+                self.image_shape = (first_metadata['height'], first_metadata['width'])
+
+            # 保留第一张影像的地理信息以兼容旧逻辑，实际显示改为逐张设置
+            self.geotransform = first_metadata.get('geotransform')
+            self.projection = first_metadata.get('projection')
+
             self.image_files = valid_files
+            self.image_metadata = metadata_list
             self.image_count = len(valid_files)
+            self._update_folder_scene_rect()
+
+            size_set = {(m['width'], m['height']) for m in metadata_list}
+            has_size_mismatch = len(size_set) > 1
+            geo_metadata = [m for m in metadata_list if m.get('has_geo') and m.get('bounds_wgs84') is not None]
+            all_have_geo = len(geo_metadata) == len(metadata_list) and len(metadata_list) > 0
+
+            has_overlap = False
+            for i in range(len(geo_metadata)):
+                for j in range(i + 1, len(geo_metadata)):
+                    if bounds_overlap(geo_metadata[i]['bounds_wgs84'], geo_metadata[j]['bounds_wgs84']):
+                        has_overlap = True
+                        break
+                if has_overlap:
+                    break
+
+            if all_have_geo:
+                self.folder_sync_mode = 'geo'
+                if has_size_mismatch:
+                    if has_overlap:
+                        self.folder_sync_message = (
+                            "检测到时序影像行列数不一致，已改为“地理坐标同步”。\n"
+                            "跨影像像素值会按屏幕坐标反算到各自影像的最近邻像素，结果可能略有偏差。"
+                        )
+                    else:
+                        self.folder_sync_message = (
+                            "检测到时序影像行列数不一致，已改为“地理坐标同步”。\n"
+                            "但这些影像之间缺少明显重叠范围，边缘或大部分位置可能显示“越界”。"
+                        )
+            else:
+                if has_size_mismatch:
+                    self.folder_sync_mode = 'unavailable'
+                    self.folder_sync_message = (
+                        "检测到时序影像行列数不一致，但部分影像缺少可用地理范围，当前无法跨影像同步。"
+                    )
+                else:
+                    self.folder_sync_mode = 'rowcol'
+                    if len(geo_metadata) != len(metadata_list) and len(geo_metadata) > 0:
+                        self.folder_sync_message = (
+                            "部分影像缺少地理范围，当前文件夹仍按同行列号同步。"
+                        )
             
             # 尝试从文件名中提取日期
             extracted_dates = extract_dates_from_filenames(valid_files)
@@ -1066,23 +1369,15 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 slider.setEnabled(True)
                 prev_btn.setEnabled(True)
                 next_btn.setEnabled(True)
-            
-            # 设置Nodata值到两个查看器
-            self.image_viewer_1.set_nodata_value(self.nodata_value)
-            self.image_viewer_2.set_nodata_value(self.nodata_value)
-            
+
             # 更新渲染设置组件的波段数
-            if len(self.image_shape) == 3:
-                num_bands = self.image_shape[2]
-            else:
-                num_bands = 1
-            self.render_settings.set_num_bands(num_bands)
+            self.render_settings.set_num_bands(band_count)
             
             # 显示第一张和第二张图像
             self.current_image_index_1 = 0
             self.current_image_index_2 = min(1, self.image_count - 1)  # 如果只有一张图像，两个窗口都显示第一张
-            self.show_image(1)
-            self.show_image(2)
+            self.show_image(1, reset_view=True)
+            self.show_image(2, reset_view=True)
             
             # 设置默认colormap为gray（非h5文件）
             self.colormap_combo.setCurrentText('gray')
@@ -1092,6 +1387,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
             
             # 启用转dB按钮
             self.to_db_btn.setEnabled(True)
+
+            if self.folder_sync_message:
+                if self.folder_sync_mode == 'unavailable':
+                    QMessageBox.warning(self, "提示", self.folder_sync_message)
+                else:
+                    QMessageBox.information(self, "提示", self.folder_sync_message)
             
             # 应用排序
             self.sort_images()
@@ -1216,17 +1517,19 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.h5_file_path = None
             self.h5_start_index = 0
             self.image_shape = (height, width)
+            self.geotransform = None
+            self.projection = None
+            self.image_metadata = []
+            self.folder_sync_mode = 'rowcol'
+            self.folder_sync_message = ""
+            self.folder_scene_rect = None
+            self._nodata_user_locked = False
             
             # 重置转换标志
             self._converted_to_db = False
             
             # 清空缓存
-            self._cached_image_1 = None
-            self._cached_index_1 = -1
-            self._cached_original_size_1 = None
-            self._cached_image_2 = None
-            self._cached_index_2 = -1
-            self._cached_original_size_2 = None
+            self._clear_cached_images()
             self._clear_selected_pixel_state()
             self.date_list = []
             
@@ -1271,8 +1574,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
             # 显示第一张和第二张图像
             self.current_image_index_1 = 0
             self.current_image_index_2 = min(1, self.image_count - 1)
-            self.show_image(1)
-            self.show_image(2)
+            self.show_image(1, reset_view=True)
+            self.show_image(2, reset_view=True)
             
             # 更新渲染设置的最大最小值
             self._update_image_stats_to_render_settings()
@@ -1429,33 +1732,52 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         # 重新排列文件路径
         self.image_files = [self.image_files[i] for i in indices]
+
+        if self.image_metadata and len(self.image_metadata) == len(indices):
+            self.image_metadata = [self.image_metadata[i] for i in indices]
         
         # 如果有日期列表，也需要重新排列
         if self.date_list and len(self.date_list) == len(indices):
             self.date_list = [self.date_list[i] for i in indices]
         
         # 清空缓存（因为索引顺序改变了）
-        self._cached_image_1 = None
-        self._cached_index_1 = -1
-        self._cached_original_size_1 = None
-        self._cached_image_2 = None
-        self._cached_index_2 = -1
-        self._cached_original_size_2 = None
+        self._clear_cached_images()
         
         # 重置当前索引
         self.current_image_index_1 = 0
         self.current_image_index_2 = min(1, self.image_count - 1)  # 如果只有一张图像，两个窗口都显示第一张
-        self.show_image(1)
-        self.show_image(2)
+        self.show_image(1, reset_view=True)
+        self.show_image(2, reset_view=True)
         
         # 如果已选择像素，更新曲线
         if self.selected_pixel:
             self.update_time_series_plot()
     
-    def on_pixel_clicked(self, x, y):
+    def on_pixel_clicked(self, viewer_id, x, y):
         """像素点击事件处理"""
+        self.selected_viewer_id = viewer_id
         self.selected_pixel = (x, y)
-        self.pixel_info_label.setText(f"选中像素: ({x}, {y})")
+
+        current_index = getattr(self, f'current_image_index_{viewer_id}', 0)
+        if self._uses_geo_sync():
+            lon, lat = self._get_pixel_lonlat(current_index, x, y)
+            if lon is not None and lat is not None:
+                self.selected_geo = (lon, lat)
+                self.pixel_info_label.setText(
+                    f"选中像素: ({x}, {y}) | 地理坐标: ({lon:.6f}, {lat:.6f})"
+                )
+            else:
+                self.selected_geo = None
+                self.pixel_info_label.setText(f"选中像素: ({x}, {y})")
+        elif self.data_source_type == 'folder' and self.folder_sync_mode == 'unavailable':
+            self.selected_geo = None
+            self.pixel_info_label.setText(
+                f"选中像素: ({x}, {y}) | 当前文件夹缺少统一地理范围，无法跨影像同步"
+            )
+        else:
+            self.selected_geo = None
+            self.pixel_info_label.setText(f"选中像素: ({x}, {y})")
+
         self._sync_selected_pixel_markers()
 
         # 绘制时序曲线
@@ -1472,6 +1794,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
         Returns:
             像素值（标量或数组）
         """
+        if not self._is_pixel_in_bounds(index, x, y):
+            return np.nan
+
         if self.data_source_type == 'h5':
             # 使用image_io模块从h5文件按需读取单个像素（获取整个时序）
             try:
@@ -1496,7 +1821,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             if index < len(self.image_files):
                 try:
                     file_path = self.image_files[index]
-                    value = read_tiff_pixel(file_path, x, y)
+                    value = read_any_image_pixel(file_path, x, y)
                     if value is not None:
                         return value
                     return np.nan
@@ -1505,7 +1830,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     return np.nan
             return np.nan
     
-    def _get_all_pixel_values_at(self, x, y):
+    def _get_all_pixel_values_at(self, x, y, lonlat=None):
         """批量获取所有时序图像在指定位置的像素值
         
         Args:
@@ -1515,7 +1840,20 @@ class PixelTimeSeriesViewerDialog(QDialog):
         Returns:
             像素值列表
         """
-        if self.data_source_type == 'h5':
+        if self.data_source_type == 'folder':
+            values = []
+            for i in range(self.image_count):
+                query_x, query_y = x, y
+                if self._uses_geo_sync() and lonlat is not None:
+                    query_x, query_y = self._map_lonlat_to_pixel(i, *lonlat)
+                if query_x is None or query_y is None or not self._is_pixel_in_bounds(i, query_x, query_y):
+                    values.append(np.nan)
+                    continue
+
+                val = self._get_pixel_value_at(i, query_x, query_y)
+                nodata_value = self._get_effective_nodata_for_index(i)
+                values.append(self._mask_nodata_value(val, nodata_value))
+        elif self.data_source_type == 'h5':
             # 从h5文件批量读取整列像素（更高效）
             try:
                 # 直接获取所有时序值（read_h5_timeseries_pixel返回完整时序）
@@ -1541,42 +1879,36 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 else:
                     values.append(np.nan)
         else:
-            # 从文件夹逐个读取
-            values = []
-            for i in range(self.image_count):
-                val = self._get_pixel_value_at(i, x, y)
-                values.append(val)
-        
+            values = [np.nan] * self.image_count
+
         # 如果已转换为dB，对像素值也应用dB转换
         if self._converted_to_db:
             converted_values = []
-            for val in values:
+            for i, val in enumerate(values):
+                nodata_value = self._get_effective_nodata_for_index(i)
                 if isinstance(val, np.ndarray):
-                    # 多波段
                     converted_val = val.copy()
-                    for i in range(len(converted_val)):
-                        v = converted_val[i]
-                        if self.is_gamma_timeseries or self.nodata_value == 0:
-                            # GAMMA数据，保持nodata(0)不变
+                    for band_idx in range(len(converted_val)):
+                        v = converted_val[band_idx]
+                        if np.isnan(v):
+                            continue
+                        if self.is_gamma_timeseries or nodata_value == 0:
                             if v == 0:
-                                converted_val[i] = 0
+                                converted_val[band_idx] = 0
                             elif v > 0:
-                                converted_val[i] = 10 * np.log10(v)
+                                converted_val[band_idx] = 10 * np.log10(v)
                             else:
-                                converted_val[i] = 10 * np.log10(1e-10)
+                                converted_val[band_idx] = 10 * np.log10(1e-10)
                         else:
-                            # 非-GAMMA数据
                             if v > 0:
-                                converted_val[i] = 10 * np.log10(v)
+                                converted_val[band_idx] = 10 * np.log10(v)
                             else:
-                                converted_val[i] = 10 * np.log10(1e-10)
+                                converted_val[band_idx] = 10 * np.log10(1e-10)
                     converted_values.append(converted_val)
                 else:
-                    # 单波段
                     if np.isnan(val):
                         converted_values.append(val)
-                    elif self.is_gamma_timeseries or self.nodata_value == 0:
-                        # GAMMA数据，保持nodata(0)不变
+                    elif self.is_gamma_timeseries or nodata_value == 0:
                         if val == 0:
                             converted_values.append(0)
                         elif val > 0:
@@ -1584,32 +1916,50 @@ class PixelTimeSeriesViewerDialog(QDialog):
                         else:
                             converted_values.append(10 * np.log10(1e-10))
                     else:
-                        # 非-GAMMA数据
                         if val > 0:
                             converted_values.append(10 * np.log10(val))
                         else:
                             converted_values.append(10 * np.log10(1e-10))
             return converted_values
-        
+
         return values
     
     def update_time_series_plot(self):
         """更新时序曲线图（按需读取像素值）"""
         if not self.selected_pixel or self.image_count == 0:
             return
-        
+
         x, y = self.selected_pixel
-        
+
         # 清空图表和数据点
         self.figure.clear()
         self._plot_data_points = []
         self._plot_annotation = None
+
+        if self.data_source_type == 'folder' and self.folder_sync_mode == 'unavailable':
+            ax = self.figure.add_subplot(111)
+            ax.text(
+                0.5, 0.5,
+                "当前文件夹影像缺少统一地理范围\n不同行列数之间无法同步时序像素值",
+                ha='center', va='center', fontsize=11
+            )
+            ax.set_axis_off()
+            self.figure.tight_layout()
+            self.canvas.draw()
+            return
         
         # 提取时序数据
         time_indices = list(range(self.image_count))
-        
-        # 批量获取所有像素值
-        all_values = self._get_all_pixel_values_at(x, y)
+
+        if self._uses_geo_sync() and self.selected_geo is not None:
+            all_values = self._get_all_pixel_values_at(x, y, lonlat=self.selected_geo)
+            title_text = (
+                f'地理坐标 ({self.selected_geo[0]:.6f}, {self.selected_geo[1]:.6f})'
+                f' 对应像素的时序曲线'
+            )
+        else:
+            all_values = self._get_all_pixel_values_at(x, y)
+            title_text = f'像素 ({x}, {y}) 的时序曲线'
         
         # 判断是单波段还是多波段
         first_value = all_values[0] if all_values else None
@@ -1647,7 +1997,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 ax.set_xlabel('图像索引')
             
             ax.set_ylabel('像素值')
-            ax.set_title(f'像素 ({x}, {y}) 的时序曲线')
+            ax.set_title(title_text)
             ax.legend()
             ax.grid(True, alpha=0.3)
             
@@ -1702,7 +2052,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 ax.set_xlabel('图像索引')
             
             ax.set_ylabel('像素值')
-            ax.set_title(f'像素 ({x}, {y}) 的时序曲线')
+            ax.set_title(title_text)
             ax.legend()
             ax.grid(True, alpha=0.3)
         
@@ -1868,6 +2218,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             if text.strip() == "":
                 # 取消Nodata设置
                 self.nodata_value = None
+                self._nodata_user_locked = True
                 self.image_viewer_1.set_nodata_value(None)
                 self.image_viewer_2.set_nodata_value(None)
                 self._refresh_colorbar_range(1)
@@ -1882,6 +2233,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                         nodata_value = float(text)
                     
                     self.nodata_value = nodata_value
+                    self._nodata_user_locked = True
                     self.image_viewer_1.set_nodata_value(nodata_value)
                     self.image_viewer_2.set_nodata_value(nodata_value)
                     self._refresh_colorbar_range(1)
@@ -1899,98 +2251,96 @@ class PixelTimeSeriesViewerDialog(QDialog):
             y: Y坐标（原始图像坐标）
             value: 像素值（已从显示数组中获取）
         """
+        current_index = getattr(self, f'current_image_index_{viewer_id}', 0)
+        current_nodata = self._get_effective_nodata_for_index(current_index)
+        current_lonlat = self._get_pixel_lonlat(current_index, x, y)
+        if self._uses_geo_sync():
+            current_value = self._get_pixel_value_at(current_index, x, y)
+        else:
+            current_value = value if value is not None else self._get_pixel_value_at(current_index, x, y)
+
         # 更新当前窗口的像素值标签
         pixel_value_label = getattr(self, f'pixel_value_label_{viewer_id}')
-        if value is not None:
-            if isinstance(value, (int, float, np.integer, np.floating)):
-                if np.isnan(value) if isinstance(value, float) else False:
-                    base_text = f"像素值: ({x}, {y}) = NaN"
-                else:
-                    base_text = f"像素值: ({x}, {y}) = {value:.6g}"
-            elif isinstance(value, np.ndarray):
-                if value.ndim == 0:
-                    base_text = f"像素值: ({x}, {y}) = {value:.6g}"
-                else:
-                    value_str = ", ".join([f"{v:.6g}" for v in value])
-                    base_text = f"像素值: ({x}, {y}) = [{value_str}]"
-            
-            # 如果有地理信息，添加经纬度
-            if self.geotransform is not None:
-                lon, lat = pixel_to_lonlat(x, y, self.geotransform, self.projection)
-                if lon is not None and lat is not None:
-                    base_text += f" | 经纬度: ({lon:.6f}, {lat:.6f})"
-            
-            pixel_value_label.setText(base_text)
+        if current_value is not None:
+            pixel_value_label.setText(
+                self._format_pixel_label_text(
+                    x, y, current_value, lonlat=current_lonlat, nodata_value=current_nodata
+                )
+            )
         else:
             pixel_value_label.setText("像素值: -")
-        
+
         # 更新colorbar当前值指示
         colorbar = getattr(self, f'colorbar_{viewer_id}', None)
-        if colorbar and value is not None:
-            # 如果是单通道图像，显示像素值
-            if isinstance(value, (int, float, np.integer, np.floating)):
-                if not (np.isnan(value) if isinstance(value, float) else False):
-                    colorbar.set_current_value(float(value))
-                else:
-                    colorbar.set_current_value(None)
-            else:
-                colorbar.set_current_value(None)
-        elif colorbar:
-            colorbar.set_current_value(None)
-        
-        # 同时更新另一个窗口的像素值，基于它当前缓存的图像
+        self._set_colorbar_current_value(colorbar, current_value)
+
+        # 同时更新另一个窗口的像素值
         other_viewer_id = 2 if viewer_id == 1 else 1
         other_pixel_label = getattr(self, f'pixel_value_label_{other_viewer_id}')
         other_colorbar = getattr(self, f'colorbar_{other_viewer_id}', None)
-        
-        # 获取另一个窗口缓存的图像数据和原始尺寸
-        other_cached_image = getattr(self, f'_cached_image_{other_viewer_id}')
-        other_original_size = getattr(self, f'_cached_original_size_{other_viewer_id}', None)
-        
-        if other_cached_image is not None:
-            # 计算降采样因子
-            if other_original_size:
-                orig_w, orig_h = other_original_size
-                downsample_factor = orig_w / other_cached_image.shape[1]
+
+        other_index = getattr(self, f'current_image_index_{other_viewer_id}', 0)
+        other_nodata = self._get_effective_nodata_for_index(other_index)
+
+        if self.data_source_type == 'folder' and self.folder_sync_mode == 'unavailable':
+            other_pixel_label.setText("像素值: 无法同步")
+            self._set_colorbar_current_value(other_colorbar, None)
+            return
+
+        if self._uses_geo_sync():
+            if current_lonlat[0] is None or current_lonlat[1] is None:
+                other_pixel_label.setText("像素值: 无法同步")
+                self._set_colorbar_current_value(other_colorbar, None)
+                return
+
+            other_x, other_y = self._map_lonlat_to_pixel(other_index, *current_lonlat)
+            if other_x is None or other_y is None:
+                other_pixel_label.setText("像素值: 无法同步")
+                self._set_colorbar_current_value(other_colorbar, None)
+            elif not self._is_pixel_in_bounds(other_index, other_x, other_y):
+                other_pixel_label.setText("像素值: 越界")
+                self._set_colorbar_current_value(other_colorbar, None)
             else:
-                downsample_factor = 1.0
-            
-            # 将原始坐标转换为降采样后的显示坐标
-            display_x = int(x / downsample_factor)
-            display_y = int(y / downsample_factor)
-            
-            # 检查坐标是否有效
-            if 0 <= display_x < other_cached_image.shape[1] and 0 <= display_y < other_cached_image.shape[0]:
-                other_value = other_cached_image[display_y, display_x]
-                
-                # 显示另一个窗口的像素值（使用原始坐标）
-                if isinstance(other_value, (int, float, np.integer, np.floating)):
-                    if np.isnan(other_value) if isinstance(other_value, float) else False:
-                        other_pixel_label.setText(f"像素值: ({x}, {y}) = NaN")
-                        if other_colorbar:
-                            other_colorbar.set_current_value(None)
-                    else:
-                        other_pixel_label.setText(f"像素值: ({x}, {y}) = {other_value:.6g}")
-                        if other_colorbar:
-                            other_colorbar.set_current_value(float(other_value))
-                elif isinstance(other_value, np.ndarray):
-                    if other_value.ndim == 0:
-                        other_pixel_label.setText(f"像素值: ({x}, {y}) = {other_value:.6g}")
-                        if other_colorbar:
-                            other_colorbar.set_current_value(float(other_value))
-                    else:
-                        value_str = ", ".join([f"{v:.6g}" for v in other_value])
-                        other_pixel_label.setText(f"像素值: ({x}, {y}) = [{value_str}]")
-                        if other_colorbar:
-                            other_colorbar.set_current_value(None)
-            else:
-                other_pixel_label.setText("像素值: -")  # 坐标超出范围
-                if other_colorbar:
-                    other_colorbar.set_current_value(None)
+                other_value = self._get_pixel_value_at(other_index, other_x, other_y)
+                other_pixel_label.setText(
+                    self._format_pixel_label_text(
+                        other_x,
+                        other_y,
+                        other_value,
+                        lonlat=current_lonlat,
+                        nodata_value=other_nodata,
+                    )
+                )
+                self._set_colorbar_current_value(other_colorbar, other_value)
         else:
-            other_pixel_label.setText("像素值: -")
-            if other_colorbar:
-                other_colorbar.set_current_value(None)
+            other_cached_image = getattr(self, f'_cached_image_{other_viewer_id}', None)
+            other_original_size = getattr(self, f'_cached_original_size_{other_viewer_id}', None)
+
+            if self._is_pixel_in_bounds(other_index, x, y):
+                if other_cached_image is not None:
+                    if other_original_size:
+                        orig_w, _ = other_original_size
+                        downsample_factor = orig_w / other_cached_image.shape[1]
+                    else:
+                        downsample_factor = 1.0
+                    display_x = int(x / downsample_factor)
+                    display_y = int(y / downsample_factor)
+                    if 0 <= display_x < other_cached_image.shape[1] and 0 <= display_y < other_cached_image.shape[0]:
+                        other_value = other_cached_image[display_y, display_x]
+                    else:
+                        other_value = self._get_pixel_value_at(other_index, x, y)
+                else:
+                    other_value = self._get_pixel_value_at(other_index, x, y)
+                other_lonlat = self._get_pixel_lonlat(other_index, x, y)
+                other_pixel_label.setText(
+                    self._format_pixel_label_text(
+                        x, y, other_value, lonlat=other_lonlat, nodata_value=other_nodata
+                    )
+                )
+                self._set_colorbar_current_value(other_colorbar, other_value)
+            else:
+                other_pixel_label.setText("像素值: 越界")
+                self._set_colorbar_current_value(other_colorbar, None)
     
     def convert_to_db(self):
         """将显示的图像转换为dB (10*log10)"""
@@ -2010,12 +2360,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 return
             
             # 清空缓存，强制重新加载
-            self._cached_image_1 = None
-            self._cached_index_1 = -1
-            self._cached_original_size_1 = None
-            self._cached_image_2 = None
-            self._cached_index_2 = -1
-            self._cached_original_size_2 = None
+            self._clear_cached_images()
             
             # 标记为已转换为dB
             self._converted_to_db = True

@@ -174,7 +174,211 @@ def get_geotransform(file_path: str) -> Tuple[Optional[Tuple], Optional[str]]:
         return None, None
 
 
-def pixel_to_lonlat(x: int, y: int, geotransform: Tuple, projection: str = None) -> Tuple[Optional[float], Optional[float]]:
+def _create_spatial_reference(projection: Optional[str] = None, epsg: Optional[int] = None):
+    """创建空间参考，并固定为传统GIS坐标轴顺序。"""
+    from osgeo import osr
+
+    if projection is None and epsg is None:
+        return None
+
+    srs = osr.SpatialReference()
+    if projection is not None:
+        srs.ImportFromWkt(projection)
+    else:
+        srs.ImportFromEPSG(int(epsg))
+
+    if hasattr(srs, "SetAxisMappingStrategy") and hasattr(osr, "OAMS_TRADITIONAL_GIS_ORDER"):
+        srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    return srs
+
+
+def build_coordinate_transform(
+    source_projection: Optional[str] = None,
+    target_projection: Optional[str] = None,
+    source_epsg: Optional[int] = None,
+    target_epsg: Optional[int] = None,
+):
+    """
+    创建坐标转换对象；若源和目标坐标系一致，则返回None表示恒等变换。
+    """
+    try:
+        source_srs = _create_spatial_reference(source_projection, source_epsg)
+        target_srs = _create_spatial_reference(target_projection, target_epsg)
+        if source_srs is None or target_srs is None:
+            return None
+
+        if source_srs.IsSame(target_srs):
+            return None
+
+        from osgeo import osr
+        return osr.CoordinateTransformation(source_srs, target_srs)
+    except Exception as e:
+        print(f"创建坐标转换失败: {e}")
+        return None
+
+
+def transform_point(x: float, y: float, transform=None) -> Tuple[Optional[float], Optional[float]]:
+    """对单个点执行坐标转换；transform为None时直接返回原值。"""
+    try:
+        if transform is None:
+            return float(x), float(y)
+
+        tx, ty, _ = transform.TransformPoint(float(x), float(y))
+        return tx, ty
+    except Exception as e:
+        print(f"坐标点转换失败: {e}")
+        return None, None
+
+
+def invert_geotransform(geotransform: Optional[Tuple]) -> Optional[Tuple]:
+    """计算GeoTransform的逆变换。"""
+    if geotransform is None:
+        return None
+
+    try:
+        return gdal.InvGeoTransform(geotransform)
+    except Exception as e:
+        print(f"GeoTransform求逆失败: {e}")
+        return None
+
+
+def pixel_to_map_coords(
+    x: float,
+    y: float,
+    geotransform: Tuple,
+    use_pixel_center: bool = False,
+) -> Tuple[Optional[float], Optional[float]]:
+    """
+    将像素/行列号转换为栅格自身坐标系下的地图坐标。
+    """
+    try:
+        px = float(x) + (0.5 if use_pixel_center else 0.0)
+        py = float(y) + (0.5 if use_pixel_center else 0.0)
+        map_x, map_y = gdal.ApplyGeoTransform(geotransform, px, py)
+        return map_x, map_y
+    except Exception as e:
+        print(f"像素坐标转地图坐标失败: {e}")
+        return None, None
+
+
+def lonlat_to_pixel(
+    lon: float,
+    lat: float,
+    geotransform: Tuple,
+    projection: str = None,
+    inv_geotransform: Optional[Tuple] = None,
+    from_wgs84_transform=None,
+    nearest: bool = True,
+) -> Tuple[Optional[Union[int, float]], Optional[Union[int, float]]]:
+    """
+    将WGS84地理坐标反算为目标影像的像素坐标。
+
+    注意：
+    - 严格使用完整逆仿射变换，兼容旋转栅格；
+    - nearest=True 时按最近邻规则返回像素行列号。
+    """
+    try:
+        if geotransform is None:
+            return None, None
+
+        map_x, map_y = transform_point(
+            lon,
+            lat,
+            transform=from_wgs84_transform or build_coordinate_transform(
+                source_epsg=4326,
+                target_projection=projection,
+            ),
+        )
+        if map_x is None or map_y is None:
+            return None, None
+
+        inv_gt = inv_geotransform or invert_geotransform(geotransform)
+        if inv_gt is None:
+            return None, None
+
+        pixel, line = gdal.ApplyGeoTransform(inv_gt, map_x, map_y)
+        if nearest:
+            return int(np.floor(pixel)), int(np.floor(line))
+
+        return pixel, line
+    except Exception as e:
+        print(f"地理坐标反算像素坐标失败: {e}")
+        return None, None
+
+
+def get_raster_bounds_wgs84(
+    width: int,
+    height: int,
+    geotransform: Optional[Tuple],
+    projection: Optional[str] = None,
+    to_wgs84_transform=None,
+) -> Optional[Tuple[float, float, float, float]]:
+    """
+    获取栅格覆盖范围的WGS84包围盒: (min_lon, min_lat, max_lon, max_lat)。
+    """
+    if geotransform is None or width is None or height is None:
+        return None
+
+    corners = [
+        (0, 0),
+        (width, 0),
+        (0, height),
+        (width, height),
+    ]
+    lon_values = []
+    lat_values = []
+
+    transform = to_wgs84_transform or build_coordinate_transform(
+        source_projection=projection,
+        target_epsg=4326,
+    )
+
+    for px, py in corners:
+        map_x, map_y = pixel_to_map_coords(px, py, geotransform, use_pixel_center=False)
+        if map_x is None or map_y is None:
+            return None
+
+        lon, lat = transform_point(map_x, map_y, transform=transform)
+        if lon is None or lat is None:
+            return None
+
+        lon_values.append(lon)
+        lat_values.append(lat)
+
+    return (
+        min(lon_values),
+        min(lat_values),
+        max(lon_values),
+        max(lat_values),
+    )
+
+
+def bounds_overlap(
+    bounds_a: Optional[Tuple[float, float, float, float]],
+    bounds_b: Optional[Tuple[float, float, float, float]],
+) -> bool:
+    """判断两个WGS84包围盒是否有重叠。"""
+    if bounds_a is None or bounds_b is None:
+        return False
+
+    min_lon_a, min_lat_a, max_lon_a, max_lat_a = bounds_a
+    min_lon_b, min_lat_b, max_lon_b, max_lat_b = bounds_b
+
+    if max_lon_a <= min_lon_b or max_lon_b <= min_lon_a:
+        return False
+    if max_lat_a <= min_lat_b or max_lat_b <= min_lat_a:
+        return False
+    return True
+
+
+def pixel_to_lonlat(
+    x: int,
+    y: int,
+    geotransform: Tuple,
+    projection: str = None,
+    use_pixel_center: bool = False,
+    to_wgs84_transform=None,
+) -> Tuple[Optional[float], Optional[float]]:
     """
     将像素坐标转换为经纬度坐标
     
@@ -188,32 +392,19 @@ def pixel_to_lonlat(x: int, y: int, geotransform: Tuple, projection: str = None)
         tuple: (经度, 纬度) 或 (None, None)
     """
     try:
-        from osgeo import osr
-        
-        # 计算地理坐标
-        x_geo = geotransform[0] + x * geotransform[1] + y * geotransform[2]
-        y_geo = geotransform[3] + x * geotransform[4] + y * geotransform[5]
-        
-        # 如果有投影信息，转换为WGS84经纬度
-        if projection:
-            # 创建源坐标系
-            source_srs = osr.SpatialReference()
-            source_srs.ImportFromWkt(projection)
-            
-            # 创建目标坐标系（WGS84）
-            target_srs = osr.SpatialReference()
-            target_srs.ImportFromEPSG(4326)  # WGS84
-            
-            # 创建坐标转换
-            transform = osr.CoordinateTransformation(source_srs, target_srs)
-            
-            # 执行转换
-            lon, lat, _ = transform.TransformPoint(x_geo, y_geo)
-            return lon, lat
-        else:
-            # 没有投影信息，假设已经是经纬度
-            return x_geo, y_geo
-            
+        map_x, map_y = pixel_to_map_coords(x, y, geotransform, use_pixel_center=use_pixel_center)
+        if map_x is None or map_y is None:
+            return None, None
+
+        lon, lat = transform_point(
+            map_x,
+            map_y,
+            transform=to_wgs84_transform or build_coordinate_transform(
+                source_projection=projection,
+                target_epsg=4326,
+            ),
+        )
+        return lon, lat
     except Exception as e:
         print(f"坐标转换失败: {e}")
         return None, None
@@ -982,7 +1173,7 @@ def read_any_image(file_path: str) -> Tuple[Optional[np.ndarray], Optional[float
     """
     ext = os.path.splitext(file_path)[1].lower()
     
-    if ext in ['.tif', '.tiff']:
+    if ext in ['.tif', '.tiff', '.grd']:
         return read_tiff(file_path)
     else:
         data, size = read_image(file_path)
@@ -1006,7 +1197,7 @@ def read_any_image_downsampled(
     """
     ext = os.path.splitext(file_path)[1].lower()
     
-    if ext in ['.tif', '.tiff']:
+    if ext in ['.tif', '.tiff', '.grd']:
         return read_tiff_downsampled(file_path, max_size)
     else:
         data, size, factor = read_image_downsampled(file_path, max_size)
@@ -1044,7 +1235,7 @@ def read_any_image_region(
     
     ext = os.path.splitext(file_path)[1].lower()
     
-    if ext in ['.tif', '.tiff']:
+    if ext in ['.tif', '.tiff', '.grd']:
         return read_tiff_region(file_path, x1, y1, x2, y2)
     else:
         return read_image_region(file_path, x1, y1, x2, y2)
@@ -1080,7 +1271,7 @@ def read_any_image_pixel(
     
     ext = os.path.splitext(file_path)[1].lower()
     
-    if ext in ['.tif', '.tiff']:
+    if ext in ['.tif', '.tiff', '.grd']:
         return read_tiff_pixel(file_path, x, y)
     else:
         # 对于普通图像，读取单像素区域
