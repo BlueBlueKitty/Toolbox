@@ -544,7 +544,7 @@ def read_gamma_downsampled(
     width: int,
     height: int,
     bkformat: str = "float32",
-    max_size: int = 2048
+    max_size: int | None = 2048
 ) -> Tuple[np.ndarray, int]:
     """
     读取GAMMA二进制文件并降采样显示。
@@ -570,7 +570,7 @@ def read_gamma_downsampled(
         (downsampled_data, downsample_factor)
     """
     max_dim = max(width, height)
-    if max_dim <= max_size:
+    if not max_size or max_dim <= max_size:
         # 无需降采样
         data, _ = freadbkB(infile, height, bkformat)
         return data, 1

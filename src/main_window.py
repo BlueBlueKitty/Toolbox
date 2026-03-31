@@ -47,13 +47,15 @@ class UpdateCheckWorker(QThread):
 
 
 class MainWindow(QMainWindow):
+    MAX_DISPLAY_SIZE_LIMIT = 65536
+
     def __init__(self):
         super(MainWindow, self).__init__()
         
         # 初始化设置
         self.settings = QSettings("Toolbox", "RemoteSensingToolbox")
         
-        # 从设置中读取降采样尺寸，默认值为 2048
+        # 从设置中读取降采样尺寸，0 表示无限制
         self.max_display_size = self.settings.value("display/max_display_size", 2048, type=int)
         self._open_tool_windows = set()
         
@@ -642,15 +644,21 @@ class MainWindow(QMainWindow):
         size_layout.addWidget(size_label)
         
         size_spinbox = QSpinBox()
-        size_spinbox.setRange(512, 8192)
+        size_spinbox.setRange(512, self.MAX_DISPLAY_SIZE_LIMIT)
         size_spinbox.setSingleStep(256)
-        size_spinbox.setValue(self.max_display_size)
+        size_spinbox.setValue(self.max_display_size if self.max_display_size > 0 else 8192)
         size_spinbox.setSuffix(" px")
         size_spinbox.setMinimumWidth(120)
         size_layout.addWidget(size_spinbox)
         size_layout.addStretch()
-        
+
         layout.addLayout(size_layout)
+
+        unlimited_check = QCheckBox("无限制（显示全部像素）")
+        unlimited_check.setChecked(self.max_display_size <= 0)
+        unlimited_check.toggled.connect(lambda checked: size_spinbox.setEnabled(not checked))
+        size_spinbox.setEnabled(not unlimited_check.isChecked())
+        layout.addWidget(unlimited_check)
         
         layout.addSpacing(10)
         
@@ -668,8 +676,8 @@ class MainWindow(QMainWindow):
         
         # 提示信息
         tip_label = QLabel(
-            "<i>提示：推荐值为 2048-4096。<br>"
-            "较大的值需要更多内存和计算资源。</i>"
+            f"<i>提示：推荐值为 4096-8192，可手动提高到 {self.MAX_DISPLAY_SIZE_LIMIT}。<br>"
+            "启用“无限制”后将直接显示全部像素，但会显著增加内存和计算压力。</i>"
         )
         tip_label.setStyleSheet("color: #7f8c8d;")
         tip_label.setWordWrap(True)
@@ -684,15 +692,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(button_box)
         
         if dialog.exec() == QDialog.Accepted:
-            self.max_display_size = size_spinbox.value()
+            self.max_display_size = 0 if unlimited_check.isChecked() else size_spinbox.value()
             smooth_display = smooth_check.isChecked()
             # 保存设置到 QSettings
             self.settings.setValue("display/max_display_size", self.max_display_size)
             self.settings.setValue("display/smooth_display", smooth_display)
+            max_size_text = "无限制（显示全部像素）" if self.max_display_size <= 0 else f"{self.max_display_size} 像素"
             QMessageBox.information(
                 self, 
                 "设置已保存",
-                f"最大显示尺寸已设置为 {self.max_display_size} 像素\n"
+                f"最大显示尺寸已设置为 {max_size_text}\n"
                 f"平滑显示: {'已启用' if smooth_display else '已禁用'}\n\n"
                 "新设置将在下次打开图像时生效。"
             )

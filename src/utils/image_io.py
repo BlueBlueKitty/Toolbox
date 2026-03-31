@@ -707,8 +707,8 @@ def get_image_info(file_path: str) -> Tuple[Optional[Tuple[int, int]], Optional[
 
 
 def read_tiff_downsampled(
-    file_path: str, 
-    max_size: int = 2048
+    file_path: str,
+    max_size: Optional[int] = 2048
 ) -> Tuple[Optional[np.ndarray], Optional[float], Optional[Tuple[int, int]], int]:
     """
     使用GDAL降采样读取TIFF，优先使用金字塔（Overview）
@@ -735,9 +735,9 @@ def read_tiff_downsampled(
         band1 = ds.GetRasterBand(1)
         nodata_value = band1.GetNoDataValue()
         
-        # 计算目标尺寸
+        # max_size <= 0 或 None 表示不限制显示尺寸
         max_dim = max(original_width, original_height)
-        if max_dim <= max_size:
+        if not max_size or max_dim <= max_size:
             # 不需要降采样
             if band_count == 1:
                 data = band1.ReadAsArray()
@@ -1081,8 +1081,8 @@ def read_image(file_path: str) -> Tuple[Optional[np.ndarray], Optional[Tuple[int
 
 
 def read_image_downsampled(
-    file_path: str, 
-    max_size: int = 2048
+    file_path: str,
+    max_size: Optional[int] = 2048
 ) -> Tuple[Optional[np.ndarray], Optional[Tuple[int, int]], int]:
     """
     使用PIL降采样读取普通图像
@@ -1100,9 +1100,9 @@ def read_image_downsampled(
         original_size = img.size  # (width, height)
         original_width, original_height = original_size
         
-        # 计算降采样因子
+        # max_size <= 0 或 None 表示不限制显示尺寸
         max_dim = max(original_width, original_height)
-        if max_dim > max_size:
+        if max_size and max_dim > max_size:
             downsample_factor = int(np.ceil(max_dim / max_size))
             # 计算目标尺寸
             target_width = original_width // downsample_factor
@@ -1181,8 +1181,8 @@ def read_any_image(file_path: str) -> Tuple[Optional[np.ndarray], Optional[float
 
 
 def read_any_image_downsampled(
-    file_path: str, 
-    max_size: int = 2048
+    file_path: str,
+    max_size: Optional[int] = 2048
 ) -> Tuple[Optional[np.ndarray], Optional[float], Optional[Tuple[int, int]], int]:
     """
     自动检测文件格式并降采样读取图像
@@ -1366,9 +1366,9 @@ def read_h5_dataset(
 
 
 def read_h5_dataset_downsampled(
-    file_path: str, 
+    file_path: str,
     dataset_name: str,
-    max_size: int = 2048,
+    max_size: Optional[int] = 2048,
     frame_index: Optional[int] = None
 ) -> Tuple[Optional[np.ndarray], Optional[Tuple[int, int]], int]:
     """
@@ -1416,9 +1416,9 @@ def read_h5_dataset_downsampled(
             
             original_size = (width, height)
             
-            # 计算是否需要降采样
+            # max_size <= 0 或 None 表示不限制显示尺寸
             max_dim = max(width, height)
-            if max_dim <= max_size:
+            if not max_size or max_dim <= max_size:
                 # 不需要降采样，直接读取全部数据
                 if dataset.ndim == 2:
                     data = dataset[:].astype(np.float32)
@@ -1512,9 +1512,9 @@ def read_h5_timeseries_metadata(file_path: str) -> Tuple[Optional[List[str]], Op
 
 
 def read_h5_timeseries_frame(
-    file_path: str, 
+    file_path: str,
     frame_index: int,
-    max_size: int = 2048
+    max_size: Optional[int] = 2048
 ) -> Tuple[Optional[np.ndarray], Optional[Tuple[int, int]]]:
     """
     按需读取HDF5时序数据的指定帧（支持降采样）
@@ -1542,9 +1542,9 @@ def read_h5_timeseries_frame(
             # 读取指定帧
             data = dataset[frame_index, :, :].astype(np.float32)
             
-            # 降采样
+            # max_size <= 0 或 None 表示不限制显示尺寸
             max_dim = max(width, height)
-            if max_dim > max_size:
+            if max_size and max_dim > max_size:
                 scale = max_size / max_dim
                 new_width = int(width * scale)
                 new_height = int(height * scale)

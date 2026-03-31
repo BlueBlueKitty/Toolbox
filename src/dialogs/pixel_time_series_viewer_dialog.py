@@ -131,6 +131,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         super().__init__(parent)
         
         # 降采样配置
+        self._configured_max_display_size = max_display_size
         self.max_display_size = max_display_size  # 显示时的最大尺寸
         
         self.setWindowTitle("像素时序查看器")
@@ -236,6 +237,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.to_db_btn.clicked.connect(self.convert_to_db)
         self.to_db_btn.setEnabled(False)
         control_layout1.addWidget(self.to_db_btn)
+
+        self.toggle_display_limit_btn = QPushButton()
+        self.toggle_display_limit_btn.clicked.connect(self.toggle_display_limit_override)
+        control_layout1.addWidget(self.toggle_display_limit_btn)
+        self._update_display_limit_button()
         
         main_layout.addLayout(control_layout1)
         
@@ -630,6 +636,36 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._cached_image_2 = None
         self._cached_index_2 = -1
         self._cached_original_size_2 = None
+
+    def _is_unlimited_display_enabled(self) -> bool:
+        return not self.max_display_size or self.max_display_size <= 0
+
+    def _display_limit_status_text(self) -> str:
+        if self._is_unlimited_display_enabled():
+            return "显示全部像素"
+        return f"上限: {self.max_display_size}px"
+
+    def _update_display_limit_button(self):
+        if self._is_unlimited_display_enabled():
+            self.toggle_display_limit_btn.setText("恢复显示上限")
+            base_limit = self._configured_max_display_size if self._configured_max_display_size > 0 else 2048
+            self.toggle_display_limit_btn.setToolTip(f"恢复为当前设置的显示上限（{base_limit}px）")
+        else:
+            self.toggle_display_limit_btn.setText("取消显示上限")
+            self.toggle_display_limit_btn.setToolTip("重新加载当前影像并显示全部像素")
+
+    def toggle_display_limit_override(self):
+        """切换是否取消显示上限。"""
+        if self._is_unlimited_display_enabled():
+            self.max_display_size = self._configured_max_display_size if self._configured_max_display_size > 0 else 2048
+        else:
+            self.max_display_size = 0
+        self._update_display_limit_button()
+
+        if self.image_count > 0:
+            self._clear_cached_images()
+            self.show_image(1, reset_view=True)
+            self.show_image(2, reset_view=True)
 
     def _get_image_metadata(self, index) -> Optional[dict]:
         """获取指定索引影像的元数据。"""
@@ -1077,6 +1113,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             else:
                 info = f"{file_name} | 尺寸: {display_shape}"
         
+        info += f" | {self._display_limit_status_text()}"
+        if self._converted_to_db:
+            info += " | dB"
         info_label.setText(info)
         
         # 如果已选择像素，更新曲线高亮

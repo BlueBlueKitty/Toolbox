@@ -60,6 +60,7 @@ class LocalImageViewerDialog(QDialog):
         super().__init__(parent)
         
         # 降采样配置
+        self._configured_max_display_size = max_display_size
         self.MAX_DISPLAY_SIZE = max_display_size  # 显示时的最大尺寸
         
         self.setWindowTitle("图像局部查看器")
@@ -109,11 +110,158 @@ class LocalImageViewerDialog(QDialog):
             # 同时更新图像统计信息（最大最小值）
             self._update_image_stats_to_render_settings()
 
+    def _is_unlimited_display_enabled(self):
+        return not self.MAX_DISPLAY_SIZE or self.MAX_DISPLAY_SIZE <= 0
+
+    def _display_limit_status_text(self):
+        if self._is_unlimited_display_enabled():
+            return "显示全部像素"
+        return f"上限: {self.MAX_DISPLAY_SIZE}px"
+
+    def _update_display_limit_button(self):
+        if self._is_unlimited_display_enabled():
+            self.toggle_display_limit_btn.setText("恢复显示上限")
+            base_limit = self._configured_max_display_size if self._configured_max_display_size > 0 else 2048
+            self.toggle_display_limit_btn.setToolTip(f"恢复为当前设置的显示上限（{base_limit}px）")
+        else:
+            self.toggle_display_limit_btn.setText("取消显示上限")
+            self.toggle_display_limit_btn.setToolTip("重新加载当前图像并显示全部像素")
+
+    def _compose_image_info(self, parts):
+        info_parts = [str(part) for part in parts if part]
+        if self.nodata_value is not None and not any(part.startswith("Nodata:") for part in info_parts):
+            info_parts.append(f"Nodata: {self.nodata_value}")
+        info_parts.append(self._display_limit_status_text())
+        if self._converted_to_db and "dB" not in info_parts:
+            info_parts.append("dB")
+        return " | ".join(info_parts)
+
+    def _refresh_image_info_label(self):
+        if self.image_data is None or not self.image_file:
+            return
+
+        display_shape = self.image_data.shape
+
+        if self.is_h5 and hasattr(self, 'h5_dataset_name'):
+            info_parts = [f"{os.path.basename(self.image_file)} [{self.h5_dataset_name}]"]
+            if getattr(self, 'h5_frame_index', None) is not None:
+                info_parts.append(f"帧: {self.h5_frame_index}")
+        elif self.is_gamma:
+            info_parts = [os.path.basename(self.image_file), f"GAMMA {self.gamma_format}"]
+            if self.gamma_format.startswith('cpx'):
+                info_parts.append("显示: 相位")
+            if self.gamma_par_file:
+                info_parts.append(f"PAR: {os.path.basename(self.gamma_par_file)}")
+        else:
+            info_parts = [os.path.basename(self.image_file)]
+
+        if self.downsample_factor > 1:
+            info_parts.append(f"原始: {self.original_width}x{self.original_height}")
+            info_parts.append(f"显示: {display_shape[1]}x{display_shape[0]} (1/{self.downsample_factor})")
+        else:
+            info_parts.append(f"尺寸: {self.original_width}x{self.original_height}")
+
+        if not self.is_gamma:
+            if self.image_data.ndim == 2:
+                info_parts.append("单波段")
+            elif self.image_data.ndim == 3:
+                info_parts.append(f"{self.image_data.shape[2]}波段")
+
+        self.image_info_label.setText(self._compose_image_info(info_parts))
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
             event.ignore()
             return
         super().keyPressEvent(event)
+
+    def _convert_array_to_db(self, image_data):
+        """将当前图像数据转换为 dB，保留 nodata 语义。"""
+        data_copy = image_data.copy()
+
+        if self.is_gamma or self.nodata_value == 0:
+            nodata_mask = (data_copy == 0)
+            min_positive = np.min(data_copy[data_copy > 0]) if np.any(data_copy > 0) else 1e-10
+            data_copy[(data_copy <= 0) & ~nodata_mask] = min_positive
+            db_data = np.where(nodata_mask, 0, 10 * np.log10(data_copy))
+        else:
+            min_positive = np.min(data_copy[data_copy > 0]) if np.any(data_copy > 0) else 1e-10
+            data_copy[data_copy <= 0] = min_positive
+            db_data = 10 * np.log10(data_copy)
+
+        if self.is_gamma:
+            self.nodata_value = 0
+
+        return db_data.astype(np.float32)
+
+    def _reload_current_image_with_display_limit(self):
+        """按当前显示上限重新加载已打开的图像。"""
+        if not self.image_file:
+            return
+
+        previous_view_state = self.image_viewer.capture_view_state() if self.image_data is not None else None
+
+        try:
+            if self.is_gamma:
+                data, downsample_factor = read_gamma_downsampled(
+                    self.image_file,
+                    self.original_width,
+                    self.original_height,
+                    self.gamma_format,
+                    self.MAX_DISPLAY_SIZE,
+                )
+                self.downsample_factor = downsample_factor
+                if self.gamma_format.startswith('cpx'):
+                    self.image_data = complex_to_phase(data).astype(np.float32)
+                else:
+                    self.image_data = data.astype(np.float32) if data.dtype != np.float32 else data
+                self.nodata_value = 0
+            elif self.is_h5 and hasattr(self, 'h5_dataset_name'):
+                self.image_data, original_size, self.downsample_factor = read_h5_dataset_downsampled(
+                    self.image_file,
+                    self.h5_dataset_name,
+                    self.MAX_DISPLAY_SIZE,
+                    self.h5_frame_index,
+                )
+                if self.image_data is None:
+                    raise ValueError("无法重新读取当前 H5 数据集")
+                self.original_width = original_size[0] if original_size else self.image_data.shape[1]
+                self.original_height = original_size[1] if original_size else self.image_data.shape[0]
+            elif self.is_tiff:
+                self.image_data, (self.original_width, self.original_height), self.downsample_factor = (
+                    self._read_tiff_downsampled_local(self.image_file)
+                )
+            else:
+                self.image_data, (self.original_width, self.original_height), self.downsample_factor = (
+                    self._read_image_downsampled_local(self.image_file)
+                )
+
+            if self._converted_to_db:
+                self.image_data = self._convert_array_to_db(self.image_data)
+
+            original_size = (self.original_width, self.original_height) if self.downsample_factor > 1 else None
+            self.image_viewer.set_image_from_array(self.image_data, original_size=original_size)
+            self.image_viewer.set_nodata_value(self.nodata_value)
+            if previous_view_state:
+                self.image_viewer.restore_view_state(previous_view_state)
+            else:
+                self.image_viewer.fit_in_view(delayed=True)
+
+            self._refresh_image_info_label()
+            self._update_render_settings_bands()
+            self.show_image_histogram()
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"重新加载图像失败: {str(e)}")
+            traceback.print_exc()
+
+    def toggle_display_limit_override(self):
+        """切换是否取消显示上限。"""
+        if self._is_unlimited_display_enabled():
+            self.MAX_DISPLAY_SIZE = self._configured_max_display_size if self._configured_max_display_size > 0 else 2048
+        else:
+            self.MAX_DISPLAY_SIZE = 0
+        self._update_display_limit_button()
+        self._reload_current_image_with_display_limit()
         
     def _create_ui(self):
         """创建用户界面"""
@@ -142,6 +290,11 @@ class LocalImageViewerDialog(QDialog):
         self.to_db_btn.clicked.connect(self.convert_to_db)
         self.to_db_btn.setEnabled(False)
         control_layout1.addWidget(self.to_db_btn)
+
+        self.toggle_display_limit_btn = QPushButton()
+        self.toggle_display_limit_btn.clicked.connect(self.toggle_display_limit_override)
+        control_layout1.addWidget(self.toggle_display_limit_btn)
+        self._update_display_limit_button()
         
         # 绘制模式选择
         control_layout1.addWidget(QLabel("绘制模式:"))
@@ -462,19 +615,21 @@ class LocalImageViewerDialog(QDialog):
             
             # 更新信息
             if self.downsample_factor > 1:
-                info = f"{os.path.basename(file_path)} | 原始尺寸: {self.original_width}x{self.original_height}"
-                info += f" | 显示: {self.image_data.shape[1]}x{self.image_data.shape[0]} (1/{self.downsample_factor})"
+                info = self._compose_image_info([
+                    os.path.basename(file_path),
+                    f"原始尺寸: {self.original_width}x{self.original_height}",
+                    f"显示: {self.image_data.shape[1]}x{self.image_data.shape[0]} (1/{self.downsample_factor})",
+                ])
             else:
-                info = f"{os.path.basename(file_path)} | 尺寸: {self.original_width}x{self.original_height}"
+                info = self._compose_image_info([
+                    os.path.basename(file_path),
+                    f"尺寸: {self.original_width}x{self.original_height}",
+                ])
             
-            # 波段数
             if self.image_data.ndim == 2:
                 info += " | 单波段"
             elif self.image_data.ndim == 3:
                 info += f" | {self.image_data.shape[2]}波段"
-            
-            if self.nodata_value is not None:
-                info += f" | Nodata: {self.nodata_value}"
             
             self.image_info_label.setText(info)
             
@@ -1487,7 +1642,7 @@ class LocalImageViewerDialog(QDialog):
             elif self.image_data.ndim == 3:
                 info_parts.append(f"{self.image_data.shape[2]}波段")
             
-            self.image_info_label.setText(" | ".join(info_parts))
+            self.image_info_label.setText(self._compose_image_info(info_parts))
             
             # 更新渲染设置的波段数
             self._update_render_settings_bands()
@@ -1587,14 +1742,22 @@ class LocalImageViewerDialog(QDialog):
             if self.image_file:
                 shape = self.image_data.shape
                 if self.image_data.ndim == 2:
-                    info = f"{os.path.basename(self.image_file)} | 尺寸: {shape[1]}x{shape[0]} | 单波段"
+                    info = self._compose_image_info([
+                        os.path.basename(self.image_file),
+                        f"尺寸: {shape[1]}x{shape[0]}",
+                        "单波段",
+                    ])
                 elif self.image_data.ndim == 3:
-                    info = f"{os.path.basename(self.image_file)} | 尺寸: {shape[1]}x{shape[0]} | {shape[2]}波段"
+                    info = self._compose_image_info([
+                        os.path.basename(self.image_file),
+                        f"尺寸: {shape[1]}x{shape[0]}",
+                        f"{shape[2]}波段",
+                    ])
                 else:
-                    info = f"{os.path.basename(self.image_file)} | 尺寸: {shape}"
-                
-                if self.nodata_value is not None:
-                    info += f" | Nodata: {self.nodata_value}"
+                    info = self._compose_image_info([
+                        os.path.basename(self.image_file),
+                        f"尺寸: {shape}",
+                    ])
                 
                 self.image_info_label.setText(info)
 
@@ -1726,17 +1889,18 @@ class LocalImageViewerDialog(QDialog):
             self.image_viewer.fit_in_view(delayed=True)
             
             # 更新信息
-            info = f"{os.path.basename(file_path)} | GAMMA {gamma_format}"
+            info_parts = [os.path.basename(file_path), f"GAMMA {gamma_format}"]
             if downsample_factor > 1:
-                info += f" | 原始: {width}x{height} | 显示: {self.image_data.shape[1]}x{self.image_data.shape[0]} (1/{downsample_factor})"
+                info_parts.append(f"原始: {width}x{height}")
+                info_parts.append(f"显示: {self.image_data.shape[1]}x{self.image_data.shape[0]} (1/{downsample_factor})")
             else:
-                info += f" | 尺寸: {width}x{height}"
+                info_parts.append(f"尺寸: {width}x{height}")
             if is_complex:
-                info += f" | 显示: {data_type_str}"
+                info_parts.append(f"显示: {data_type_str}")
             if par_file_used:
-                info += f" | PAR: {os.path.basename(par_file_used)}"
+                info_parts.append(f"PAR: {os.path.basename(par_file_used)}")
             
-            self.image_info_label.setText(info)
+            self.image_info_label.setText(self._compose_image_info(info_parts))
             
             # 更新渲染设置的波段数
             self._update_render_settings_bands()
@@ -1825,33 +1989,8 @@ class LocalImageViewerDialog(QDialog):
             return
         
         try:
-            # 转换为dB
-            # 避免log10(0)或负数，先做处理
-            data_copy = self.image_data.copy()
-            
-            # 如果是GAMMA文件，特殊处理nodata值（0）
-            if self.is_gamma:
-                # 创建mask：标记nodata像素
-                nodata_mask = (data_copy == 0)
-                # 将<=0且不是nodata的值设为一个很小的正数
-                min_positive = np.min(data_copy[data_copy > 0]) if np.any(data_copy > 0) else 1e-10
-                data_copy[(data_copy <= 0) & ~nodata_mask] = min_positive
-                # 转换为dB，但保持nodata为0
-                db_data = np.where(nodata_mask, 0, 10 * np.log10(data_copy))
-            else:
-                # 非GAMMA数据，正常转换
-                # 将<=0的值设为一个很小的正数
-                min_positive = np.min(data_copy[data_copy > 0]) if np.any(data_copy > 0) else 1e-10
-                data_copy[data_copy <= 0] = min_positive
-                # 转换为dB
-                db_data = 10 * np.log10(data_copy)
-            
             # 更新图像数据
-            self.image_data = db_data.astype(np.float32)
-            
-            # 如果是GAMMA文件，保持nodata为0
-            if self.is_gamma:
-                self.nodata_value = 0
+            self.image_data = self._convert_array_to_db(self.image_data)
             
             # 设置转换标志
             self._converted_to_db = True
