@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                                 QGroupBox, QButtonGroup, QRadioButton, QListWidget,
                                 QDialogButtonBox, QInputDialog, QComboBox, QFrame,
                                 QCheckBox, QApplication)
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import Qt, QSettings, QTimer
 
 # 配置文件路径
 def get_settings():
@@ -98,6 +98,12 @@ class LocalImageViewerDialog(QDialog):
         # 创建UI
         self._create_ui()
         self._loading_title_text = self.windowTitle()
+        self._render_update_timer = QTimer(self)
+        self._render_update_timer.setSingleShot(True)
+        self._render_update_timer.timeout.connect(self._apply_render_settings_update)
+        for button in self.findChildren(QPushButton):
+            button.setAutoDefault(False)
+            button.setDefault(False)
     
     def _update_render_settings_bands(self):
         """根据当前图像更新渲染设置的波段数和统计信息"""
@@ -145,6 +151,7 @@ class LocalImageViewerDialog(QDialog):
 
     def _hide_loading_indicator(self):
         self.setWindowTitle(self._loading_title_text)
+        self._refresh_image_info_label()
 
     def _refresh_image_info_label(self):
         if self.image_data is None or not self.image_file:
@@ -780,6 +787,8 @@ class LocalImageViewerDialog(QDialog):
         # 跳过分隔符项（分隔符以"━"开头）
         if colormap_name.startswith('━'):
             return
+        if self.image_data is not None:
+            self._show_loading_indicator("正在重新渲染图像...")
         
         self.image_viewer.set_colormap(colormap_name)
         
@@ -787,16 +796,26 @@ class LocalImageViewerDialog(QDialog):
         if hasattr(self, 'colorbar'):
             reversed = self.render_settings.reverse_check.isChecked() if hasattr(self, 'render_settings') else False
             self.colorbar.set_colormap(colormap_name, reversed)
+        if self.image_data is not None:
+            self._hide_loading_indicator()
     
     def on_render_settings_changed(self):
-        """渲染设置变化时更新图像显示"""
-        settings = self.render_settings.get_all_settings()
-        self.image_viewer.set_render_settings(settings)
-        
-        # 更新colorbar
-        if hasattr(self, 'colorbar'):
-            self.colorbar.set_range(settings['value_min'], settings['value_max'])
-            self.colorbar.set_colormap(self.colormap_combo.currentText(), settings['colormap_reversed'])
+        """渲染设置变化时延迟更新图像显示，避免频繁重绘。"""
+        if self.image_data is not None:
+            self._show_loading_indicator("正在重新渲染图像...")
+        self._render_update_timer.start(150)
+
+    def _apply_render_settings_update(self):
+        try:
+            settings = self.render_settings.get_all_settings()
+            self.image_viewer.set_render_settings(settings)
+            
+            # 更新colorbar
+            if hasattr(self, 'colorbar'):
+                self.colorbar.set_range(settings['value_min'], settings['value_max'])
+                self.colorbar.set_colormap(self.colormap_combo.currentText(), settings['colormap_reversed'])
+        finally:
+            self._hide_loading_indicator()
     
     def on_suggest_colormap(self, colormap_name):
         """接收建议的colormap并切换"""

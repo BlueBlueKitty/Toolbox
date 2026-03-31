@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                                 QSplitter, QGroupBox, QGridLayout, QCheckBox, QFormLayout,
                                 QDialogButtonBox, QInputDialog, QFrame,
                                 QApplication)
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import Qt, QSettings, QTimer
 
 # 导入共享的GAMMA对话框
 from src.dialogs.gamma_dialogs import GammaTimeSeriesDialog
@@ -189,6 +189,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 创建UI
         self._create_ui()
         self._loading_title_text = self.windowTitle()
+        self._render_update_timer = QTimer(self)
+        self._render_update_timer.setSingleShot(True)
+        self._render_update_timer.timeout.connect(self._apply_render_settings_update)
+        for button in self.findChildren(QPushButton):
+            button.setAutoDefault(False)
+            button.setDefault(False)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
@@ -427,7 +433,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
         image_slider.setMinimum(0)
         image_slider.setMaximum(0)
         image_slider.setEnabled(False)
+        image_slider.setTracking(False)
         image_slider.valueChanged.connect(lambda v: self.slider_changed(viewer_id, v))
+        image_slider.sliderMoved.connect(lambda v: self.preview_slider_position(viewer_id, v))
         setattr(self, f'image_slider_{viewer_id}', image_slider)
         
         image_index_label = QLabel("0/0")
@@ -439,6 +447,22 @@ class PixelTimeSeriesViewerDialog(QDialog):
         switch_layout.addWidget(next_btn)
         
         control_layout.addLayout(switch_layout)
+
+        jump_layout = QHBoxLayout()
+        jump_btn = QPushButton("跳转到...")
+        jump_btn.setEnabled(False)
+        jump_btn.clicked.connect(lambda: self.jump_to_image(viewer_id))
+        setattr(self, f'jump_btn_{viewer_id}', jump_btn)
+
+        image_select_combo = QComboBox()
+        image_select_combo.setEnabled(False)
+        image_select_combo.setMinimumWidth(220)
+        image_select_combo.currentIndexChanged.connect(lambda idx: self.on_image_selector_changed(viewer_id, idx))
+        setattr(self, f'image_select_combo_{viewer_id}', image_select_combo)
+
+        jump_layout.addWidget(jump_btn)
+        jump_layout.addWidget(image_select_combo, 1)
+        control_layout.addLayout(jump_layout)
         
         # 图像信息标签
         image_info_label = QLabel("图像信息: 未加载")
@@ -499,6 +523,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 跳过分隔符项（分隔符以"━"开头）
         if colormap_name.startswith('━'):
             return
+        if self.image_count > 0:
+            self._show_loading_indicator("正在重新渲染图像...")
         
         if hasattr(self, 'image_viewer_1'):
             self.image_viewer_1.set_colormap(colormap_name)
@@ -511,22 +537,71 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.colorbar_1.set_colormap(colormap_name, reversed)
         if hasattr(self, 'colorbar_2'):
             self.colorbar_2.set_colormap(colormap_name, reversed)
+        if self.image_count > 0:
+            self._hide_loading_indicator()
     
     def on_render_settings_changed(self):
-        """渲染设置变化时更新两个窗口"""
-        settings = self.render_settings.get_all_settings()
-        if hasattr(self, 'image_viewer_1'):
-            self.image_viewer_1.set_render_settings(settings)
-        if hasattr(self, 'image_viewer_2'):
-            self.image_viewer_2.set_render_settings(settings)
-        
-        # 更新colorbar的数值范围
-        if hasattr(self, 'colorbar_1'):
-            self._refresh_colorbar_range(1)
-        if hasattr(self, 'colorbar_2'):
-            self._refresh_colorbar_range(2)
+        """渲染设置变化时延迟更新两个窗口，避免频繁重绘。"""
+        if self.image_count > 0:
+            self._show_loading_indicator("正在重新渲染图像...")
+        self._render_update_timer.start(150)
 
-        self._sync_selected_pixel_markers()
+    def _apply_render_settings_update(self):
+        """应用渲染设置更新。"""
+        try:
+            settings = self.render_settings.get_all_settings()
+            if hasattr(self, 'image_viewer_1'):
+                self.image_viewer_1.set_render_settings(settings)
+            if hasattr(self, 'image_viewer_2'):
+                self.image_viewer_2.set_render_settings(settings)
+            
+            # 更新colorbar的数值范围
+            if hasattr(self, 'colorbar_1'):
+                self._refresh_colorbar_range(1)
+            if hasattr(self, 'colorbar_2'):
+                self._refresh_colorbar_range(2)
+
+            self._sync_selected_pixel_markers()
+        finally:
+            self._hide_loading_indicator()
+
+    def _navigation_item_label(self, index):
+        prefix = f"{index + 1:04d}"
+        if self.date_list and index < len(self.date_list):
+            return f"{prefix} | {self.date_list[index]}"
+        if index < len(self.image_files):
+            return f"{prefix} | {os.path.basename(self.image_files[index])}"
+        return prefix
+
+    def _refresh_navigation_controls(self):
+        has_images = self.image_count > 0
+        for viewer_id in [1, 2]:
+            slider = getattr(self, f'image_slider_{viewer_id}', None)
+            prev_btn = getattr(self, f'prev_btn_{viewer_id}', None)
+            next_btn = getattr(self, f'next_btn_{viewer_id}', None)
+            jump_btn = getattr(self, f'jump_btn_{viewer_id}', None)
+            image_select_combo = getattr(self, f'image_select_combo_{viewer_id}', None)
+            if slider is not None:
+                slider.setMaximum(max(0, self.image_count - 1))
+                slider.setEnabled(has_images)
+            if prev_btn is not None:
+                prev_btn.setEnabled(has_images)
+            if next_btn is not None:
+                next_btn.setEnabled(has_images)
+            if jump_btn is not None:
+                jump_btn.setEnabled(has_images)
+            if image_select_combo is not None:
+                image_select_combo.blockSignals(True)
+                image_select_combo.clear()
+                if has_images:
+                    for index in range(self.image_count):
+                        image_select_combo.addItem(self._navigation_item_label(index), index)
+                    image_select_combo.setEnabled(True)
+                    current_index = getattr(self, f'current_image_index_{viewer_id}', 0)
+                    image_select_combo.setCurrentIndex(min(current_index, self.image_count - 1))
+                else:
+                    image_select_combo.setEnabled(False)
+                image_select_combo.blockSignals(False)
     
     def on_suggest_colormap(self, colormap_name):
         """接收建议的colormap并切换"""
@@ -677,6 +752,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
 
     def _hide_loading_indicator(self):
         self.setWindowTitle(self._loading_title_text)
+
+        if not hasattr(self, 'image_count_label'):
+            return
+        if self.image_count <= 0:
+            self.image_count_label.setText("未加载图像")
+        elif self.data_source_type == 'gamma':
+            self.image_count_label.setText(f"已加载 {self.image_count} 张GAMMA时序影像")
+        elif self.data_source_type == 'h5':
+            self.image_count_label.setText(f"已加载 {self.image_count} 张时序影像")
+        else:
+            self.image_count_label.setText(f"已加载 {self.image_count} 张图像")
 
     def _get_image_metadata(self, index) -> Optional[dict]:
         """获取指定索引影像的元数据。"""
@@ -947,6 +1033,56 @@ class PixelTimeSeriesViewerDialog(QDialog):
         if value != current_index:
             setattr(self, f'current_image_index_{viewer_id}', value)
             self.show_image(viewer_id, reset_view=False)
+
+    def preview_slider_position(self, viewer_id, value):
+        """拖动滑块时仅预览目标索引，不立即加载图像。"""
+        if self.image_count == 0:
+            return
+        index_label = getattr(self, f'image_index_label_{viewer_id}')
+        info_label = getattr(self, f'image_info_label_{viewer_id}')
+        index_label.setText(f"{value + 1}/{self.image_count}")
+        info_label.setText(f"准备切换到: {self._navigation_item_label(value)}")
+
+    def jump_to_image(self, viewer_id):
+        """弹出输入框跳转到指定影像。"""
+        if self.image_count == 0:
+            return
+        current_index = getattr(self, f'current_image_index_{viewer_id}')
+        value, ok = QInputDialog.getInt(
+            self,
+            "跳转到影像",
+            f"请输入影像序号（1-{self.image_count}）:",
+            current_index + 1,
+            1,
+            self.image_count,
+            1,
+        )
+        if ok:
+            target_index = value - 1
+            setattr(self, f'current_image_index_{viewer_id}', target_index)
+            slider = getattr(self, f'image_slider_{viewer_id}')
+            slider.blockSignals(True)
+            slider.setValue(target_index)
+            slider.blockSignals(False)
+            self.show_image(viewer_id, reset_view=False)
+
+    def on_image_selector_changed(self, viewer_id, combo_index):
+        """通过日期/文件名下拉框切换影像。"""
+        if combo_index < 0 or self.image_count == 0:
+            return
+        image_select_combo = getattr(self, f'image_select_combo_{viewer_id}')
+        target_index = image_select_combo.currentData()
+        if target_index is None:
+            target_index = combo_index
+        current_index = getattr(self, f'current_image_index_{viewer_id}')
+        if target_index == current_index:
+            return
+        setattr(self, f'current_image_index_{viewer_id}', target_index)
+        slider = getattr(self, f'image_slider_{viewer_id}')
+        slider.blockSignals(True)
+        slider.setValue(target_index)
+        slider.blockSignals(False)
+        self.show_image(viewer_id, reset_view=False)
     
     def _get_image_data(self, index):
         """按需获取指定索引的图像数据（支持降采样）
@@ -1050,6 +1186,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             return
         
         current_index = getattr(self, f'current_image_index_{viewer_id}')
+        self._show_loading_indicator(
+            f"正在加载图像...\n窗口{viewer_id} 第 {current_index + 1}/{self.image_count} 张"
+        )
         viewer = getattr(self, f'image_viewer_{viewer_id}')
         slider = getattr(self, f'image_slider_{viewer_id}')
         index_label = getattr(self, f'image_index_label_{viewer_id}')
@@ -1057,81 +1196,90 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         previous_view_state = None if reset_view else viewer.capture_view_state()
 
-        # 按需获取图像数据（包含原始尺寸）
-        current_data, original_size = self._get_cached_image(viewer_id, current_index)
-        
-        if current_data is None:
-            info_label.setText("图像加载失败")
-            return
-        
-        self._configure_viewer_scene_mapping(viewer, current_index)
+        try:
+            # 按需获取图像数据（包含原始尺寸）
+            current_data, original_size = self._get_cached_image(viewer_id, current_index)
+            
+            if current_data is None:
+                info_label.setText("图像加载失败")
+                return
+            
+            self._configure_viewer_scene_mapping(viewer, current_index)
 
-        # 更新图像查看器（传递原始尺寸用于坐标映射）
-        viewer.set_image_from_array(current_data, original_size=original_size)
+            # 更新图像查看器（传递原始尺寸用于坐标映射）
+            viewer.set_image_from_array(current_data, original_size=original_size)
 
-        current_metadata = self._get_image_metadata(current_index) if self.data_source_type == 'folder' else None
-        current_nodata = self._get_effective_nodata_for_index(current_index)
-        viewer.set_nodata_value(current_nodata)
+            current_metadata = self._get_image_metadata(current_index) if self.data_source_type == 'folder' else None
+            current_nodata = self._get_effective_nodata_for_index(current_index)
+            viewer.set_nodata_value(current_nodata)
 
-        # 设置当前影像自己的地理信息到图像查看器（用于hillshade计算）
-        if current_metadata is not None:
-            viewer.set_geotransform(current_metadata.get('geotransform'), current_metadata.get('projection'))
-        else:
-            viewer.set_geotransform(self.geotransform, self.projection)
-        
-        # 首次加载或明确要求时才适配全图；切图时保留当前视角
-        if reset_view:
-            viewer.fit_in_view(delayed=True)
-        else:
-            viewer.restore_view_state(previous_view_state)
-        self._refresh_colorbar_range(viewer_id)
-        self._sync_selected_pixel_markers()
-        
-        # 更新滑块
-        slider.blockSignals(True)
-        slider.setValue(current_index)
-        slider.blockSignals(False)
-        
-        # 更新索引标签
-        index_label.setText(f"{current_index + 1}/{self.image_count}")
-        
-        # 更新图像信息（显示原始尺寸）
-        file_name = os.path.basename(self.image_files[current_index])
-        display_shape = current_data.shape
-        if original_size:
-            orig_w, orig_h = original_size
-            if display_shape[0] != orig_h or display_shape[1] != orig_w:
-                # 显示降采样信息
+            # 设置当前影像自己的地理信息到图像查看器（用于hillshade计算）
+            if current_metadata is not None:
+                viewer.set_geotransform(current_metadata.get('geotransform'), current_metadata.get('projection'))
+            else:
+                viewer.set_geotransform(self.geotransform, self.projection)
+            
+            # 首次加载或明确要求时才适配全图；切图时保留当前视角
+            if reset_view:
+                viewer.fit_in_view(delayed=True)
+            else:
+                viewer.restore_view_state(previous_view_state)
+            self._refresh_colorbar_range(viewer_id)
+            self._sync_selected_pixel_markers()
+            
+            # 更新滑块
+            slider.blockSignals(True)
+            slider.setValue(current_index)
+            slider.blockSignals(False)
+
+            image_select_combo = getattr(self, f'image_select_combo_{viewer_id}', None)
+            if image_select_combo is not None:
+                image_select_combo.blockSignals(True)
+                image_select_combo.setCurrentIndex(current_index)
+                image_select_combo.blockSignals(False)
+            
+            # 更新索引标签
+            index_label.setText(f"{current_index + 1}/{self.image_count}")
+            
+            # 更新图像信息（显示原始尺寸）
+            file_name = os.path.basename(self.image_files[current_index])
+            display_shape = current_data.shape
+            if original_size:
+                orig_w, orig_h = original_size
+                if display_shape[0] != orig_h or display_shape[1] != orig_w:
+                    # 显示降采样信息
+                    if current_data.ndim == 2:
+                        info = f"{file_name} | 原始: {orig_w}x{orig_h} | 显示: {display_shape[1]}x{display_shape[0]} | 单波段"
+                    elif current_data.ndim == 3:
+                        info = f"{file_name} | 原始: {orig_w}x{orig_h} | 显示: {display_shape[1]}x{display_shape[0]} | {display_shape[2]}波段"
+                    else:
+                        info = f"{file_name} | 尺寸: {display_shape}"
+                else:
+                    # 没有降采样
+                    if current_data.ndim == 2:
+                        info = f"{file_name} | 尺寸: {orig_w}x{orig_h} | 单波段"
+                    elif current_data.ndim == 3:
+                        info = f"{file_name} | 尺寸: {orig_w}x{orig_h} | {display_shape[2]}波段"
+                    else:
+                        info = f"{file_name} | 尺寸: {display_shape}"
+            else:
                 if current_data.ndim == 2:
-                    info = f"{file_name} | 原始: {orig_w}x{orig_h} | 显示: {display_shape[1]}x{display_shape[0]} | 单波段"
+                    info = f"{file_name} | 尺寸: {display_shape[1]}x{display_shape[0]} | 单波段"
                 elif current_data.ndim == 3:
-                    info = f"{file_name} | 原始: {orig_w}x{orig_h} | 显示: {display_shape[1]}x{display_shape[0]} | {display_shape[2]}波段"
+                    info = f"{file_name} | 尺寸: {display_shape[1]}x{display_shape[0]} | {display_shape[2]}波段"
                 else:
                     info = f"{file_name} | 尺寸: {display_shape}"
-            else:
-                # 没有降采样
-                if current_data.ndim == 2:
-                    info = f"{file_name} | 尺寸: {orig_w}x{orig_h} | 单波段"
-                elif current_data.ndim == 3:
-                    info = f"{file_name} | 尺寸: {orig_w}x{orig_h} | {display_shape[2]}波段"
-                else:
-                    info = f"{file_name} | 尺寸: {display_shape}"
-        else:
-            if current_data.ndim == 2:
-                info = f"{file_name} | 尺寸: {display_shape[1]}x{display_shape[0]} | 单波段"
-            elif current_data.ndim == 3:
-                info = f"{file_name} | 尺寸: {display_shape[1]}x{display_shape[0]} | {display_shape[2]}波段"
-            else:
-                info = f"{file_name} | 尺寸: {display_shape}"
-        
-        info += f" | {self._display_limit_status_text()}"
-        if self._converted_to_db:
-            info += " | dB"
-        info_label.setText(info)
-        
-        # 如果已选择像素，更新曲线高亮
-        if self.selected_pixel:
-            self.update_time_series_plot()
+            
+            info += f" | {self._display_limit_status_text()}"
+            if self._converted_to_db:
+                info += " | dB"
+            info_label.setText(info)
+            
+            # 如果已选择像素，更新曲线高亮
+            if self.selected_pixel:
+                self.update_time_series_plot()
+        finally:
+            self._hide_loading_indicator()
     
     def open_folder(self):
         """打开图像文件夹"""
@@ -1248,15 +1396,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.image_count_label.setText(f"已加载 {self.image_count} 张时序影像")
             
             # 更新两个窗口的控件
-            for viewer_id in [1, 2]:
-                slider = getattr(self, f'image_slider_{viewer_id}')
-                prev_btn = getattr(self, f'prev_btn_{viewer_id}')
-                next_btn = getattr(self, f'next_btn_{viewer_id}')
-                
-                slider.setMaximum(self.image_count - 1)
-                slider.setEnabled(True)
-                prev_btn.setEnabled(True)
-                next_btn.setEnabled(True)
+            self._refresh_navigation_controls()
             
             # 设置默认的彩色colormap
             self.colormap_combo.setCurrentText('jet')
@@ -1418,15 +1558,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.image_count_label.setText(f"已加载 {self.image_count} 张图像")
             
             # 更新两个窗口的控件
-            for viewer_id in [1, 2]:
-                slider = getattr(self, f'image_slider_{viewer_id}')
-                prev_btn = getattr(self, f'prev_btn_{viewer_id}')
-                next_btn = getattr(self, f'next_btn_{viewer_id}')
-                
-                slider.setMaximum(self.image_count - 1)
-                slider.setEnabled(True)
-                prev_btn.setEnabled(True)
-                next_btn.setEnabled(True)
+            self._refresh_navigation_controls()
 
             # 更新渲染设置组件的波段数
             self.render_settings.set_num_bands(band_count)
@@ -1613,15 +1745,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.image_count_label.setText(f"已加载 {self.image_count} 张GAMMA时序影像")
             
             # 更新两个窗口的控件
-            for viewer_id in [1, 2]:
-                slider = getattr(self, f'image_slider_{viewer_id}')
-                prev_btn = getattr(self, f'prev_btn_{viewer_id}')
-                next_btn = getattr(self, f'next_btn_{viewer_id}')
-                
-                slider.setMaximum(self.image_count - 1)
-                slider.setEnabled(True)
-                prev_btn.setEnabled(True)
-                next_btn.setEnabled(True)
+            self._refresh_navigation_controls()
             
             # 设置默认colormap
             is_complex = gamma_format.startswith('cpx')
@@ -1808,6 +1932,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 重置当前索引
         self.current_image_index_1 = 0
         self.current_image_index_2 = min(1, self.image_count - 1)  # 如果只有一张图像，两个窗口都显示第一张
+        self._refresh_navigation_controls()
         self.show_image(1, reset_view=True)
         self.show_image(2, reset_view=True)
         

@@ -6,10 +6,46 @@ Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 '''
 
 import numpy as np
-from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLabel, 
+from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLabel,
                                QComboBox, QDoubleSpinBox, QCheckBox, QPushButton,
                                QGroupBox, QGridLayout, QSpinBox, QFrame)
 from PySide6.QtCore import Signal, Qt
+
+
+class DeferredApplyDoubleSpinBox(QDoubleSpinBox):
+    """仅在回车或步进时提交，失焦时恢复到上次已提交值。"""
+
+    committed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setKeyboardTracking(False)
+        self._committed_value = super().value()
+        self.lineEdit().returnPressed.connect(self._commit_if_changed)
+
+    def setValue(self, value):
+        super().setValue(value)
+        self._committed_value = super().value()
+
+    def stepBy(self, steps):
+        old_value = super().value()
+        super().stepBy(steps)
+        if super().value() != old_value:
+            self._committed_value = super().value()
+            self.committed.emit()
+
+    def focusOutEvent(self, event):
+        if self.lineEdit().isModified():
+            self.lineEdit().setText(self.textFromValue(self._committed_value))
+            self.lineEdit().setModified(False)
+        super().focusOutEvent(event)
+
+    def _commit_if_changed(self):
+        self.interpretText()
+        new_value = super().value()
+        if new_value != self._committed_value:
+            self._committed_value = new_value
+            self.committed.emit()
 
 
 class RenderSettingsWidget(QWidget):
@@ -160,6 +196,7 @@ class RenderSettingsWidget(QWidget):
         self.percent_low_spin.setRange(0, 50)
         self.percent_low_spin.setValue(self._percent_low)
         self.percent_low_spin.setSuffix("%")
+        self.percent_low_spin.setKeyboardTracking(False)
         self.percent_low_spin.setMaximumWidth(65)
         self.percent_low_spin.valueChanged.connect(self._on_settings_changed)
         self.percent_low_spin.setToolTip("低端截断百分比")
@@ -168,6 +205,7 @@ class RenderSettingsWidget(QWidget):
         self.percent_high_spin.setRange(50, 100)
         self.percent_high_spin.setValue(self._percent_high)
         self.percent_high_spin.setSuffix("%")
+        self.percent_high_spin.setKeyboardTracking(False)
         self.percent_high_spin.setMaximumWidth(65)
         self.percent_high_spin.valueChanged.connect(self._on_settings_changed)
         self.percent_high_spin.setToolTip("高端截断百分比")
@@ -182,6 +220,7 @@ class RenderSettingsWidget(QWidget):
         self.std_dev_spin.setRange(0.5, 10)
         self.std_dev_spin.setValue(self._std_dev_n)
         self.std_dev_spin.setSingleStep(0.5)
+        self.std_dev_spin.setKeyboardTracking(False)
         self.std_dev_spin.setPrefix("n=")
         self.std_dev_spin.setMaximumWidth(70)
         self.std_dev_spin.valueChanged.connect(self._on_settings_changed)
@@ -194,24 +233,24 @@ class RenderSettingsWidget(QWidget):
         self.auto_range_check.stateChanged.connect(self._on_auto_range_changed)
         self.auto_range_check.setToolTip("使用图像最大最小值自动计算数值范围")
         
-        self.min_spin = QDoubleSpinBox()
+        self.min_spin = DeferredApplyDoubleSpinBox()
         self.min_spin.setRange(-1e10, 1e10)
         self.min_spin.setValue(self._value_min)
         self.min_spin.setMaximumWidth(90)
         self.min_spin.setDecimals(4)
         self.min_spin.setEnabled(not self._auto_range)
-        self.min_spin.valueChanged.connect(self._on_settings_changed)
+        self.min_spin.committed.connect(self._on_settings_changed)
         self.min_spin.setToolTip("最小值")
         
         self.range_dash_label = QLabel("-")
         
-        self.max_spin = QDoubleSpinBox()
+        self.max_spin = DeferredApplyDoubleSpinBox()
         self.max_spin.setRange(-1e10, 1e10)
         self.max_spin.setValue(self._value_max)
         self.max_spin.setMaximumWidth(90)
         self.max_spin.setDecimals(4)
         self.max_spin.setEnabled(not self._auto_range)
-        self.max_spin.valueChanged.connect(self._on_settings_changed)
+        self.max_spin.committed.connect(self._on_settings_changed)
         self.max_spin.setToolTip("最大值")
         
         # ============ 5. Gamma值（最后）============
@@ -219,6 +258,7 @@ class RenderSettingsWidget(QWidget):
         self.gamma_spin.setRange(0.1, 5.0)
         self.gamma_spin.setValue(self._gamma)
         self.gamma_spin.setSingleStep(0.1)
+        self.gamma_spin.setKeyboardTracking(False)
         self.gamma_spin.setMaximumWidth(60)
         self.gamma_spin.valueChanged.connect(self._on_settings_changed)
         self.gamma_spin.setToolTip("Gamma校正值 (1.0=无校正)")
@@ -249,6 +289,7 @@ class RenderSettingsWidget(QWidget):
         self.percent_low_spin.setRange(0, 50)
         self.percent_low_spin.setValue(self._percent_low)
         self.percent_low_spin.setSuffix("%")
+        self.percent_low_spin.setKeyboardTracking(False)
         self.percent_low_spin.valueChanged.connect(self._on_settings_changed)
         stretch_layout.addWidget(self.percent_low_spin, 1, 1)
         
@@ -256,6 +297,7 @@ class RenderSettingsWidget(QWidget):
         self.percent_high_spin.setRange(50, 100)
         self.percent_high_spin.setValue(self._percent_high)
         self.percent_high_spin.setSuffix("%")
+        self.percent_high_spin.setKeyboardTracking(False)
         self.percent_high_spin.valueChanged.connect(self._on_settings_changed)
         stretch_layout.addWidget(self.percent_high_spin, 1, 2)
         
@@ -265,6 +307,7 @@ class RenderSettingsWidget(QWidget):
         self.std_dev_spin.setRange(0.5, 10)
         self.std_dev_spin.setValue(self._std_dev_n)
         self.std_dev_spin.setSingleStep(0.5)
+        self.std_dev_spin.setKeyboardTracking(False)
         self.std_dev_spin.valueChanged.connect(self._on_settings_changed)
         stretch_layout.addWidget(self.std_dev_spin, 2, 1, 1, 2)
         
@@ -279,6 +322,7 @@ class RenderSettingsWidget(QWidget):
         self.gamma_spin.setRange(0.1, 5.0)
         self.gamma_spin.setValue(self._gamma)
         self.gamma_spin.setSingleStep(0.1)
+        self.gamma_spin.setKeyboardTracking(False)
         self.gamma_spin.valueChanged.connect(self._on_settings_changed)
         value_layout.addWidget(self.gamma_spin, 0, 1, 1, 2)
         
@@ -288,19 +332,19 @@ class RenderSettingsWidget(QWidget):
         value_layout.addWidget(self.auto_range_check, 1, 0)
         
         value_layout.addWidget(QLabel("最小值:"), 2, 0)
-        self.min_spin = QDoubleSpinBox()
+        self.min_spin = DeferredApplyDoubleSpinBox()
         self.min_spin.setRange(-1e10, 1e10)
         self.min_spin.setValue(self._value_min)
         self.min_spin.setEnabled(not self._auto_range)
-        self.min_spin.valueChanged.connect(self._on_settings_changed)
+        self.min_spin.committed.connect(self._on_settings_changed)
         value_layout.addWidget(self.min_spin, 2, 1, 1, 2)
         
         value_layout.addWidget(QLabel("最大值:"), 3, 0)
-        self.max_spin = QDoubleSpinBox()
+        self.max_spin = DeferredApplyDoubleSpinBox()
         self.max_spin.setRange(-1e10, 1e10)
         self.max_spin.setValue(self._value_max)
         self.max_spin.setEnabled(not self._auto_range)
-        self.max_spin.valueChanged.connect(self._on_settings_changed)
+        self.max_spin.committed.connect(self._on_settings_changed)
         value_layout.addWidget(self.max_spin, 3, 1, 1, 2)
         
         self.reverse_check = QCheckBox("Colormap反向")
@@ -367,6 +411,7 @@ class RenderSettingsWidget(QWidget):
         self.hillshade_azimuth_spin = QDoubleSpinBox()
         self.hillshade_azimuth_spin.setRange(0, 360)
         self.hillshade_azimuth_spin.setValue(315)
+        self.hillshade_azimuth_spin.setKeyboardTracking(False)
         self.hillshade_azimuth_spin.setSuffix("°")
         self.hillshade_azimuth_spin.setToolTip("光照方位角 (0=北, 90=东, 180=南, 270=西)")
         self.hillshade_azimuth_spin.valueChanged.connect(self._on_settings_changed)
@@ -377,6 +422,7 @@ class RenderSettingsWidget(QWidget):
         self.hillshade_altitude_spin = QDoubleSpinBox()
         self.hillshade_altitude_spin.setRange(0, 90)
         self.hillshade_altitude_spin.setValue(45)
+        self.hillshade_altitude_spin.setKeyboardTracking(False)
         self.hillshade_altitude_spin.setSuffix("°")
         self.hillshade_altitude_spin.setToolTip("光照高度角")
         self.hillshade_altitude_spin.valueChanged.connect(self._on_settings_changed)
@@ -388,6 +434,7 @@ class RenderSettingsWidget(QWidget):
         self.hillshade_zfactor_spin.setRange(0.000001, 100.0)
         self.hillshade_zfactor_spin.setValue(1.0)
         self.hillshade_zfactor_spin.setSingleStep(0.1)
+        self.hillshade_zfactor_spin.setKeyboardTracking(False)
         self.hillshade_zfactor_spin.setDecimals(6)
         self.hillshade_zfactor_spin.setToolTip("高程缩放因子\n投影坐标系: 通常为1.0\n地理坐标系: 自动调整，或手动微调")
         self.hillshade_zfactor_spin.valueChanged.connect(self._on_settings_changed)
@@ -458,7 +505,8 @@ class RenderSettingsWidget(QWidget):
         self._auto_range = (state == Qt.Checked.value if hasattr(Qt.Checked, 'value') else state == Qt.Checked)
         self.min_spin.setEnabled(not self._auto_range)
         self.max_spin.setEnabled(not self._auto_range)
-        self._emit_settings_changed()
+        if self._auto_range:
+            self._emit_settings_changed()
         
     def _on_display_mode_changed(self, mode):
         """显示模式变更"""
