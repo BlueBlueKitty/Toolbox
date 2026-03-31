@@ -10,10 +10,11 @@ import re
 import numpy as np
 from pathlib import Path
 from typing import Optional, Tuple
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
-                               QFileDialog, QLabel, QSlider, QComboBox, QMessageBox,
-                               QSplitter, QGroupBox, QGridLayout, QCheckBox, QFormLayout,
-                               QDialogButtonBox, QInputDialog, QFrame)
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
+                                QFileDialog, QLabel, QSlider, QComboBox, QMessageBox,
+                                QSplitter, QGroupBox, QGridLayout, QCheckBox, QFormLayout,
+                                QDialogButtonBox, QInputDialog, QFrame,
+                                QApplication)
 from PySide6.QtCore import Qt, QSettings
 
 # 导入共享的GAMMA对话框
@@ -187,6 +188,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         # 创建UI
         self._create_ui()
+        self._loading_title_text = self.windowTitle()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
@@ -667,6 +669,15 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.show_image(1, reset_view=True)
             self.show_image(2, reset_view=True)
 
+    def _show_loading_indicator(self, message: str):
+        self.setWindowTitle(f"{self._loading_title_text} - 加载中")
+        if hasattr(self, 'image_count_label'):
+            self.image_count_label.setText(message.replace("\n", " | "))
+        QApplication.processEvents()
+
+    def _hide_loading_indicator(self):
+        self.setWindowTitle(self._loading_title_text)
+
     def _get_image_metadata(self, index) -> Optional[dict]:
         """获取指定索引影像的元数据。"""
         if 0 <= index < len(self.image_metadata):
@@ -1136,6 +1147,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         settings.setValue("last_folder_path", folder)
         
         try:
+            self._show_loading_indicator(f"正在扫描图像文件夹...\n{os.path.basename(folder)}")
             # 查找支持的图像文件
             supported_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.grd']
             files = []
@@ -1153,11 +1165,14 @@ class PixelTimeSeriesViewerDialog(QDialog):
             files.sort()
             
             # 加载图像
+            self._show_loading_indicator(f"正在加载图像文件夹...\n{os.path.basename(folder)}")
             self.load_images(files)
             
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开文件夹失败: {str(e)}")
             traceback.print_exc()
+        finally:
+            self._hide_loading_indicator()
     
     def open_h5_timeseries(self):
         """打开h5时序数据"""
@@ -1176,6 +1191,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         settings.setValue("last_h5_path", os.path.dirname(file_path))
         
         try:
+            self._show_loading_indicator(f"正在分析 h5 时序数据...\n{os.path.basename(file_path)}")
             # 使用image_io模块获取h5时序元信息
             date_list, timeseries_shape, start_index = read_h5_timeseries_metadata(file_path)
             
@@ -1251,6 +1267,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.image_viewer_2.set_nodata_value(0)
             
             # 显示第一张和第二张图像
+            self._show_loading_indicator(f"正在加载 h5 时序图像...\n{os.path.basename(file_path)}")
             self.current_image_index_1 = 0
             self.current_image_index_2 = min(1, self.image_count - 1)
             self.show_image(1, reset_view=True)
@@ -1268,6 +1285,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开h5文件失败: {str(e)}")
             traceback.print_exc()
+        finally:
+            self._hide_loading_indicator()
     
     def load_images(self, file_list):
         """加载图像列表（按需加载模式，只读取第一张获取元信息）"""
@@ -1453,6 +1472,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         settings.setValue("last_gamma_folder_path", folder)
         
         try:
+            self._show_loading_indicator(f"正在分析 GAMMA 时序数据...\n{os.path.basename(folder)}")
             # 查找目录中的二进制文件（排除.par文件）
             # 使用文件大小>10M且大小一致来判断
             MIN_FILE_SIZE = 10 * 1024 * 1024  # 10MB
@@ -1611,6 +1631,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 self.colormap_combo.setCurrentText('gray')
             
             # 显示第一张和第二张图像
+            self._show_loading_indicator(f"正在加载 GAMMA 时序图像...\n{os.path.basename(folder)}")
             self.current_image_index_1 = 0
             self.current_image_index_2 = min(1, self.image_count - 1)
             self.show_image(1, reset_view=True)
@@ -1631,6 +1652,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开GAMMA文件夹失败: {str(e)}")
             traceback.print_exc()
+        finally:
+            self._hide_loading_indicator()
     
     def _read_gamma_image_downsampled(self, file_path, max_size=2048):
         """

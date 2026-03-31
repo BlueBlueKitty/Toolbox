@@ -9,11 +9,11 @@ import os
 import numpy as np
 import h5py
 from pathlib import Path
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
-                               QFileDialog, QLabel, QMessageBox, QSplitter, 
-                               QGroupBox, QButtonGroup, QRadioButton, QListWidget,
-                               QDialogButtonBox, QInputDialog, QComboBox, QFrame,
-                               QCheckBox)
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
+                                QFileDialog, QLabel, QMessageBox, QSplitter,
+                                QGroupBox, QButtonGroup, QRadioButton, QListWidget,
+                                QDialogButtonBox, QInputDialog, QComboBox, QFrame,
+                                QCheckBox, QApplication)
 from PySide6.QtCore import Qt, QSettings
 
 # 配置文件路径
@@ -97,6 +97,7 @@ class LocalImageViewerDialog(QDialog):
         
         # 创建UI
         self._create_ui()
+        self._loading_title_text = self.windowTitle()
     
     def _update_render_settings_bands(self):
         """根据当前图像更新渲染设置的波段数和统计信息"""
@@ -135,6 +136,15 @@ class LocalImageViewerDialog(QDialog):
         if self._converted_to_db and "dB" not in info_parts:
             info_parts.append("dB")
         return " | ".join(info_parts)
+
+    def _show_loading_indicator(self, message):
+        self.setWindowTitle(f"{self._loading_title_text} - 加载中")
+        if hasattr(self, 'image_info_label'):
+            self.image_info_label.setText(message.replace("\n", " | "))
+        QApplication.processEvents()
+
+    def _hide_loading_indicator(self):
+        self.setWindowTitle(self._loading_title_text)
 
     def _refresh_image_info_label(self):
         if self.image_data is None or not self.image_file:
@@ -483,6 +493,7 @@ class LocalImageViewerDialog(QDialog):
         settings.setValue("last_file_path", os.path.dirname(file_path))
         
         try:
+            self._show_loading_indicator(f"正在加载图像...\n{os.path.basename(file_path)}")
             self.image_file = file_path
             ext = os.path.splitext(file_path)[1].lower()
             self.is_tiff = ext in ['.tif', '.tiff', '.grd']
@@ -648,6 +659,8 @@ class LocalImageViewerDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开图像失败: {str(e)}")
             traceback.print_exc()
+        finally:
+            self._hide_loading_indicator()
     
     def _read_tiff_downsampled_local(self, file_path):
         """
@@ -1532,6 +1545,7 @@ class LocalImageViewerDialog(QDialog):
         settings.setValue("last_h5_path", os.path.dirname(file_path))
         
         try:
+            self._show_loading_indicator(f"正在分析 h5 文件...\n{os.path.basename(file_path)}")
             # 使用image_io模块列出所有数据集
             datasets = list_h5_datasets(file_path, min_ndim=2)
             
@@ -1586,6 +1600,7 @@ class LocalImageViewerDialog(QDialog):
                 return
             
             # 使用降采样读取数据集
+            self._show_loading_indicator(f"正在加载 h5 图像...\n{os.path.basename(file_path)}")
             data, original_size, downsample_factor = read_h5_dataset_downsampled(
                 file_path, selected_dataset, self.MAX_DISPLAY_SIZE, frame_index
             )
@@ -1656,6 +1671,8 @@ class LocalImageViewerDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开h5文件失败: {str(e)}")
             traceback.print_exc()
+        finally:
+            self._hide_loading_indicator()
     
     def _show_dataset_selection_dialog(self, datasets):
         """显示数据集选择对话框
@@ -1782,6 +1799,7 @@ class LocalImageViewerDialog(QDialog):
         settings.setValue("last_gamma_path", os.path.dirname(file_path))
         
         try:
+            self._show_loading_indicator(f"正在分析 GAMMA 文件...\n{os.path.basename(file_path)}")
             # 先尝试以float32格式查找PAR文件
             auto_par_file, auto_dims = find_valid_par_for_binary(file_path, "float32")
             auto_format = "float32"
@@ -1853,6 +1871,7 @@ class LocalImageViewerDialog(QDialog):
             self.image_file = file_path
             
             # 读取图像数据（使用降采样）
+            self._show_loading_indicator(f"正在加载 GAMMA 图像...\n{os.path.basename(file_path)}")
             data, downsample_factor = read_gamma_downsampled(
                 file_path, width, height, gamma_format, self.MAX_DISPLAY_SIZE
             )
@@ -1914,6 +1933,8 @@ class LocalImageViewerDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开GAMMA文件失败: {str(e)}")
             traceback.print_exc()
+        finally:
+            self._hide_loading_indicator()
     
     def _read_gamma_original_region(self, x1, y1, x2, y2):
         """
