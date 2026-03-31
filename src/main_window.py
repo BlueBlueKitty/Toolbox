@@ -348,6 +348,13 @@ class MainWindow(QMainWindow):
 
     def _show_tool_window(self, dialog):
         """以非模态方式显示工具窗口，并持有引用直到关闭。"""
+        if dialog.parent() is self:
+            dialog.setParent(None)
+
+        dialog.setWindowFlag(Qt.Window, True)
+        dialog.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
+        dialog.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
+        dialog.setWindowFlag(Qt.WindowCloseButtonHint, True)
         dialog.setAttribute(Qt.WA_DeleteOnClose, True)
         self._open_tool_windows.add(dialog)
         dialog.destroyed.connect(lambda *_args, ref=dialog: self._open_tool_windows.discard(ref))
