@@ -38,7 +38,7 @@ class ImageViewer(QGraphicsView):
     mouse_moved = Signal(int, int, object)
     
     # 视图变换信号（用于同步多个查看器）
-    view_transformed = Signal(object)  # 发送transform对象
+    view_transformed = Signal(object)  # 发送完整视图状态
     
     # 鼠标样式变化信号（用于同步鼠标样式）
     cursor_changed = Signal(object)  # 发送cursor对象
@@ -160,10 +160,14 @@ class ImageViewer(QGraphicsView):
 
     def capture_view_state(self):
         """捕获当前视图状态。"""
+        viewport_center = self.viewport().rect().center()
+        scene_center = self.mapToScene(viewport_center)
         return {
             'transform': self.transform(),
             'h_value': self.horizontalScrollBar().value(),
             'v_value': self.verticalScrollBar().value(),
+            'scene_center_x': scene_center.x(),
+            'scene_center_y': scene_center.y(),
         }
 
     def restore_view_state(self, state):
@@ -173,8 +177,11 @@ class ImageViewer(QGraphicsView):
 
         self.is_syncing = True
         self.setTransform(state['transform'])
-        self.horizontalScrollBar().setValue(state['h_value'])
-        self.verticalScrollBar().setValue(state['v_value'])
+        if 'scene_center_x' in state and 'scene_center_y' in state:
+            self.centerOn(QPointF(state['scene_center_x'], state['scene_center_y']))
+        else:
+            self.horizontalScrollBar().setValue(state['h_value'])
+            self.verticalScrollBar().setValue(state['v_value'])
         self.is_syncing = False
 
     def _get_current_scene_rect(self):
@@ -549,7 +556,7 @@ class ImageViewer(QGraphicsView):
             self.scale(self.zoom_factor, self.zoom_factor)
             self.current_zoom *= self.zoom_factor
             if not self.is_syncing:
-                self.view_transformed.emit(self.transform())
+                self.view_transformed.emit(self.capture_view_state())
     
     def zoom_out(self):
         """缩小"""
@@ -557,7 +564,7 @@ class ImageViewer(QGraphicsView):
             self.scale(1 / self.zoom_factor, 1 / self.zoom_factor)
             self.current_zoom /= self.zoom_factor
             if not self.is_syncing:
-                self.view_transformed.emit(self.transform())
+                self.view_transformed.emit(self.capture_view_state())
     
     def wheelEvent(self, event):
         """鼠标滚轮事件：缩放"""
@@ -651,9 +658,17 @@ class ImageViewer(QGraphicsView):
             super().mouseReleaseEvent(event)
     
     def sync_transform(self, transform):
-        """同步视图变换（从另一个查看器）"""
+        """同步视图变换或完整视图状态（从另一个查看器）。"""
         self.is_syncing = True
-        self.setTransform(transform)
+        if isinstance(transform, dict):
+            self.setTransform(transform['transform'])
+            if 'scene_center_x' in transform and 'scene_center_y' in transform:
+                self.centerOn(QPointF(transform['scene_center_x'], transform['scene_center_y']))
+            else:
+                self.horizontalScrollBar().setValue(transform['h_value'])
+                self.verticalScrollBar().setValue(transform['v_value'])
+        else:
+            self.setTransform(transform)
         self.is_syncing = False
     
     def sync_cursor(self, cursor):
