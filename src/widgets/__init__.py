@@ -12,6 +12,11 @@ from .interactive_image_viewer import InteractiveImageViewer
 from .leaflet_map_widget import LeafletMapWidget, MapBridge, WEBENGINE_AVAILABLE
 from .render_settings_widget import RenderSettingsWidget, apply_render_settings
 from .colorbar_widget import ColorbarWidget
+from .segmentation_pg_view import SegmentationPgView
+from .layer_panel_widget import LayerPanelWidget
+from .label_panel_widget import LabelPanelWidget
+from .magic_wand_panel import MagicWandPanel
+from .segmentation_tool_controller import SegmentationToolController
 
 __all__ = [
     'ImageViewer', 
@@ -24,4 +29,9 @@ __all__ = [
     'apply_render_settings',
     'ImageViewerSynchronizer',
     'ColorbarWidget',
+    'SegmentationPgView',
+    'LayerPanelWidget',
+    'LabelPanelWidget',
+    'MagicWandPanel',
+    'SegmentationToolController',
 ]

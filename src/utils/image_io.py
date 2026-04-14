@@ -971,6 +971,85 @@ def find_best_overview_by_factor(band, target_factor: int):
     return best_level
 
 
+def detect_tiff_overviews(file_path: str) -> List[dict]:
+    """
+    检测 TIFF / GeoTIFF 的 overview 信息。
+    """
+    try:
+        ds = _open_gdal_dataset(file_path)
+        if ds is None or ds.RasterCount == 0:
+            return []
+
+        band = ds.GetRasterBand(1)
+        results = []
+        for index in range(band.GetOverviewCount()):
+            overview = band.GetOverview(index)
+            factor = ds.RasterXSize / max(overview.XSize, 1)
+            results.append(
+                {
+                    "level_index": index,
+                    "downsample_factor": float(factor),
+                    "width": overview.XSize,
+                    "height": overview.YSize,
+                    "source_type": "external" if str(ds.GetDescription()).lower().endswith(".ovr") else "internal",
+                }
+            )
+        ds = None
+        return results
+    except Exception as e:
+        print(f"检测金字塔失败 {file_path}: {e}")
+        return []
+
+
+def choose_tiff_overview(file_path: str, target_downsample: float) -> Optional[dict]:
+    """
+    根据目标缩放因子选择 overview。
+    """
+    overviews = detect_tiff_overviews(file_path)
+    if not overviews:
+        return None
+    overviews = sorted(overviews, key=lambda item: item["downsample_factor"])
+    for overview in overviews:
+        if overview["downsample_factor"] >= max(target_downsample, 1.0):
+            return overview
+    return overviews[-1]
+
+
+def read_tiff_window(
+    file_path: str,
+    xoff: int,
+    yoff: int,
+    xsize: int,
+    ysize: int,
+    buf_xsize: Optional[int] = None,
+    buf_ysize: Optional[int] = None,
+    bands: Optional[List[int]] = None
+) -> Optional[np.ndarray]:
+    """
+    读取指定窗口区域。
+    """
+    try:
+        ds = _open_gdal_dataset(file_path)
+        if ds is None:
+            return None
+
+        selected_bands = bands or list(range(1, min(ds.RasterCount, 3) + 1))
+        arrays = []
+        for band_index in selected_bands:
+            band = ds.GetRasterBand(band_index)
+            arrays.append(
+                band.ReadAsArray(xoff, yoff, xsize, ysize, buf_xsize=buf_xsize, buf_ysize=buf_ysize)
+            )
+        ds = None
+        if len(arrays) == 1:
+            return arrays[0]
+        return np.stack(arrays, axis=-1)
+    except Exception as e:
+        print(f"读取窗口失败 {file_path}: {e}")
+        traceback.print_exc()
+        return None
+
+
 def check_tiff_needs_overview(file_path: str, threshold: int = 4096) -> Tuple[bool, int, int]:
     """
     检查TIFF文件是否需要金字塔

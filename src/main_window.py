@@ -16,7 +16,8 @@ import traceback
 
 # 导入自定义对话框
 from src.dialogs import (TiffBoundarySettingsDialog, PixelTimeSeriesViewerDialog,
-                         LocalImageViewerDialog, RasterDataAcquisitionDialog)
+                         LocalImageViewerDialog, RasterDataAcquisitionDialog,
+                         ImageSegmentationDialog)
 
 # 导入工具函数
 from src.utils import tiff_boundary_to_vector
@@ -215,6 +216,29 @@ class MainWindow(QMainWindow):
         """)
         self.button_pixel_time_series_viewer.clicked.connect(self.on_button_pixel_time_series_viewer_click)
         image_analysis_layout.addWidget(self.button_pixel_time_series_viewer, 0, 1)
+
+        # 图像分割工具按钮
+        self.button_image_segmentation = QPushButton("图像分割工具")
+        self.button_image_segmentation.setMinimumHeight(50)
+        self.button_image_segmentation.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:pressed {
+                background-color: #21618c;
+            }
+        """)
+        self.button_image_segmentation.clicked.connect(self.on_button_image_segmentation_click)
+        image_analysis_layout.addWidget(self.button_image_segmentation, 1, 0, 1, 2)
         
         image_analysis_group.setLayout(image_analysis_layout)
         scroll_layout.addWidget(image_analysis_group)
@@ -333,6 +357,17 @@ class MainWindow(QMainWindow):
             self._show_tool_window(dialog)
         except Exception as e:
             QMessageBox.critical(self, "错误", f"发生异常: {str(e)}")
+            traceback.print_exc()
+
+    def on_button_image_segmentation_click(self):
+        """
+        图像分割工具按钮点击事件
+        """
+        try:
+            dialog = ImageSegmentationDialog(self)
+            self._show_tool_window(dialog)
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"打开图像分割工具失败: {str(e)}")
             traceback.print_exc()
     
     def on_button_dem_acquisition_click(self):

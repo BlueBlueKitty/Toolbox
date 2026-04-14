@@ -5,3 +5,4 @@ from .pixel_time_series_viewer_dialog import PixelTimeSeriesViewerDialog
 from .local_image_viewer_dialog import LocalImageViewerDialog
 from .raster_acquisition_dialog import DEMAcquisitionDialog, RasterDataAcquisitionDialog
 from .gamma_dialogs import GammaFormatSelectorWidget, GammaSingleFileDialog, GammaTimeSeriesDialog
+from .image_segmentation_dialog import ImageSegmentationDialog

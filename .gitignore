@@ -235,3 +235,6 @@ installer.nsi
 # 临时文件
 *.log
 *.tmp
+
+ref_repos/
+AGENTS.md
