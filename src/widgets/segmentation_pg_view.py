@@ -44,6 +44,7 @@ class SegmentationPgView(QWidget):
         layout.addWidget(self.graphics)
 
         self.view_box = self.graphics.addViewBox(lockAspect=False, enableMouse=True)
+        self.view_box.setMenuEnabled(False)
         self.view_box.invertY(True)
         self.view_box.setAspectLocked(False)
         self.view_box.setMouseMode(pg.ViewBox.PanMode)
@@ -65,6 +66,7 @@ class SegmentationPgView(QWidget):
         self._preview_polygon_items: list[PreviewPolygonItem] = []
         self._dynamic_source = False
         self._last_request_signature = None
+        self._interaction_mode = "browse"
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(120)
@@ -79,13 +81,33 @@ class SegmentationPgView(QWidget):
         if obj is self.graphics.viewport():
             if event.type() == QEvent.MouseButtonPress:
                 self.mouse_pressed.emit(self._payload_from_event(event))
+                if self._should_consume_left_mouse(event):
+                    return True
             elif event.type() == QEvent.MouseButtonDblClick:
                 self.mouse_pressed.emit(self._payload_from_event(event, double_click=True))
+                if self._should_consume_left_mouse(event):
+                    return True
             elif event.type() == QEvent.MouseMove:
                 self.mouse_moved.emit(self._payload_from_event(event))
+                if self._should_consume_left_drag(event):
+                    return True
             elif event.type() == QEvent.MouseButtonRelease:
                 self.mouse_released.emit(self._payload_from_event(event))
+                if self._should_consume_left_mouse(event):
+                    return True
         return super().eventFilter(obj, event)
+
+    def _should_consume_left_mouse(self, event) -> bool:
+        return (
+            hasattr(event, "button")
+            and event.button() == Qt.LeftButton
+        )
+
+    def _should_consume_left_drag(self, event) -> bool:
+        return (
+            hasattr(event, "buttons")
+            and bool(event.buttons() & Qt.LeftButton)
+        )
 
     def _payload_from_event(self, event, double_click: bool = False) -> CanvasMousePayload:
         scene_pos = self.graphics.mapToScene(event.position().toPoint())
@@ -126,9 +148,10 @@ class SegmentationPgView(QWidget):
             self.refresh_view()
 
     def set_interaction_mode(self, tool_name: str) -> None:
-        browse = tool_name == "browse"
-        self.view_box.setMouseEnabled(x=browse, y=browse)
+        self._interaction_mode = tool_name
+        self.view_box.setMouseEnabled(x=True, y=True)
         self.view_box.setMouseMode(pg.ViewBox.PanMode)
+        self.graphics.viewport().setCursor(Qt.ArrowCursor if tool_name == "browse" else Qt.CrossCursor)
 
     def refresh_view(self) -> None:
         if self.source is None:
@@ -208,7 +231,15 @@ class SegmentationPgView(QWidget):
         )
         self.refresh_view()
 
-    def update_annotations(self, annotations, label_lookup, selected_id: str | None = None) -> None:
+    def update_annotations(
+        self,
+        annotations,
+        label_lookup,
+        selected_ids: set[str] | None = None,
+        editable_annotation_id: str | None = None,
+        active_vertex=None,
+    ) -> None:
+        selected_ids = selected_ids or set()
         for overlay in self._overlay_items.values():
             self.view_box.removeItem(overlay.scatter)
             if overlay.path_item.scene() is not None:
@@ -219,26 +250,33 @@ class SegmentationPgView(QWidget):
             label = label_lookup.get(annotation.label_id)
             if label is None:
                 continue
-            overlay = PolygonOverlayItem(annotation, label, selected=annotation.id == selected_id)
+            overlay = PolygonOverlayItem(
+                annotation,
+                label,
+                selected=annotation.id in selected_ids,
+                editable=annotation.id == editable_annotation_id,
+                active_vertex=active_vertex if annotation.id == editable_annotation_id else None,
+            )
             overlay.path_item.setParentItem(self.view_box.childGroup)
             self.view_box.addItem(overlay.scatter)
             self._overlay_items[annotation.id] = overlay
 
-    def update_preview_mask(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None) -> None:
-        self.preview_item.update_mask(mask, bbox)
+    def update_preview_mask(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None, color_name: str = "#ffd43b") -> None:
+        self.preview_item.update_mask(mask, bbox, color_name)
 
-    def update_preview_polygons(self, annotations) -> None:
+    def update_preview_polygons(self, annotations, color_name: str = "#ffd43b") -> None:
         for item in self._preview_polygon_items:
             if item.path_item.scene() is not None:
                 item.path_item.setParentItem(None)
                 item.path_item.scene().removeItem(item.path_item)
         self._preview_polygon_items = []
         for annotation in annotations or []:
-            item = PreviewPolygonItem(annotation)
+            item = PreviewPolygonItem(annotation, color_name)
             item.path_item.setParentItem(self.view_box.childGroup)
             self._preview_polygon_items.append(item)
 
-    def update_draft(self, points: list[list[float]] | None) -> None:
+    def update_draft(self, points: list[list[float]] | None, color_name: str = "#ffd43b", fill_alpha: int = 40) -> None:
+        self.draft_item.update_style(color_name, fill_alpha=fill_alpha)
         self.draft_item.update_geometry(points)
 
     def update_raster_mask(self, rgba_mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None = None) -> None:
@@ -270,8 +308,8 @@ class SegmentationPgView(QWidget):
         if not (x0 <= x < x0 + width and y0 <= y < y0 + height):
             return None
         display = self.last_render.display_rgb
-        rel_x = int(round((x - x0) * display.shape[1] / max(width, 1)))
-        rel_y = int(round((y - y0) * display.shape[0] / max(height, 1)))
+        rel_x = int(np.floor((x - x0) * display.shape[1] / max(width, 1)))
+        rel_y = int(np.floor((y - y0) * display.shape[0] / max(height, 1)))
         rel_x = max(0, min(display.shape[1] - 1, rel_x))
         rel_y = max(0, min(display.shape[0] - 1, rel_y))
         value = display[rel_y, rel_x]

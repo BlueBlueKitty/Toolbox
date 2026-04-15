@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QColorDialog,
     QInputDialog,
     QLabel,
+    QMessageBox,
     QVBoxLayout,
 )
 
@@ -61,7 +62,7 @@ class LabelPanelWidget(QGroupBox):
         self.list_widget.clear()
         current_row = 0
         for index, label in enumerate(labels):
-            item = QListWidgetItem(f"{label.shortcut}  {label.name}")
+            item = QListWidgetItem(f"{label.name}  快捷键 {label.shortcut}")
             item.setIcon(self._make_color_icon(label.color))
             item.setToolTip(f"颜色: {label.color}")
             self.list_widget.addItem(item)
@@ -82,11 +83,25 @@ class LabelPanelWidget(QGroupBox):
         color = QColorDialog.getColor(parent=self)
         if not color.isValid():
             return
-        shortcut, ok = QInputDialog.getText(self, "快捷键", "快捷键")
+        next_id = max([label.id for label in self._labels], default=0) + 1
+        shortcut, ok = QInputDialog.getText(
+            self,
+            "快捷键",
+            "快捷键",
+            QLineEdit.Normal,
+            str(next_id),
+        )
         if not ok or not shortcut.strip():
             return
-        next_id = max([label.id for label in self._labels], default=0) + 1
-        self._labels.append(LabelClass(next_id, name.strip(), color.name(), shortcut.strip()))
+        name_value = name.strip()
+        color_value = color.name()
+        if any(label.name == name_value for label in self._labels):
+            QMessageBox.warning(self, "提示", "标签名称已存在，请更改。")
+            return
+        if any(label.color.lower() == color_value.lower() for label in self._labels):
+            QMessageBox.warning(self, "提示", "标签颜色已存在，请更改。")
+            return
+        self._labels.append(LabelClass(next_id, name_value, color_value, shortcut.strip()))
         self.labels_changed.emit(self._labels[:])
         self.set_labels(self._labels, next_id)
 
@@ -99,6 +114,12 @@ class LabelPanelWidget(QGroupBox):
         if dialog.exec() != QDialog.Accepted:
             return
         edited = dialog.label()
+        if any(item.name == edited.name and item.id != label.id for item in self._labels):
+            QMessageBox.warning(self, "提示", "标签名称已存在，请更改。")
+            return
+        if any(item.color.lower() == edited.color.lower() and item.id != label.id for item in self._labels):
+            QMessageBox.warning(self, "提示", "标签颜色已存在，请更改。")
+            return
         self._labels[row] = LabelClass(label.id, edited.name, edited.color, edited.shortcut, label.visible, label.locked)
         self.labels_changed.emit(self._labels[:])
         self.set_labels(self._labels, label.id)

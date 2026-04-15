@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Iterable
 
 import numpy as np
@@ -14,10 +15,11 @@ except Exception:  # pragma: no cover
     cv2 = None
 
 try:
-    from osgeo import gdal, ogr
+    from osgeo import gdal, ogr, osr
 except Exception:  # pragma: no cover
     gdal = None
     ogr = None
+    osr = None
 
 try:
     from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
@@ -41,7 +43,7 @@ from .models import AnnotationObject
 
 class GeometryService:
     _CV_SUBPIXEL_SHIFT = 8
-    _SIMPLIFY_EPSILON = 0.5
+    _SIMPLIFY_EPSILON = 1.0
 
     @staticmethod
     def rectangle_to_polygon(x1: float, y1: float, x2: float, y2: float) -> list[list[float]]:
@@ -98,6 +100,30 @@ class GeometryService:
     @staticmethod
     def annotation_to_polygon(annotation: AnnotationObject):
         return GeometryService._polygon_from_ring(annotation.exterior, annotation.holes)
+
+    @staticmethod
+    def is_annotation_geometry_valid(annotation: AnnotationObject) -> bool:
+        if Polygon is None:
+            return bool(annotation.exterior and len(annotation.exterior) >= 4)
+        shell = GeometryService.ensure_closed(annotation.exterior)
+        if len(shell) < 4:
+            return False
+        holes = [GeometryService.ensure_closed(hole) for hole in annotation.holes]
+        try:
+            polygon = Polygon(shell, holes=holes or None)
+        except Exception:
+            return False
+        return not polygon.is_empty and polygon.is_valid and polygon.area > 0
+
+    @staticmethod
+    def refresh_annotation_metadata(annotation: AnnotationObject) -> None:
+        if not annotation.exterior:
+            annotation.bbox = None
+            return
+        xs = [pt[0] for pt in annotation.exterior]
+        ys = [pt[1] for pt in annotation.exterior]
+        annotation.bbox = [min(xs), min(ys), max(xs), max(ys)]
+        annotation.updated_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
     @staticmethod
     def annotations_union(annotations: Iterable[AnnotationObject]):
@@ -207,10 +233,16 @@ class GeometryService:
                     continue
                 shapely_geom = shapely_wkb.loads(bytes(geom.ExportToWkb()))
                 if shapely_translate is not None and (x0 != 0 or y0 != 0):
-                    shapely_geom = shapely_translate(shapely_geom, xoff=x0, yoff=y0)
+                    shapely_geom = shapely_translate(
+                        shapely_geom,
+                        xoff=x0,
+                        yoff=y0,
+                    )
                 for polygon in GeometryService._extract_polygon_geometries(shapely_geom):
                     if polygon.is_empty:
                         continue
+                    if not polygon.is_valid:
+                        polygon = make_valid(polygon) if make_valid is not None else polygon.buffer(0)
                     if not simplify and vector_smoothness <= 0:
                         exterior = [[float(x), float(y)] for x, y in polygon.exterior.coords]
                         holes = [
@@ -243,21 +275,36 @@ class GeometryService:
         height: int,
         binary_label_id: int | None = None,
     ) -> np.ndarray:
-        if cv2 is None:
-            raise RuntimeError("rasterize_annotations 需要 opencv-python 依赖")
+        if gdal is None or ogr is None or osr is None:
+            raise RuntimeError("rasterize_annotations 需要 GDAL 依赖")
 
-        mask = np.zeros((height, width), dtype=np.uint16)
+        mem_driver = gdal.GetDriverByName("MEM")
+        raster = mem_driver.Create("", width, height, 1, gdal.GDT_UInt16)
+        raster.SetGeoTransform((0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+        local_srs = osr.SpatialReference()
+        local_srs.SetLocalCS("pixel")
+        raster.SetProjection(local_srs.ExportToWkt())
+        band = raster.GetRasterBand(1)
+        band.Fill(0)
+
+        vector_driver = ogr.GetDriverByName("Memory")
+        datasource = vector_driver.CreateDataSource("")
+        layer = datasource.CreateLayer("annotations", srs=local_srs, geom_type=ogr.wkbPolygon)
+        layer.CreateField(ogr.FieldDefn("value", ogr.OFTInteger))
+        definition = layer.GetLayerDefn()
+
         for annotation in annotations:
-            value = binary_label_id if binary_label_id is not None else annotation.label_id
-            exterior = GeometryService._to_fixed_point_contour(annotation.exterior)
-            if exterior.size == 0:
+            polygon = GeometryService.annotation_to_polygon(annotation)
+            if polygon is None or polygon.is_empty:
                 continue
-            cv2.fillPoly(mask, [exterior], int(value), shift=GeometryService._CV_SUBPIXEL_SHIFT)
-            for hole in annotation.holes:
-                interior = GeometryService._to_fixed_point_contour(hole)
-                if interior.size > 0:
-                    cv2.fillPoly(mask, [interior], 0, shift=GeometryService._CV_SUBPIXEL_SHIFT)
-        return mask
+            feature = ogr.Feature(definition)
+            feature.SetField("value", int(binary_label_id if binary_label_id is not None else annotation.label_id))
+            geometry = ogr.CreateGeometryFromWkb(polygon.wkb)
+            feature.SetGeometry(geometry)
+            layer.CreateFeature(feature)
+
+        gdal.RasterizeLayer(raster, [1], layer, options=["ATTRIBUTE=value"])
+        return band.ReadAsArray().astype(np.uint16)
 
     @staticmethod
     def bbox_intersects(bbox_a: list[float] | tuple[float, float, float, float] | None, bbox_b: tuple[float, float, float, float] | None) -> bool:
@@ -390,14 +437,6 @@ class GeometryService:
             weights.fill(1.0 / kernel_size)
             return weights
         return weights / total
-
-    @staticmethod
-    def _to_fixed_point_contour(points: list[list[float]]) -> np.ndarray:
-        if not points:
-            return np.empty((0, 2), dtype=np.int32)
-        scale = 1 << GeometryService._CV_SUBPIXEL_SHIFT
-        contour = np.round(np.asarray(points, dtype=np.float64) * scale).astype(np.int32)
-        return contour.reshape(-1, 2)
 
     @staticmethod
     def colorize_mask(mask: np.ndarray, label_lookup: dict[int, object]) -> np.ndarray:

@@ -9,11 +9,11 @@ from pathlib import Path
 import numpy as np
 
 from PySide6.QtCore import QPointF, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QPolygonF, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QFontDatabase, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -47,10 +47,12 @@ from src.segmentation.exporters import (
 )
 from src.segmentation.geometry_service import GeometryService
 from src.segmentation.image_sources import GeoTiffImageSource, StandardImageSource
-from src.segmentation.rendering import default_render_config
+from src.segmentation.rendering import default_render_config, render_base_rgb
+from src.widgets.colormap_combobox import ColormapComboBox
 from src.widgets.layer_panel_widget import LayerPanelWidget
 from src.widgets.label_panel_widget import LabelPanelWidget
 from src.widgets.magic_wand_panel import MagicWandPanel
+from src.widgets.render_settings_widget import RenderSettingsWidget
 from src.widgets.segmentation_pg_view import SegmentationPgView
 from src.widgets.segmentation_tool_controller import SegmentationToolController
 
@@ -76,13 +78,27 @@ class ImageSegmentationDialog(QDialog):
         self._preview_bbox = None
         self._dirty = False
         self._vertex_update_pending: dict[str, AnnotationObject] = {}
+        self._node_edit_session_annotation_id: str | None = None
+        self._node_edit_original_annotation: AnnotationObject | None = None
+        self._node_edit_session_dirty = False
+        self._node_edit_mask_snapshot_annotations: list[AnnotationObject] = []
+        self._raster_overlay_override_annotations: list[AnnotationObject] | None = None
+        self._suspend_selection_sync = False
         self._magic_preview_timer = QTimer(self)
-        self._magic_preview_timer.setInterval(60)
+        self._magic_preview_timer.setInterval(250)
         self._magic_preview_timer.setSingleShot(True)
         self._magic_preview_timer.timeout.connect(self._trigger_pending_magic_preview)
+        self._render_update_timer = QTimer(self)
+        self._render_update_timer.setInterval(100)
+        self._render_update_timer.setSingleShot(True)
+        self._render_update_timer.timeout.connect(self._apply_render_settings_update)
+        self._material_icon_family = self._load_material_icon_font()
+        self._last_image_dir = self.project_manager.settings.value("last_image_dir", "", type=str)
+        self._last_project_dir = self.project_manager.settings.value("last_project_dir", "", type=str)
 
         self._create_ui()
         self._bind_signals()
+        self._load_render_preferences()
         self._setup_shortcuts()
 
         self.autosave_timer = QTimer(self)
@@ -101,8 +117,14 @@ class ImageSegmentationDialog(QDialog):
         self.export_action = QAction(self.style().standardIcon(QStyle.SP_DialogApplyButton), "导出...", self)
         self.undo_action = QAction(self.style().standardIcon(QStyle.SP_ArrowBack), "撤销", self)
         self.redo_action = QAction(self.style().standardIcon(QStyle.SP_ArrowForward), "重做", self)
-        self.fit_action = QAction(self.style().standardIcon(QStyle.SP_DesktopIcon), "适应窗口", self)
-        self.actual_size_action = QAction(self.style().standardIcon(QStyle.SP_TitleBarMaxButton), "1:1", self)
+        self.clear_annotations_action = QAction(self._make_tool_icon("delete_sweep"), "清空绘制", self)
+        self.open_action.setIcon(self._make_tool_icon("image"))
+        self.open_project_action.setIcon(self._make_tool_icon("folder_open"))
+        self.save_project_action.setIcon(self._make_tool_icon("save"))
+        self.export_action.setIcon(self._make_tool_icon("ios_share"))
+        self.undo_action.setIcon(self._make_tool_icon("undo"))
+        self.redo_action.setIcon(self._make_tool_icon("redo"))
+        self.actual_size_action = QAction(self._make_tool_icon("zoom_in_map"), "1:1", self)
         for action in [
             self.open_action,
             self.open_project_action,
@@ -110,19 +132,21 @@ class ImageSegmentationDialog(QDialog):
             self.export_action,
             self.undo_action,
             self.redo_action,
-            self.fit_action,
+            self.clear_annotations_action,
             self.actual_size_action,
         ]:
+            action.setToolTip(action.text())
+            action.setStatusTip(action.text())
             self.toolbar.addAction(action)
+        self.toolbar.setToolTipDuration(5000)
 
         self.toolbar.addSeparator()
-        self.toolbar.addWidget(QLabel("工具"))
         self.tool_action_group = QActionGroup(self)
         self.tool_action_group.setExclusive(True)
-        self.browse_tool_action = self._create_tool_action("浏览", SegmentationToolController.TOOL_BROWSE, self._make_tool_icon("browse"))
-        self.rectangle_tool_action = self._create_tool_action("矩形框", SegmentationToolController.TOOL_RECTANGLE, self._make_tool_icon("rectangle"))
-        self.polygon_tool_action = self._create_tool_action("多边形", SegmentationToolController.TOOL_POLYGON, self._make_tool_icon("polygon"))
-        self.magic_tool_action = self._create_tool_action("魔法棒", SegmentationToolController.TOOL_MAGIC_WAND, self._make_tool_icon("magic"))
+        self.browse_tool_action = self._create_tool_action("浏览", SegmentationToolController.TOOL_BROWSE, self._make_tool_icon("pan_tool"))
+        self.rectangle_tool_action = self._create_tool_action("矩形框", SegmentationToolController.TOOL_RECTANGLE, self._make_tool_icon("crop_square"))
+        self.polygon_tool_action = self._create_tool_action("多边形", SegmentationToolController.TOOL_POLYGON, self._make_tool_icon("gesture"))
+        self.magic_tool_action = self._create_tool_action("魔法棒", SegmentationToolController.TOOL_MAGIC_WAND, self._make_tool_icon("auto_fix_high"))
         self.browse_tool_action.setChecked(True)
         for action in [
             self.browse_tool_action,
@@ -132,6 +156,33 @@ class ImageSegmentationDialog(QDialog):
         ]:
             self.tool_action_group.addAction(action)
             self.toolbar.addAction(action)
+
+        render_controls = QWidget()
+        render_layout = QHBoxLayout(render_controls)
+        render_layout.setContentsMargins(0, 0, 0, 0)
+        render_layout.setSpacing(6)
+        self.render_settings = RenderSettingsWidget(compact=True)
+        self._remove_hillshade_mode()
+        self.render_settings.set_smooth_display(False)
+        render_layout.addWidget(self.render_settings.band_widget)
+        render_layout.addWidget(self.render_settings.reverse_check)
+        render_layout.addWidget(self.render_settings.stretch_combo)
+        render_layout.addWidget(self.render_settings.stretch_param_widget)
+        render_layout.addWidget(self.render_settings.auto_range_check)
+        render_layout.addWidget(self.render_settings.min_spin)
+        render_layout.addWidget(self.render_settings.range_dash_label)
+        render_layout.addWidget(self.render_settings.max_spin)
+        render_layout.addWidget(QLabel("Gamma:"))
+        render_layout.addWidget(self.render_settings.gamma_spin)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        render_layout.addWidget(sep)
+        render_layout.addWidget(QLabel("Colormap:"))
+        self.colormap_combo = ColormapComboBox()
+        render_layout.addWidget(self.colormap_combo)
+        render_layout.addStretch(1)
+        main_layout.addWidget(render_controls)
 
         splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(splitter)
@@ -144,14 +195,7 @@ class ImageSegmentationDialog(QDialog):
         self.label_panel = LabelPanelWidget()
         self.layer_panel = LayerPanelWidget()
         self.magic_panel = MagicWandPanel()
-        self.assign_label_combo = QComboBox()
-        assign_row = QWidget()
-        assign_layout = QHBoxLayout(assign_row)
-        assign_layout.setContentsMargins(0, 0, 0, 0)
-        assign_layout.addWidget(QLabel("选中对象标签"))
-        assign_layout.addWidget(self.assign_label_combo)
         right_layout.addWidget(self.label_panel)
-        right_layout.addWidget(assign_row)
         right_layout.addWidget(self.layer_panel)
         right_layout.addWidget(self.magic_panel)
         right_layout.addStretch(1)
@@ -174,7 +218,7 @@ class ImageSegmentationDialog(QDialog):
         self.export_action.triggered.connect(self.export_data)
         self.undo_action.triggered.connect(self.undo)
         self.redo_action.triggered.connect(self.redo)
-        self.fit_action.triggered.connect(self.canvas.fit_image)
+        self.clear_annotations_action.triggered.connect(self.clear_all_annotations)
         self.actual_size_action.triggered.connect(self.canvas.set_one_to_one)
         self.tool_action_group.triggered.connect(self._on_tool_action_triggered)
 
@@ -182,6 +226,7 @@ class ImageSegmentationDialog(QDialog):
         self.canvas.mouse_moved.connect(self._update_mouse_position)
         self.canvas.mouse_moved.connect(self.tool_controller.handle_move)
         self.canvas.mouse_released.connect(self._handle_mouse_release)
+        self.canvas.view_state_changed.connect(self._on_view_state_changed)
 
         self.tool_controller.polygon_finished.connect(self._add_polygon_annotation)
         self.tool_controller.rectangle_finished.connect(self._add_rectangle_annotation)
@@ -189,6 +234,7 @@ class ImageSegmentationDialog(QDialog):
         self.tool_controller.selection_changed.connect(self._on_selection_changed)
         self.tool_controller.geometry_changed.connect(self._on_geometry_changed)
         self.tool_controller.draft_changed.connect(self._on_draft_changed)
+        self.tool_controller.message_requested.connect(self._show_tool_message)
 
         self.label_panel.active_label_changed.connect(self._set_active_label)
         self.label_panel.labels_changed.connect(self._replace_labels)
@@ -197,11 +243,13 @@ class ImageSegmentationDialog(QDialog):
         self.magic_panel.merge_preview_changed.connect(self._on_merge_preview_changed)
         self.magic_panel.confirm_requested.connect(self._confirm_magic_preview)
         self.magic_panel.cancel_requested.connect(self._clear_magic_preview)
-        self.assign_label_combo.currentIndexChanged.connect(self._assign_selected_label)
-
+        self.render_settings.settings_changed.connect(self.on_render_settings_changed)
+        self.render_settings.suggest_colormap.connect(self.on_suggest_colormap)
+        self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
     def _setup_shortcuts(self) -> None:
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self.undo)
         QShortcut(QKeySequence("Ctrl+Y"), self, activated=self.redo)
+        QShortcut(QKeySequence("Ctrl+A"), self, activated=self._select_all_annotations)
         QShortcut(QKeySequence(Qt.Key_Delete), self, activated=self.delete_selected)
         QShortcut(QKeySequence(Qt.Key_Backspace), self, activated=self._backspace_action)
         QShortcut(QKeySequence(Qt.Key_Return), self, activated=self._enter_action)
@@ -220,22 +268,34 @@ class ImageSegmentationDialog(QDialog):
         action = QAction(icon, text, self)
         action.setCheckable(True)
         action.setData(tool_name)
+        action.setToolTip(text)
+        action.setStatusTip(text)
         return action
 
-    def _make_tool_icon(self, tool_name: str) -> QIcon:
+    def _make_tool_icon(self, icon_name: str) -> QIcon:
+        if self._material_icon_family:
+            pixmap = QPixmap(20, 20)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            font = QFont(self._material_icon_family)
+            font.setPixelSize(20)
+            painter.setFont(font)
+            painter.setPen(self.palette().color(self.foregroundRole()))
+            painter.drawText(pixmap.rect(), Qt.AlignCenter, icon_name)
+            painter.end()
+            return QIcon(pixmap)
         pixmap = QPixmap(18, 18)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setPen(QPen(QColor("#1f2937"), 2))
-        if tool_name == "browse":
+        if icon_name == "pan_tool":
             painter.drawLine(9, 2, 9, 16)
             painter.drawLine(2, 9, 16, 9)
-        elif tool_name == "rectangle":
+        elif icon_name == "crop_square":
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(3, 4, 12, 10)
-        elif tool_name == "polygon":
-            painter.drawPolygon(QPolygonF([QPointF(3, 12), QPointF(7, 4), QPointF(14, 6), QPointF(12, 14)]))
         else:
             painter.drawLine(9, 2, 9, 16)
             painter.drawLine(2, 9, 16, 9)
@@ -244,8 +304,74 @@ class ImageSegmentationDialog(QDialog):
         painter.end()
         return QIcon(pixmap)
 
+    def _load_material_icon_font(self) -> str | None:
+        font_path = Path(__file__).resolve().parents[2] / "resources" / "fonts" / "MaterialIcons-Regular.ttf"
+        if not font_path.exists():
+            return None
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        if font_id < 0:
+            return None
+        families = QFontDatabase.applicationFontFamilies(font_id)
+        return families[0] if families else None
+
     def _set_dirty(self, value: bool = True) -> None:
         self._dirty = value
+
+    def _remove_hillshade_mode(self) -> None:
+        combo = self.render_settings.display_mode_combo
+        for index in range(combo.count() - 1, -1, -1):
+            if combo.itemText(index) == "晕渲地貌":
+                combo.removeItem(index)
+        if combo.currentText() == "晕渲地貌":
+            combo.setCurrentText("灰度")
+
+    def _show_tool_message(self, text: str) -> None:
+        QMessageBox.information(self, "提示", text)
+
+    def _load_render_preferences(self) -> None:
+        settings = self.project_manager.settings
+        self._set_display_mode(settings.value("render/display_mode", "灰度", type=str))
+        self.render_settings.set_stretch_mode(settings.value("render/stretch_mode", self.render_settings.STRETCH_MIN_MAX, type=str))
+        self.render_settings.reverse_check.setChecked(settings.value("render/reversed", False, type=bool))
+        self.render_settings.auto_range_check.setChecked(settings.value("render/auto_range", True, type=bool))
+        self.render_settings.set_value_range(
+            settings.value("render/value_min", 0.0, type=float),
+            settings.value("render/value_max", 1.0, type=float),
+        )
+        self.render_settings.set_gamma(settings.value("render/gamma", 1.0, type=float))
+        self.render_settings.gray_band_spin.setValue(settings.value("render/gray_band", 1, type=int))
+        self.render_settings.band_r_spin.setValue(settings.value("render/band_r", 1, type=int))
+        self.render_settings.band_g_spin.setValue(settings.value("render/band_g", 2, type=int))
+        self.render_settings.band_b_spin.setValue(settings.value("render/band_b", 3, type=int))
+        self.render_settings.percent_low_spin.setValue(settings.value("render/percent_low", 2.0, type=float))
+        self.render_settings.percent_high_spin.setValue(settings.value("render/percent_high", 98.0, type=float))
+        self.render_settings.std_dev_spin.setValue(settings.value("render/std_dev_n", 2.0, type=float))
+        self.colormap_combo.setCurrentText(settings.value("render/colormap", "gray", type=str))
+        self.on_render_settings_changed()
+
+    def _save_render_preferences(self) -> None:
+        settings = self.project_manager.settings
+        current = self.render_settings.get_all_settings()
+        settings.setValue("render/display_mode", current["display_mode"])
+        settings.setValue("render/stretch_mode", current["stretch_mode"])
+        settings.setValue("render/reversed", current["colormap_reversed"])
+        settings.setValue("render/auto_range", current["auto_range"])
+        settings.setValue("render/value_min", current["value_min"])
+        settings.setValue("render/value_max", current["value_max"])
+        settings.setValue("render/gamma", current["gamma"])
+        settings.setValue("render/gray_band", current["gray_band"])
+        settings.setValue("render/band_r", current["rgb_bands"][0])
+        settings.setValue("render/band_g", current["rgb_bands"][1])
+        settings.setValue("render/band_b", current["rgb_bands"][2])
+        settings.setValue("render/percent_low", current["percent_clip"][0])
+        settings.setValue("render/percent_high", current["percent_clip"][1])
+        settings.setValue("render/std_dev_n", current["std_dev_n"])
+        settings.setValue("render/colormap", self.colormap_combo.currentText())
+
+    def _set_display_mode(self, mode: str) -> None:
+        if mode not in {"灰度", "RGB"}:
+            mode = "灰度"
+        self.render_settings.display_mode_combo.setCurrentText(mode)
 
     def _replace_labels(self, labels) -> None:
         self.project.labels = labels[:]
@@ -260,9 +386,16 @@ class ImageSegmentationDialog(QDialog):
         self._apply_label_choice(label_id)
 
     def _apply_label_choice(self, label_id: int) -> None:
-        selected = self._selected_annotation()
-        if selected is not None and selected.label_id != label_id:
-            self.command_stack.push(UpdateLabelAssignmentCommand(selected.id, selected.label_id, int(label_id)))
+        selected_annotations = [
+            item for item in self.project.annotations
+            if item.id in self.tool_controller.selected_annotation_ids and item.label_id != label_id
+        ]
+        if selected_annotations:
+            commands = [
+                UpdateLabelAssignmentCommand(item.id, item.label_id, int(label_id))
+                for item in selected_annotations
+            ]
+            self.command_stack.push(BatchCommand(commands))
             self.tool_controller.set_annotations(self.project.annotations)
             self._set_dirty(True)
             self._refresh_canvas()
@@ -273,28 +406,71 @@ class ImageSegmentationDialog(QDialog):
         self.label_panel.blockSignals(True)
         self.label_panel.set_labels(self.project.labels, self.project.active_label_id)
         self.label_panel.blockSignals(False)
-        self.assign_label_combo.blockSignals(True)
-        self.assign_label_combo.clear()
-        for label in self.project.labels:
-            self.assign_label_combo.addItem(f"{label.name} ({label.shortcut})", label.id)
-        selected = self._selected_annotation()
-        if selected:
-            index = self.assign_label_combo.findData(selected.label_id)
-            if index >= 0:
-                self.assign_label_combo.setCurrentIndex(index)
-        self.assign_label_combo.blockSignals(False)
+
+    def on_colormap_changed(self, colormap_name: str) -> None:
+        if colormap_name.startswith("━"):
+            return
+        self._render_update_timer.start()
+
+    def on_suggest_colormap(self, colormap_name: str) -> None:
+        self.colormap_combo.setCurrentText(colormap_name)
+
+    def on_render_settings_changed(self) -> None:
+        self._render_update_timer.start()
+
+    def _apply_render_settings_update(self) -> None:
+        settings = self.render_settings.get_all_settings()
+        self.render_config.display_mode = settings["display_mode"]
+        self.render_config.gray_band = settings["gray_band"]
+        self.render_config.rgb_bands = tuple(settings["rgb_bands"])
+        self.render_config.gamma = settings["gamma"]
+        self.render_config.stretch_mode = settings["stretch_mode"]
+        self.render_config.percent_clip = tuple(settings["percent_clip"])
+        self.render_config.std_dev_n = settings["std_dev_n"]
+        self.render_config.auto_range = settings["auto_range"]
+        self.render_config.value_range = tuple(settings["value_range"])
+        self.render_config.colormap_reversed = settings["colormap_reversed"]
+        self.render_config.colormap_name = self.colormap_combo.currentText()
+        self.render_config.smooth_display = settings.get("smooth_display", False)
+        self._save_render_preferences()
+        if self.current_source is not None:
+            self.canvas.set_render_config(self.render_config)
+            self._refresh_canvas()
+
+    def _update_render_settings_bands(self) -> None:
+        if self.project.image_asset is None:
+            return
+        self.render_settings.set_num_bands(max(1, self.project.image_asset.band_count))
+
+    def _update_image_stats_to_render_settings(self) -> None:
+        if self.canvas.last_render is None:
+            return
+        arr = self.canvas.last_render.raw_array
+        if arr is None:
+            return
+        nodata_value = self.project.image_asset.nodata if self.project.image_asset else None
+        valid_mask = np.isfinite(arr)
+        if nodata_value is not None:
+            valid_mask = valid_mask & (arr != nodata_value)
+        if np.any(valid_mask):
+            valid_data = arr[valid_mask]
+            self.render_settings.set_image_stats(float(np.min(valid_data)), float(np.max(valid_data)))
 
     def open_image(self) -> None:
+        if not self._finish_node_edit_session():
+            return
         if not self._handle_pending_magic_session():
             return
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "打开图像",
-            "",
+            self._last_image_dir,
             "Images (*.jpg *.jpeg *.png *.tif *.tiff)",
         )
         if not file_path:
             return
+        self._last_image_dir = os.path.dirname(file_path)
+        self.project_manager.settings.setValue("last_image_dir", self._last_image_dir)
         self._load_image(file_path)
 
     def _load_image(self, file_path: str) -> None:
@@ -348,26 +524,36 @@ class ImageSegmentationDialog(QDialog):
             self.project.annotations = annotations
             self.project.active_label_id = active_label_id
         self.command_stack = CommandStack(self.project)
+        self._vertex_update_pending.clear()
+        self._clear_node_edit_session_state(clear_override=True)
         self.canvas.set_render_config(self.render_config)
         self.canvas.set_image_source(source)
         self.canvas.set_interaction_mode(self.tool_controller.active_tool)
         self.tool_controller.set_annotations(self.project.annotations)
         self.status_label.setText(f"{os.path.basename(meta.path)} | {meta.width} x {meta.height}")
+        self._update_render_settings_bands()
+        self._update_image_stats_to_render_settings()
+        self._apply_render_settings_update()
         self._replace_labels(self.project.labels)
         self._clear_magic_preview()
         self._refresh_canvas()
+        self.canvas.set_one_to_one()
 
     def open_project(self) -> None:
+        if not self._finish_node_edit_session():
+            return
         if not self._handle_pending_magic_session():
             return
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "打开项目",
-            "",
+            self._last_project_dir,
             f"Segmentation Project (*{self.project_manager.PROJECT_SUFFIX});;JSON (*.json)",
         )
         if not file_path:
             return
+        self._last_project_dir = os.path.dirname(file_path)
+        self.project_manager.settings.setValue("last_project_dir", self._last_project_dir)
         project = self.project_manager.load_project(file_path)
         self.project = project
         self.label_store.set_labels(project.labels)
@@ -390,12 +576,15 @@ class ImageSegmentationDialog(QDialog):
         self.layer_panel.image_check.setChecked(self.project.layer_visibility.get("image", True))
         self.layer_panel.annotation_check.setChecked(self.project.layer_visibility.get("annotations", True))
         self.layer_panel.raster_check.setChecked(self.project.layer_visibility.get("raster", True))
-        self.layer_panel.preview_check.setChecked(self.project.layer_visibility.get("preview", True))
+        self.layer_panel.preview_vector_check.setChecked(self.project.layer_visibility.get("preview_vector", True))
+        self.layer_panel.preview_mask_check.setChecked(self.project.layer_visibility.get("preview_mask", True))
         self._refresh_label_ui()
         self._refresh_canvas()
         self._set_dirty(False)
 
     def save_project(self) -> None:
+        if not self._finish_node_edit_session():
+            return
         if self.project.image_asset is None:
             QMessageBox.warning(self, "提示", "请先打开图像。")
             return
@@ -403,17 +592,25 @@ class ImageSegmentationDialog(QDialog):
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
                 "保存项目",
-                str(Path(self.project.image_asset.path).with_suffix(self.project_manager.PROJECT_SUFFIX)),
+                str(
+                    (
+                        Path(self._last_project_dir) / (Path(self.project.image_asset.path).stem + self.project_manager.PROJECT_SUFFIX)
+                    ) if self._last_project_dir else Path(self.project.image_asset.path).with_suffix(self.project_manager.PROJECT_SUFFIX)
+                ),
                 f"Segmentation Project (*{self.project_manager.PROJECT_SUFFIX})",
             )
             if not file_path:
                 return
             self.current_project_path = file_path
+        self._last_project_dir = os.path.dirname(self.current_project_path)
+        self.project_manager.settings.setValue("last_project_dir", self._last_project_dir)
         self.project_manager.save_project(self.project, self.current_project_path)
         self._set_dirty(False)
         QMessageBox.information(self, "保存成功", f"项目已保存到:\n{self.current_project_path}")
 
     def export_data(self) -> None:
+        if not self._finish_node_edit_session():
+            return
         if self.project.image_asset is None:
             return
         export_type, ok = QFileDialog.getSaveFileName(
@@ -442,22 +639,42 @@ class ImageSegmentationDialog(QDialog):
         QMessageBox.information(self, "导出成功", f"已导出到:\n{export_type}")
 
     def undo(self) -> None:
+        if not self._finish_node_edit_session():
+            return
         if self.command_stack.undo():
+            self._raster_overlay_override_annotations = None
             self.tool_controller.set_annotations(self.project.annotations)
             self._refresh_canvas()
+            self._set_dirty(True)
 
     def redo(self) -> None:
+        if not self._finish_node_edit_session():
+            return
         if self.command_stack.redo():
+            self._raster_overlay_override_annotations = None
             self.tool_controller.set_annotations(self.project.annotations)
             self._refresh_canvas()
+            self._set_dirty(True)
 
     def delete_selected(self) -> None:
-        selected = self._selected_annotation()
-        if selected is None:
+        if self.tool_controller.selected_vertex_index is not None:
+            updated = self.tool_controller.remove_selected_vertex()
+            if updated is not None:
+                self._set_dirty(True)
             return
-        self.command_stack.push(DeleteAnnotationCommand(selected))
+        if not self._finish_node_edit_session():
+            return
+        selected_items = [
+            item for item in self.project.annotations
+            if item.id in self.tool_controller.selected_annotation_ids
+        ]
+        if not selected_items:
+            return
+        self.command_stack.push(BatchCommand([DeleteAnnotationCommand(item) for item in selected_items]))
+        self._raster_overlay_override_annotations = None
         self.tool_controller.set_annotations(self.project.annotations)
         self.tool_controller.selected_annotation_id = None
+        self.tool_controller.selected_annotation_ids.clear()
         self._refresh_canvas()
         self._set_dirty(True)
 
@@ -470,7 +687,7 @@ class ImageSegmentationDialog(QDialog):
                 else:
                     self.canvas.update_draft(None)
         else:
-            if self.tool_controller.remove_selected_vertex():
+            if self.tool_controller.remove_selected_vertex() is not None:
                 self._set_dirty(True)
 
     def _enter_action(self) -> None:
@@ -482,6 +699,8 @@ class ImageSegmentationDialog(QDialog):
     def _escape_action(self) -> None:
         if self.tool_controller.active_tool == SegmentationToolController.TOOL_MAGIC_WAND and self._preview_mask is not None:
             self._clear_magic_preview()
+        elif self.tool_controller.selected_annotation_ids:
+            self._set_controller_selection(set())
         else:
             self.canvas.update_draft(None)
 
@@ -490,19 +709,21 @@ class ImageSegmentationDialog(QDialog):
 
     def _handle_mouse_release(self, payload) -> None:
         self.tool_controller.handle_release(payload)
-        if self._vertex_update_pending:
-            for annotation_id, updated in self._vertex_update_pending.items():
-                original = next((item for item in self.project.annotations if item.id == annotation_id), None)
-                if original is not None:
-                    self.command_stack.push(UpdateGeometryCommand(annotation_id, original, updated))
-            self._vertex_update_pending.clear()
-            self.tool_controller.set_annotations(self.project.annotations)
-            self._refresh_canvas()
-            self._set_dirty(True)
+        self.tool_controller.set_annotations(self.project.annotations)
+        self._refresh_canvas()
 
     def _on_tool_action_triggered(self, action: QAction) -> None:
         target = action.data()
         if not self._handle_pending_magic_session():
+            current = self.tool_controller.active_tool
+            for item in self.tool_action_group.actions():
+                if item.data() == current:
+                    item.blockSignals(True)
+                    item.setChecked(True)
+                    item.blockSignals(False)
+                    break
+            return
+        if target != self.tool_controller.active_tool and not self._finish_node_edit_session():
             current = self.tool_controller.active_tool
             for item in self.tool_action_group.actions():
                 if item.data() == current:
@@ -524,6 +745,7 @@ class ImageSegmentationDialog(QDialog):
             exterior=polygon_points,
             source_tool="polygon",
         )
+        self._raster_overlay_override_annotations = None
         self.command_stack.push(AddAnnotationCommand(annotation))
         self.tool_controller.set_annotations(self.project.annotations)
         self.tool_controller.selected_annotation_id = annotation.id
@@ -539,23 +761,43 @@ class ImageSegmentationDialog(QDialog):
             geom_type="rectangle",
             source_tool="rectangle",
         )
+        self._raster_overlay_override_annotations = None
         self.command_stack.push(AddAnnotationCommand(annotation))
         self.tool_controller.set_annotations(self.project.annotations)
         self.tool_controller.selected_annotation_id = annotation.id
         self._refresh_canvas()
         self._set_dirty(True)
 
-    def _on_selection_changed(self, annotation_id: str | None) -> None:
-        self.tool_controller.selected_annotation_id = annotation_id
+    def _on_selection_changed(self, selection) -> None:
+        selection_ids = set(selection or [])
+        previous_id = self._node_edit_session_annotation_id
+        next_single_id = next(iter(selection_ids), None) if len(selection_ids) == 1 else None
+        if (
+            not self._suspend_selection_sync
+            and previous_id is not None
+            and previous_id != next_single_id
+            and not self._finish_node_edit_session()
+        ):
+            self._set_controller_selection({previous_id})
+            return
+        self.tool_controller.selected_annotation_ids = selection_ids
+        self.tool_controller.selected_annotation_id = next(iter(selection_ids), None)
+        self.tool_controller.selected_vertex_index = None if len(selection_ids) != 1 else self.tool_controller.selected_vertex_index
+        if self.tool_controller.active_tool == SegmentationToolController.TOOL_BROWSE and len(selection_ids) == 1:
+            self._ensure_node_edit_session(self.tool_controller.selected_annotation_id)
+        else:
+            self._clear_node_edit_session_state()
         self._refresh_canvas()
         self._refresh_label_ui()
 
     def _on_geometry_changed(self, annotation_id: str, updated: AnnotationObject) -> None:
+        self._ensure_node_edit_session(annotation_id)
         self._vertex_update_pending[annotation_id] = updated.clone()
         self.project.annotations = [
             updated.clone() if item.id == annotation_id else item
             for item in self.project.annotations
         ]
+        self._node_edit_session_dirty = True
         self.tool_controller.set_annotations(self.project.annotations)
         self._refresh_canvas()
 
@@ -563,20 +805,30 @@ class ImageSegmentationDialog(QDialog):
         if draft_type == "clear":
             self.canvas.update_draft(None)
             return
-        self.canvas.update_draft(points)
+        if draft_type == "selection_box":
+            self.canvas.update_draft(points, color_name="#64748b", fill_alpha=10)
+        else:
+            self.canvas.update_draft(points, color_name=self._active_label_color())
 
     def _run_magic_wand_preview(self, x: int, y: int) -> None:
-        rendered = self.canvas.viewport_image()
-        last_render = self.canvas.last_render
-        if rendered is None or last_render is None:
+        if self.current_source is None or self.project.image_asset is None:
             return
-        win_x, win_y, win_w, win_h = last_render.source_window
-        if not (win_x <= x <= win_x + win_w and win_y <= y <= win_y + win_h):
+        full_width = self.project.image_asset.width
+        full_height = self.project.image_asset.height
+        if not (0 <= x < full_width and 0 <= y < full_height):
             return
-        seed_x = int((x - win_x) * rendered.shape[1] / max(win_w, 1))
-        seed_y = int((y - win_y) * rendered.shape[0] / max(win_h, 1))
-        preview = self.segmenter.run(rendered, (seed_x, seed_y), self.magic_panel.params())
-        mapped_mask, mapped_bbox = self._map_preview_to_image(preview, last_render, rendered.shape[1], rendered.shape[0], win_x, win_y, win_w, win_h)
+        native_window = self.current_source.read_window_native(0, 0, full_width, full_height)
+        native_rgb = render_base_rgb(
+            native_window,
+            self.render_config,
+            nodata_value=self.project.image_asset.nodata if self.project.image_asset else None,
+        )
+        seed_x = int(np.floor(x))
+        seed_y = int(np.floor(y))
+        preview = self.segmenter.run(native_rgb, (seed_x, seed_y), self.magic_panel.params())
+        bx, by, bw, bh = preview.bbox
+        mapped_bbox = preview.bbox
+        mapped_mask = preview.mask[by:by + bh, bx:bx + bw].astype(np.uint8) if bw > 0 and bh > 0 else None
         if mapped_mask is None or mapped_bbox is None:
             return
         if self.magic_panel.merge_preview_enabled() and self._preview_mask is not None and self._preview_bbox is not None:
@@ -609,8 +861,7 @@ class ImageSegmentationDialog(QDialog):
             self.preview_selection.polygon_preview = preview_polygons.polygon_preview
         self._last_magic_seed = (x, y)
         if self.preview_selection:
-            self.canvas.update_preview_mask(None, None)
-            self.canvas.update_preview_polygons(self.preview_selection.polygon_preview)
+            self._update_preview_display()
 
     def _schedule_magic_preview(self, _params) -> None:
         if self._last_magic_seed is None or self.tool_controller.active_tool != SegmentationToolController.TOOL_MAGIC_WAND:
@@ -627,8 +878,7 @@ class ImageSegmentationDialog(QDialog):
             self._preview_mask = None
             self._preview_bbox = None
             self.preview_selection = None
-            self.canvas.update_preview_mask(None, None)
-            self.canvas.update_preview_polygons([])
+            self._update_preview_display()
 
     def _confirm_magic_preview(self) -> None:
         if not self.preview_selection or self.project.active_label_id is None or self._preview_mask is None or self._preview_bbox is None:
@@ -644,6 +894,7 @@ class ImageSegmentationDialog(QDialog):
             return
         commands = self._build_magic_commit_commands(preview.polygon_preview)
         if commands:
+            self._raster_overlay_override = None
             self.command_stack.push(BatchCommand(commands))
         self.tool_controller.set_annotations(self.project.annotations)
         if preview.polygon_preview:
@@ -657,32 +908,16 @@ class ImageSegmentationDialog(QDialog):
         self._last_magic_seed = None
         self._preview_mask = None
         self._preview_bbox = None
-        self.canvas.update_preview_mask(None, None)
-        self.canvas.update_preview_polygons([])
+        self._update_preview_display()
         self._refresh_canvas()
 
     def _on_layer_visibility_changed(self, layer_name: str, visible: bool) -> None:
         self.project.layer_visibility[layer_name] = visible
         if layer_name == "image":
             self.canvas.image_item.setVisible(visible)
-        elif layer_name == "raster":
-            self.canvas.raster_item.setVisible(visible)
         elif layer_name == "preview":
             self.canvas.preview_item.setVisible(visible)
-        else:
-            self._refresh_canvas()
-
-    def _assign_selected_label(self, _index: int) -> None:
-        annotation = self._selected_annotation()
-        if annotation is None:
-            return
-        new_label_id = self.assign_label_combo.currentData()
-        if new_label_id is None or new_label_id == annotation.label_id:
-            return
-        self.command_stack.push(UpdateLabelAssignmentCommand(annotation.id, annotation.label_id, int(new_label_id)))
-        self.tool_controller.set_annotations(self.project.annotations)
         self._refresh_canvas()
-        self._set_dirty(True)
 
     def _selected_annotation(self) -> AnnotationObject | None:
         selected_id = self.tool_controller.selected_annotation_id
@@ -693,12 +928,109 @@ class ImageSegmentationDialog(QDialog):
                 return annotation
         return None
 
+    def _find_annotation_by_id(self, annotation_id: str | None) -> AnnotationObject | None:
+        if annotation_id is None:
+            return None
+        for annotation in self.project.annotations:
+            if annotation.id == annotation_id:
+                return annotation
+        return None
+
+    def _set_controller_selection(self, selection_ids: set[str]) -> None:
+        self._suspend_selection_sync = True
+        self.tool_controller.selected_annotation_ids = set(selection_ids)
+        self.tool_controller.selected_annotation_id = next(iter(selection_ids), None)
+        if len(selection_ids) != 1:
+            self.tool_controller.selected_vertex_index = None
+        self.tool_controller.selection_changed.emit(set(selection_ids))
+        self._suspend_selection_sync = False
+
+    def _clear_node_edit_session_state(self, clear_override: bool = False) -> None:
+        self._node_edit_session_annotation_id = None
+        self._node_edit_original_annotation = None
+        self._node_edit_session_dirty = False
+        self._node_edit_mask_snapshot_annotations = []
+        self._vertex_update_pending.clear()
+        if clear_override:
+            self._raster_overlay_override_annotations = None
+
+    def _ensure_node_edit_session(self, annotation_id: str | None) -> None:
+        if annotation_id is None:
+            return
+        if self._node_edit_session_annotation_id == annotation_id and self._node_edit_original_annotation is not None:
+            return
+        annotation = self._find_annotation_by_id(annotation_id)
+        if annotation is None:
+            return
+        label_lookup = {label.id: label for label in self.project.labels}
+        self._node_edit_session_annotation_id = annotation_id
+        self._node_edit_original_annotation = annotation.clone()
+        self._node_edit_session_dirty = False
+        self._node_edit_mask_snapshot_annotations = [item.clone() for item in self.project.annotations]
+
+    def _restore_annotation(self, annotation: AnnotationObject) -> None:
+        self.project.annotations = [
+            annotation.clone() if item.id == annotation.id else item
+            for item in self.project.annotations
+        ]
+        self.tool_controller.set_annotations(self.project.annotations)
+
+    def _finish_node_edit_session(self) -> bool:
+        annotation_id = self._node_edit_session_annotation_id
+        original = self._node_edit_original_annotation
+        if annotation_id is None or original is None:
+            self._clear_node_edit_session_state()
+            return True
+        current = self._find_annotation_by_id(annotation_id)
+        if current is None:
+            self._clear_node_edit_session_state()
+            return True
+        if not self._node_edit_session_dirty or current.to_dict() == original.to_dict():
+            self._clear_node_edit_session_state()
+            return True
+        save_reply = QMessageBox.question(
+            self,
+            "保存节点编辑",
+            "检测到当前对象的节点已编辑。是否保存矢量修改？\n选择“否”将恢复编辑前的几何。",
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.Yes,
+        )
+        if save_reply == QMessageBox.Cancel:
+            return False
+        if save_reply == QMessageBox.No:
+            self._restore_annotation(original)
+            self._raster_overlay_override_annotations = [item.clone() for item in self._node_edit_mask_snapshot_annotations]
+            self._clear_node_edit_session_state()
+            self._refresh_canvas()
+            return True
+        self.command_stack.push(UpdateGeometryCommand(annotation_id, original, current))
+        self._set_dirty(True)
+        mask_reply = QMessageBox.question(
+            self,
+            "更新 Mask",
+            "是否根据保存后的矢量对象更新当前 Mask 显示？\n选择“否”将保留编辑前的 Mask 结果。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        self._raster_overlay_override_annotations = None if mask_reply == QMessageBox.Yes else [item.clone() for item in self._node_edit_mask_snapshot_annotations]
+        self.tool_controller.set_annotations(self.project.annotations)
+        self._clear_node_edit_session_state()
+        self._refresh_canvas()
+        return True
+
     def _refresh_canvas(self) -> None:
         label_lookup = {label.id: label for label in self.project.labels}
         annotations = self.project.annotations if self.project.layer_visibility.get("annotations", True) else []
-        self.canvas.update_annotations(annotations, label_lookup, self.tool_controller.selected_annotation_id)
+        self.canvas.update_annotations(
+            annotations,
+            label_lookup,
+            self.tool_controller.selected_annotation_ids,
+            editable_annotation_id=self.tool_controller.editable_annotation_id(),
+            active_vertex=self.tool_controller.selected_vertex_index,
+        )
         raster_rgba, raster_bbox = self._current_raster_overlay(label_lookup)
         self.canvas.update_raster_mask(raster_rgba, raster_bbox)
+        self._update_preview_display()
 
     def _autosave_if_needed(self) -> None:
         if not self._dirty:
@@ -707,13 +1039,18 @@ class ImageSegmentationDialog(QDialog):
             self.project_manager.save_autosave(self.project, self.current_project_path)
 
     def _current_raster_overlay(self, label_lookup):
+        if self._raster_overlay_override_annotations is not None:
+            return self._build_raster_overlay_for_annotations(self._raster_overlay_override_annotations, label_lookup)
+        return self._build_raster_overlay_for_annotations(self.project.annotations, label_lookup)
+
+    def _build_raster_overlay_for_annotations(self, annotations_source, label_lookup):
         if not self.project.image_asset or not self.canvas.last_render or not self.project.layer_visibility.get("raster", True):
             return None, None
         x0, y0, width, height = self.canvas.last_render.source_window
         if width <= 0 or height <= 0:
             return None, None
         clipped = []
-        for annotation in self.project.annotations:
+        for annotation in annotations_source:
             if annotation.bbox is None:
                 continue
             min_x, min_y, max_x, max_y = annotation.bbox
@@ -727,6 +1064,15 @@ class ImageSegmentationDialog(QDialog):
             return None, None
         raster_mask = GeometryService.rasterize_annotations(clipped, width, height)
         return GeometryService.colorize_mask(raster_mask, label_lookup), (x0, y0, width, height)
+
+    def _on_view_state_changed(self, _state) -> None:
+        if self.project.image_asset is None:
+            return
+        self._update_image_stats_to_render_settings()
+        label_lookup = {label.id: label for label in self.project.labels}
+        raster_rgba, raster_bbox = self._current_raster_overlay(label_lookup)
+        self.canvas.update_raster_mask(raster_rgba, raster_bbox)
+        self._update_preview_display()
 
     def _build_preview_from_mask(self, mask, bbox, label_id: int | None = None, source_tool: str = "magic_wand_preview"):
         if mask is None or bbox is None:
@@ -757,7 +1103,7 @@ class ImageSegmentationDialog(QDialog):
         reply = QMessageBox.question(
             self,
             "未确认的魔法棒结果",
-            "当前存在未确认的魔法棒结果。是否先应用？\n选择“否”将取消当前结果。",
+            "当前存在未确认的魔法棒结果。是否先应用？\n选择“No”将取消当前结果。",
             QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
             QMessageBox.Yes,
         )
@@ -822,11 +1168,11 @@ class ImageSegmentationDialog(QDialog):
         if not self.project.image_asset:
             self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: -")
             return
-        row = int(round(payload.y))
-        col = int(round(payload.x))
+        row = int(np.floor(payload.y))
+        col = int(np.floor(payload.x))
         if 0 <= row < self.project.image_asset.height and 0 <= col < self.project.image_asset.width:
-            rendered_rgb = self.canvas.rendered_rgb_at(col, row)
             original_value = self.current_source.read_pixel(col, row) if self.current_source else None
+            rendered_rgb = self.canvas.rendered_rgb_at(col, row) or self._rendered_rgb_from_original(original_value)
             rgb_text = (
                 f"({rendered_rgb[0]}, {rendered_rgb[1]}, {rendered_rgb[2]})"
                 if rendered_rgb is not None else "-"
@@ -840,3 +1186,67 @@ class ImageSegmentationDialog(QDialog):
             )
         else:
             self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: -")
+
+    def _rendered_rgb_from_original(self, original_value):
+        if original_value is None:
+            return None
+        if isinstance(original_value, list):
+            raw = np.asarray(original_value).reshape(1, 1, -1)
+        else:
+            raw = np.asarray([[original_value]])
+        rgb = render_base_rgb(raw, self.render_config, nodata_value=self.project.image_asset.nodata if self.project.image_asset else None)
+        if rgb.ndim != 3 or rgb.shape[2] < 3:
+            return None
+        return [int(rgb[0, 0, 0]), int(rgb[0, 0, 1]), int(rgb[0, 0, 2])]
+
+    def clear_all_annotations(self) -> None:
+        if not self.project.annotations:
+            return
+        reply = QMessageBox.question(
+            self,
+            "清空绘制",
+            "确定要删除当前所有绘制的矢量对象吗？此操作可撤销。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        if not self._finish_node_edit_session():
+            return
+        commands = [DeleteAnnotationCommand(annotation) for annotation in self.project.annotations]
+        if commands:
+            self._raster_overlay_override_annotations = None
+            self.command_stack.push(BatchCommand(commands))
+            self.tool_controller.set_annotations(self.project.annotations)
+            self.tool_controller.selected_annotation_id = None
+            self._refresh_canvas()
+            self._set_dirty(True)
+
+    def _select_all_annotations(self) -> None:
+        self.tool_controller.select_all()
+
+    def _active_label_color(self) -> str:
+        for label in self.project.labels:
+            if label.id == self.project.active_label_id:
+                return label.color
+        return "#ffd43b"
+
+    def _update_preview_display(self) -> None:
+        color = self._active_label_color()
+        if self.project.layer_visibility.get("preview_mask", True) and self._preview_mask is not None and self._preview_bbox is not None:
+            self.canvas.update_preview_mask(self._preview_mask, self._preview_bbox, color)
+        else:
+            self.canvas.update_preview_mask(None, None, color)
+        if self.project.layer_visibility.get("preview_vector", True) and self.preview_selection is not None:
+            self.canvas.update_preview_polygons(self.preview_selection.polygon_preview, color)
+        else:
+            self.canvas.update_preview_polygons([], color)
+
+    def closeEvent(self, event) -> None:
+        if not self._finish_node_edit_session():
+            event.ignore()
+            return
+        if not self._handle_pending_magic_session():
+            event.ignore()
+            return
+        super().closeEvent(event)

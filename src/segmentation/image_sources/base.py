@@ -19,5 +19,8 @@ class BaseImageSource:
     def read_pixel(self, x: int, y: int):
         raise NotImplementedError
 
+    def read_window_native(self, x: int, y: int, width: int, height: int):
+        raise NotImplementedError
+
     def build_overviews(self) -> tuple[bool, list[int]]:
         return False, []

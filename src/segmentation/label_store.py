@@ -10,7 +10,7 @@ from .models import LabelClass
 
 
 DEFAULT_LABELS = [
-    ("类别 1", "#ff6b6b", "1"),
+    ("类别 1", "#1d4ed8", "1"),
 ]
 
 

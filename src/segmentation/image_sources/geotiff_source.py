@@ -91,7 +91,7 @@ class GeoTiffImageSource(BaseImageSource):
             raw = arrays[0]
         else:
             raw = np.stack(arrays, axis=-1)
-        display_rgb = render_base_rgb(raw, render_config)
+        display_rgb = render_base_rgb(raw, render_config, nodata_value=self._metadata.nodata)
 
         return RenderTileResult(
             raw_array=raw,
@@ -112,3 +112,16 @@ class GeoTiffImageSource(BaseImageSource):
         if len(values) == 1:
             return values[0]
         return values
+
+    def read_window_native(self, x: int, y: int, width: int, height: int):
+        x0 = max(0, int(x))
+        y0 = max(0, int(y))
+        width = max(1, int(min(self._metadata.width - x0, width)))
+        height = max(1, int(min(self._metadata.height - y0, height)))
+        arrays = []
+        for band_index in range(1, self._metadata.band_count + 1):
+            band = self.dataset.GetRasterBand(band_index)
+            arrays.append(band.ReadAsArray(x0, y0, width, height))
+        if len(arrays) == 1:
+            return arrays[0]
+        return np.stack(arrays, axis=-1)

@@ -77,6 +77,8 @@ class MagicWandSegmenter(BaseSegmenter):
 
     def _grow_region(self, image: np.ndarray, seed_point: tuple[int, int], params: MagicWandParams) -> np.ndarray:
         threshold = int(max(0.0, float(params.tolerance)))
+        if threshold > 0:
+            threshold += 1
         return self._grow_region_flood_fill(image, seed_point, threshold, params.connectivity)
 
     def _grow_region_flood_fill(self, image: np.ndarray, seed_point: tuple[int, int], threshold: int, connectivity: int) -> np.ndarray:

@@ -147,6 +147,8 @@ class DisplayState:
     show_annotations: bool = True
     show_raster: bool = True
     show_preview: bool = True
+    show_preview_vector: bool = True
+    show_preview_mask: bool = True
 
 
 @dataclass
@@ -164,6 +166,8 @@ class SegmentationProject:
             "annotations": True,
             "raster": True,
             "preview": True,
+            "preview_vector": True,
+            "preview_mask": True,
         }
     )
     export_prefs: dict[str, Any] = field(default_factory=dict)

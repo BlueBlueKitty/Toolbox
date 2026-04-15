@@ -43,7 +43,7 @@ class StandardImageSource(BaseImageSource):
         return self._metadata
 
     def render(self, request: RenderRequest, render_config: SegmentationRenderConfig) -> RenderTileResult:
-        display_rgb = render_base_rgb(self._array, render_config)
+        display_rgb = render_base_rgb(self._array, render_config, nodata_value=self._metadata.nodata)
         return RenderTileResult(
             raw_array=self._array,
             display_rgb=display_rgb,
@@ -59,3 +59,10 @@ class StandardImageSource(BaseImageSource):
         if hasattr(value, "tolist"):
             return value.tolist()
         return value.item() if hasattr(value, "item") else value
+
+    def read_window_native(self, x: int, y: int, width: int, height: int):
+        x0 = max(0, int(x))
+        y0 = max(0, int(y))
+        x1 = min(self._array.shape[1], x0 + max(1, int(width)))
+        y1 = min(self._array.shape[0], y0 + max(1, int(height)))
+        return self._array[y0:y1, x0:x1].copy()
