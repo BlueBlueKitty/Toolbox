@@ -238,3 +238,5 @@ installer.nsi
 
 ref_repos/
 AGENTS.md
+
+.omx/

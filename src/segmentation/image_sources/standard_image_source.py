@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image
 
 from ..models import ImageAsset, RenderTileResult
+from ..rendering import SegmentationRenderConfig, render_base_rgb
 from .base import BaseImageSource
 from .render_request import RenderRequest
 
@@ -41,15 +42,20 @@ class StandardImageSource(BaseImageSource):
     def metadata(self) -> ImageAsset:
         return self._metadata
 
-    def render(self, request: RenderRequest) -> RenderTileResult:
-        x0 = max(0, int(request.x))
-        y0 = max(0, int(request.y))
-        x1 = min(self._array.shape[1], int(request.x + request.width))
-        y1 = min(self._array.shape[0], int(request.y + request.height))
-        view = self._array[y0:y1, x0:x1]
+    def render(self, request: RenderRequest, render_config: SegmentationRenderConfig) -> RenderTileResult:
+        display_rgb = render_base_rgb(self._array, render_config)
         return RenderTileResult(
-            array=view,
-            image_rect=(x0, y0, max(x1 - x0, 1), max(y1 - y0, 1)),
+            raw_array=self._array,
+            display_rgb=display_rgb,
+            image_rect=(0, 0, self._array.shape[1], self._array.shape[0]),
             overview_level=None,
-            source_window=(x0, y0, max(x1 - x0, 1), max(y1 - y0, 1)),
+            source_window=(0, 0, self._array.shape[1], self._array.shape[0]),
         )
+
+    def read_pixel(self, x: int, y: int):
+        if not (0 <= x < self._array.shape[1] and 0 <= y < self._array.shape[0]):
+            return None
+        value = self._array[y, x]
+        if hasattr(value, "tolist"):
+            return value.tolist()
+        return value.item() if hasattr(value, "item") else value

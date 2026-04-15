@@ -1,10 +1,8 @@
 """
-MVP 魔法棒算法。
+基于种子点颜色相似性与连通性的区域生长魔法棒。
 """
 
 from __future__ import annotations
-
-from collections import deque
 
 import numpy as np
 
@@ -13,7 +11,6 @@ try:
 except Exception:  # pragma: no cover
     cv2 = None
 
-from ..geometry_service import GeometryService
 from ..models import MagicWandParams, PreviewSelection
 from .base import BaseSegmenter
 
@@ -28,110 +25,79 @@ class MagicWandSegmenter(BaseSegmenter):
         if cv2 is None:
             raise RuntimeError("魔法棒需要 opencv-python 依赖")
 
-        if image.ndim == 3:
-            working = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_RGB2GRAY)
-        else:
-            working = image.astype(np.float32)
-        working = self._normalize(working)
-        mask = self._region_grow(working, seed_point, params)
+        height, width = image.shape[:2]
+        sx, sy = seed_point
+        if not (0 <= sx < width and 0 <= sy < height):
+            return PreviewSelection(seed_point, params, (0, 0, 0, 0), np.zeros((1, 1), dtype=np.uint8))
 
+        working = self._prepare_image(image, params)
+        mask = self._grow_region(working, seed_point, params)
+        area = int(mask.sum())
+        if area < params.min_area:
+            return PreviewSelection(seed_point, params, (0, 0, 0, 0), np.zeros((1, 1), dtype=np.uint8))
+
+        alpha_mask = (mask * 255).astype(np.uint8)
         if params.fill_holes:
-            mask = self._fill_holes(mask)
-        if params.smooth_radius > 0:
-            kernel_size = params.smooth_radius * 2 + 1
-            kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+            alpha_mask = self._fill_holes(alpha_mask)
 
-        ys, xs = np.where(mask > 0)
+        ys, xs = np.where(alpha_mask > 0)
         if len(xs) == 0 or len(ys) == 0:
-            bbox = (0, 0, 0, 0)
-            contours = []
-            polygon_preview = []
-        else:
-            x0, x1 = int(xs.min()), int(xs.max())
-            y0, y1 = int(ys.min()), int(ys.max())
-            bbox = (x0, y0, x1 - x0 + 1, y1 - y0 + 1)
-            cropped = mask[y0 : y1 + 1, x0 : x1 + 1]
-            polygon_preview = GeometryService.mask_to_annotations(
-                cropped,
-                bbox,
-                label_id=1,
-                min_area=params.min_area,
-                smooth_radius=0,
-                source_tool="magic_wand_preview",
-            )
-            contours = [annotation.exterior for annotation in polygon_preview]
+            return PreviewSelection(seed_point, params, (0, 0, 0, 0), np.zeros((1, 1), dtype=np.uint8))
 
+        x0, x1 = int(xs.min()), int(xs.max())
+        y0, y1 = int(ys.min()), int(ys.max())
+        bbox = (x0, y0, x1 - x0 + 1, y1 - y0 + 1)
         return PreviewSelection(
             seed_point=seed_point,
             params=params,
             bbox=bbox,
-            mask=mask,
-            contours=contours,
-            polygon_preview=polygon_preview,
+            mask=alpha_mask,
+            contours=[],
+            polygon_preview=[],
         )
 
-    def _normalize(self, image: np.ndarray) -> np.ndarray:
-        image = image.astype(np.float32)
-        min_val = float(np.nanmin(image))
-        max_val = float(np.nanmax(image))
-        if max_val - min_val < 1e-6:
-            return np.zeros_like(image, dtype=np.uint8)
-        return (((image - min_val) / (max_val - min_val)) * 255).astype(np.uint8)
-
-    def _region_grow(
-        self,
-        image: np.ndarray,
-        seed_point: tuple[int, int],
-        params: MagicWandParams,
-    ) -> np.ndarray:
-        height, width = image.shape[:2]
-        sx, sy = seed_point
-        if not (0 <= sx < width and 0 <= sy < height):
-            return np.zeros((height, width), dtype=np.uint8)
-
-        tolerance = max(0, int(params.tolerance))
-        seed_value = int(image[sy, sx])
-        mask = np.zeros((height, width), dtype=np.uint8)
-        queue = deque([(sx, sy)])
-        mask[sy, sx] = 1
-        if params.connectivity == 4:
-            directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    def _prepare_image(self, image: np.ndarray, params: MagicWandParams) -> np.ndarray:
+        if image.ndim == 2:
+            base = image[..., None]
         else:
-            directions = [
-                (1, 0), (-1, 0), (0, 1), (0, -1),
-                (1, 1), (1, -1), (-1, 1), (-1, -1),
-            ]
+            base = image
 
-        while queue:
-            x, y = queue.popleft()
-            for dx, dy in directions:
-                nx, ny = x + dx, y + dy
-                if not (0 <= nx < width and 0 <= ny < height):
-                    continue
-                if mask[ny, nx]:
-                    continue
-                if abs(int(image[ny, nx]) - seed_value) <= tolerance:
-                    mask[ny, nx] = 1
-                    queue.append((nx, ny))
+        mode = params.similarity_mode
+        rgb = base[..., :3] if base.shape[-1] >= 3 else np.repeat(base[..., :1], 3, axis=-1)
+        if mode == "rgb":
+            return rgb
+        if mode in {"r", "g", "b"}:
+            index = {"r": 0, "g": 1, "b": 2}[mode]
+            return rgb[..., index:index + 1]
+        if mode in {"h", "s", "v"}:
+            hsv = cv2.cvtColor(np.ascontiguousarray(rgb.astype(np.uint8)), cv2.COLOR_RGB2HSV)
+            index = {"h": 0, "s": 1, "v": 2}[mode]
+            return hsv[..., index:index + 1]
+        return rgb
 
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, params.connectivity)
-        filtered = np.zeros_like(mask)
-        seed_component = labels[sy, sx]
-        for label in range(1, num_labels):
-            area = stats[label, cv2.CC_STAT_AREA]
-            if area < params.min_area:
-                continue
-            if params.seed_only and label != seed_component:
-                continue
-            filtered[labels == label] = 1
-        return filtered
+    def _grow_region(self, image: np.ndarray, seed_point: tuple[int, int], params: MagicWandParams) -> np.ndarray:
+        threshold = int(max(0.0, float(params.tolerance)))
+        return self._grow_region_flood_fill(image, seed_point, threshold, params.connectivity)
 
-    def _fill_holes(self, mask: np.ndarray) -> np.ndarray:
-        flood = mask.copy().astype(np.uint8)
+    def _grow_region_flood_fill(self, image: np.ndarray, seed_point: tuple[int, int], threshold: int, connectivity: int) -> np.ndarray:
+        height, width = image.shape[:2]
+        work = np.ascontiguousarray(image.astype(np.uint8))
+        flood_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
+        flags = connectivity | cv2.FLOODFILL_MASK_ONLY | cv2.FLOODFILL_FIXED_RANGE | (255 << 8)
+        if work.ndim == 2 or (work.ndim == 3 and work.shape[2] == 1):
+            diff = threshold
+        else:
+            channels = work.shape[2]
+            diff = tuple([threshold] * channels)
+        cv2.floodFill(work.copy(), flood_mask, seedPoint=seed_point, newVal=0, loDiff=diff, upDiff=diff, flags=flags)
+        return (flood_mask[1:-1, 1:-1] > 0).astype(np.uint8)
+
+    def _fill_holes(self, alpha_mask: np.ndarray) -> np.ndarray:
+        binary = (alpha_mask > 0).astype(np.uint8)
+        flood = binary.copy()
         height, width = flood.shape[:2]
         fill_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
         cv2.floodFill(flood, fill_mask, (0, 0), 1)
-        inverted = 1 - flood
-        return np.maximum(mask, inverted).astype(np.uint8)
+        holes = 1 - flood
+        merged = np.maximum(binary, holes)
+        return np.where(merged > 0, 255, 0).astype(np.uint8)

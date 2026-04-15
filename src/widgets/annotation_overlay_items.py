@@ -51,7 +51,7 @@ class PolygonOverlayItem:
 
 class PreviewMaskItem(pg.ImageItem):
     def __init__(self):
-        super().__init__()
+        super().__init__(axisOrder="row-major")
         self.setOpacity(0.35)
 
     def update_mask(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None) -> None:
@@ -63,3 +63,31 @@ class PreviewMaskItem(pg.ImageItem):
         self.setImage(rgba, autoLevels=False)
         x, y, width, height = bbox
         self.setRect(pg.QtCore.QRectF(x, y, width, height))
+
+
+class DraftOverlayItem:
+    def __init__(self):
+        self.path_item = QGraphicsPathItem()
+        pen = QPen(QColor("#ffd43b"))
+        pen.setWidthF(2.0)
+        pen.setStyle(pg.QtCore.Qt.DashLine)
+        pen.setCosmetic(True)
+        self.path_item.setPen(pen)
+        self.path_item.setBrush(QBrush(QColor(255, 212, 59, 40)))
+        self.scatter = pg.ScatterPlotItem()
+        self.scatter.setBrush(pg.mkBrush("#ffd43b"))
+        self.scatter.setPen(pg.mkPen("#ffffff", width=1.0))
+        self.scatter.setSize(7)
+
+    def update_geometry(self, points: list[list[float]] | None) -> None:
+        path = QPainterPath()
+        if points:
+            path.moveTo(points[0][0], points[0][1])
+            for x, y in points[1:]:
+                path.lineTo(x, y)
+        self.path_item.setPath(path)
+        if points:
+            pts = np.array(points, dtype=float)
+            self.scatter.setData(pos=pts)
+        else:
+            self.scatter.setData(pos=np.empty((0, 2)))

@@ -56,7 +56,8 @@ class ViewportState:
 
 @dataclass
 class RenderTileResult:
-    array: Any
+    raw_array: Any
+    display_rgb: Any
     image_rect: tuple[float, float, float, float]
     overview_level: Optional[OverviewInfo]
     source_window: tuple[int, int, int, int]
@@ -122,9 +123,10 @@ class MagicWandParams:
     tolerance: int = 15
     connectivity: int = 8
     min_area: int = 16
-    smooth_radius: int = 2
-    fill_holes: bool = True
-    seed_only: bool = True
+    similarity_mode: str = "rgba"
+    fill_holes: bool = False
+    simplify_polygon: bool = True
+    vector_smoothness: int = 2
 
 
 @dataclass
@@ -143,6 +145,7 @@ class DisplayState:
     center: tuple[float, float] = (0.0, 0.0)
     show_image: bool = True
     show_annotations: bool = True
+    show_raster: bool = True
     show_preview: bool = True
 
 
@@ -159,6 +162,7 @@ class SegmentationProject:
         default_factory=lambda: {
             "image": True,
             "annotations": True,
+            "raster": True,
             "preview": True,
         }
     )

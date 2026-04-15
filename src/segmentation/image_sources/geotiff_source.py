@@ -10,6 +10,7 @@ import numpy as np
 from osgeo import gdal
 
 from ..models import ImageAsset, RenderTileResult
+from ..rendering import SegmentationRenderConfig, render_base_rgb
 from .base import BaseImageSource
 from .overview_manager import build_overviews, choose_overview_for_scale, detect_overviews
 from .render_request import RenderRequest
@@ -56,7 +57,7 @@ class GeoTiffImageSource(BaseImageSource):
             self._refresh_metadata()
         return success, levels
 
-    def render(self, request: RenderRequest) -> RenderTileResult:
+    def render(self, request: RenderRequest, render_config: SegmentationRenderConfig) -> RenderTileResult:
         x0 = max(0, int(request.x))
         y0 = max(0, int(request.y))
         width = max(1, int(min(self._metadata.width - x0, request.width)))
@@ -87,13 +88,27 @@ class GeoTiffImageSource(BaseImageSource):
             arrays.append(array)
 
         if len(arrays) == 1:
-            display = arrays[0]
+            raw = arrays[0]
         else:
-            display = np.stack(arrays, axis=-1)
+            raw = np.stack(arrays, axis=-1)
+        display_rgb = render_base_rgb(raw, render_config)
 
         return RenderTileResult(
-            array=display,
+            raw_array=raw,
+            display_rgb=display_rgb,
             image_rect=(x0, y0, width, height),
             overview_level=overview,
             source_window=(x0, y0, width, height),
         )
+
+    def read_pixel(self, x: int, y: int):
+        if not (0 <= x < self._metadata.width and 0 <= y < self._metadata.height):
+            return None
+        values = []
+        for band_index in range(1, self._metadata.band_count + 1):
+            band = self.dataset.GetRasterBand(band_index)
+            value = band.ReadAsArray(x, y, 1, 1)[0, 0]
+            values.append(value.item() if hasattr(value, "item") else value)
+        if len(values) == 1:
+            return values[0]
+        return values

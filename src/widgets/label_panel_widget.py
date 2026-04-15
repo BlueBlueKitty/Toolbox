@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QGroupBox,
@@ -27,6 +28,17 @@ class LabelPanelWidget(QGroupBox):
         super().__init__("标签", parent)
         layout = QVBoxLayout(self)
         self.list_widget = QListWidget()
+        self.list_widget.setStyleSheet("""
+            QListWidget::item {
+                padding: 6px 8px;
+                border-radius: 4px;
+            }
+            QListWidget::item:selected {
+                background: #dbeafe;
+                color: #1d4ed8;
+                font-weight: 700;
+            }
+        """)
         layout.addWidget(self.list_widget)
         button_row = QHBoxLayout()
         self.add_button = QPushButton("新增")
@@ -41,15 +53,19 @@ class LabelPanelWidget(QGroupBox):
 
     def set_labels(self, labels: list[LabelClass], active_label_id: int | None = None) -> None:
         self._labels = labels[:]
+        self.list_widget.blockSignals(True)
         self.list_widget.clear()
         current_row = 0
         for index, label in enumerate(labels):
-            item = QListWidgetItem(f"{label.shortcut}  {label.name}  {label.color}")
+            item = QListWidgetItem(f"{label.shortcut}  {label.name}")
+            item.setIcon(self._make_color_icon(label.color))
+            item.setToolTip(f"颜色: {label.color}")
             self.list_widget.addItem(item)
             if active_label_id == label.id:
                 current_row = index
         if labels:
             self.list_widget.setCurrentRow(current_row)
+        self.list_widget.blockSignals(False)
 
     def _on_current_changed(self, row: int) -> None:
         if 0 <= row < len(self._labels):
@@ -89,3 +105,8 @@ class LabelPanelWidget(QGroupBox):
         self._labels[row] = LabelClass(label.id, name.strip(), color_name, shortcut.strip(), label.visible, label.locked)
         self.labels_changed.emit(self._labels[:])
         self.set_labels(self._labels, label.id)
+
+    def _make_color_icon(self, color_name: str) -> QIcon:
+        pixmap = QPixmap(14, 14)
+        pixmap.fill(QColor(color_name))
+        return QIcon(pixmap)

@@ -13,17 +13,19 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 import pyqtgraph as pg
 
 from src.segmentation.image_sources import BaseImageSource, RenderRequest
+from src.segmentation.image_sources.geotiff_source import GeoTiffImageSource
+from src.segmentation.rendering import default_render_config
 from src.segmentation.models import AnnotationObject, RenderTileResult, ViewportState
-from .annotation_overlay_items import PolygonOverlayItem, PreviewMaskItem
+from .annotation_overlay_items import DraftOverlayItem, PolygonOverlayItem, PreviewMaskItem
 
 
 @dataclass
 class CanvasMousePayload:
     x: float
     y: float
-    button: int
-    buttons: int
-    modifiers: int
+    button: Qt.MouseButton
+    buttons: Qt.MouseButtons
+    modifiers: Qt.KeyboardModifiers
     double_click: bool = False
 
 
@@ -42,25 +44,35 @@ class SegmentationPgView(QWidget):
         layout.addWidget(self.graphics)
 
         self.view_box = self.graphics.addViewBox(lockAspect=False, enableMouse=True)
-        self.view_box.invertY(False)
+        self.view_box.invertY(True)
         self.view_box.setAspectLocked(False)
         self.view_box.setMouseMode(pg.ViewBox.PanMode)
         self.image_item = pg.ImageItem(axisOrder="row-major")
+        self.raster_item = pg.ImageItem(axisOrder="row-major")
         self.preview_item = PreviewMaskItem()
+        self.draft_item = DraftOverlayItem()
         self.view_box.addItem(self.image_item)
+        self.view_box.addItem(self.raster_item)
         self.view_box.addItem(self.preview_item)
+        self.view_box.addItem(self.draft_item.scatter)
+        self.draft_item.path_item.setParentItem(self.view_box.childGroup)
+        self.raster_item.setOpacity(0.45)
 
         self.source: BaseImageSource | None = None
         self.last_render: RenderTileResult | None = None
+        self.render_config = default_render_config()
         self._overlay_items: dict[str, PolygonOverlayItem] = {}
+        self._dynamic_source = False
+        self._last_request_signature = None
 
         self._refresh_timer = QTimer(self)
-        self._refresh_timer.setInterval(50)
+        self._refresh_timer.setInterval(120)
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.timeout.connect(self.refresh_view)
-        self.view_box.sigRangeChanged.connect(lambda *_: self._refresh_timer.start())
+        self.view_box.sigRangeChanged.connect(self._on_view_range_changed)
 
         self.graphics.viewport().installEventFilter(self)
+        self.graphics.viewport().setCursor(Qt.CrossCursor)
 
     def eventFilter(self, obj, event):
         if obj is self.graphics.viewport():
@@ -80,42 +92,73 @@ class SegmentationPgView(QWidget):
         return CanvasMousePayload(
             x=float(image_pos.x()),
             y=float(image_pos.y()),
-            button=int(event.button()),
-            buttons=int(event.buttons()),
-            modifiers=int(event.modifiers()),
+            button=event.button(),
+            buttons=event.buttons(),
+            modifiers=event.modifiers(),
             double_click=double_click,
         )
 
     def set_image_source(self, source: BaseImageSource) -> None:
         self.source = source
+        self._dynamic_source = isinstance(source, GeoTiffImageSource)
         metadata = source.metadata()
-        self.view_box.setLimits(xMin=0, yMin=0, xMax=metadata.width, yMax=metadata.height)
-        self.view_box.setRange(xRange=(0, metadata.width), yRange=(0, metadata.height), padding=0)
+        margin_x = metadata.width * 4
+        margin_y = metadata.height * 4
+        self.view_box.setLimits(
+            xMin=-margin_x,
+            yMin=-margin_y,
+            xMax=metadata.width + margin_x,
+            yMax=metadata.height + margin_y,
+            minXRange=1,
+            minYRange=1,
+            maxXRange=metadata.width + margin_x * 2,
+            maxYRange=metadata.height + margin_y * 2,
+        )
+        self.view_box.setRange(xRange=(0, metadata.width), yRange=(0, metadata.height), padding=0.02)
+        self._last_request_signature = None
         self.refresh_view()
+
+    def set_render_config(self, render_config) -> None:
+        self.render_config = render_config
+        self._last_request_signature = None
+        if self.source is not None:
+            self.refresh_view()
+
+    def set_interaction_mode(self, tool_name: str) -> None:
+        browse = tool_name == "browse"
+        self.view_box.setMouseEnabled(x=browse, y=browse)
+        self.view_box.setMouseMode(pg.ViewBox.PanMode)
 
     def refresh_view(self) -> None:
         if self.source is None:
             return
+        if not self._dynamic_source and self.last_render is not None:
+            self.view_state_changed.emit(self.current_view_state())
+            return
         request = self.current_render_request()
-        result = self.source.render(request)
+        signature = (
+            int(request.x),
+            int(request.y),
+            int(request.width),
+            int(request.height),
+            int(request.screen_width),
+            int(request.screen_height),
+        )
+        if signature == self._last_request_signature and self.last_render is not None:
+            self.view_state_changed.emit(self.current_view_state())
+            return
+        self._last_request_signature = signature
+        result = self.source.render(request, self.render_config)
         self.last_render = result
-        image = self._normalize_for_display(result.array)
-        self.image_item.setImage(image, autoLevels=False)
+        self.image_item.setImage(result.display_rgb, autoLevels=False)
         self.image_item.setRect(QRectF(*result.image_rect))
         self.view_state_changed.emit(self.current_view_state())
 
-    def _normalize_for_display(self, array: np.ndarray) -> np.ndarray:
-        if array.dtype == np.uint8:
-            return array
-        if array.ndim == 3:
-            clipped = np.clip(array, 0, 255)
-            return clipped.astype(np.uint8)
-        arr = array.astype(np.float32)
-        min_val = float(np.nanmin(arr))
-        max_val = float(np.nanmax(arr))
-        if max_val - min_val < 1e-6:
-            return np.zeros_like(arr, dtype=np.uint8)
-        return (((arr - min_val) / (max_val - min_val)) * 255).astype(np.uint8)
+    def _on_view_range_changed(self, *_args) -> None:
+        if self._dynamic_source:
+            self._refresh_timer.start()
+        else:
+            self.view_state_changed.emit(self.current_view_state())
 
     def current_render_request(self) -> RenderRequest:
         ((x0, x1), (y0, y1)) = self.view_box.viewRange()
@@ -146,7 +189,7 @@ class SegmentationPgView(QWidget):
         if self.source is None:
             return
         meta = self.source.metadata()
-        self.view_box.setRange(xRange=(0, meta.width), yRange=(0, meta.height), padding=0)
+        self.view_box.setRange(xRange=(0, meta.width), yRange=(0, meta.height), padding=0.02)
         self.refresh_view()
 
     def set_one_to_one(self) -> None:
@@ -182,7 +225,47 @@ class SegmentationPgView(QWidget):
     def update_preview_mask(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None) -> None:
         self.preview_item.update_mask(mask, bbox)
 
+    def update_draft(self, points: list[list[float]] | None) -> None:
+        self.draft_item.update_geometry(points)
+
+    def update_raster_mask(self, rgba_mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None = None) -> None:
+        if rgba_mask is None:
+            self.raster_item.clear()
+            return
+        self.raster_item.setImage(rgba_mask, autoLevels=False)
+        if bbox is None:
+            self.raster_item.setRect(QRectF(0, 0, rgba_mask.shape[1], rgba_mask.shape[0]))
+        else:
+            self.raster_item.setRect(QRectF(*bbox))
+
     def viewport_image(self) -> np.ndarray | None:
         if self.last_render is None:
             return None
-        return self.last_render.array
+        return self.last_render.display_rgb
+
+    def raw_viewport_image(self) -> np.ndarray | None:
+        if self.last_render is None:
+            return None
+        return self.last_render.raw_array
+
+    def rendered_rgb_at(self, x: int, y: int):
+        if self.last_render is None:
+            return None
+        x0, y0, width, height = self.last_render.source_window
+        if width <= 0 or height <= 0:
+            return None
+        if not (x0 <= x < x0 + width and y0 <= y < y0 + height):
+            return None
+        display = self.last_render.display_rgb
+        rel_x = int(round((x - x0) * display.shape[1] / max(width, 1)))
+        rel_y = int(round((y - y0) * display.shape[0] / max(height, 1)))
+        rel_x = max(0, min(display.shape[1] - 1, rel_x))
+        rel_y = max(0, min(display.shape[0] - 1, rel_y))
+        value = display[rel_y, rel_x]
+        if display.ndim == 2:
+            gray = int(value)
+            return [gray, gray, gray]
+        if len(value) >= 3:
+            return [int(value[0]), int(value[1]), int(value[2])]
+        gray = int(value[0])
+        return [gray, gray, gray]

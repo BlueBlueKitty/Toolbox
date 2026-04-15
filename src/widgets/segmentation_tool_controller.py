@@ -18,6 +18,7 @@ class SegmentationToolController(QObject):
     magic_wand_requested = Signal(int, int)
     selection_changed = Signal(object)
     geometry_changed = Signal(str, object)
+    draft_changed = Signal(str, object)
 
     TOOL_BROWSE = "browse"
     TOOL_RECTANGLE = "rectangle"
@@ -41,16 +42,20 @@ class SegmentationToolController(QObject):
         self.active_tool = tool_name
         if tool_name != self.TOOL_POLYGON:
             self._polygon_points = []
+        self._rectangle_start = None
+        self.draft_changed.emit("clear", None)
 
     def handle_press(self, payload) -> None:
-        if payload.button != int(Qt.LeftButton):
+        if payload.button != Qt.LeftButton:
             return
         x, y = payload.x, payload.y
         if self.active_tool == self.TOOL_RECTANGLE:
             self._rectangle_start = (x, y)
+            self.draft_changed.emit("rectangle", GeometryService.rectangle_to_polygon(x, y, x, y))
             return
         if self.active_tool == self.TOOL_POLYGON:
             self._append_polygon_point(x, y)
+            self.draft_changed.emit("polygon", self._polygon_points[:])
             if payload.double_click:
                 self.finish_polygon()
             return
@@ -61,11 +66,19 @@ class SegmentationToolController(QObject):
 
     def handle_move(self, payload) -> None:
         x, y = payload.x, payload.y
-        if self.active_tool == self.TOOL_POLYGON and payload.buttons & int(Qt.LeftButton):
+        if self.active_tool == self.TOOL_POLYGON and bool(payload.buttons & Qt.LeftButton):
             if not self._polygon_points:
                 self._append_polygon_point(x, y)
             elif self._distance(self._polygon_points[-1], [x, y]) >= 3:
                 self._append_polygon_point(x, y)
+            self.draft_changed.emit("polygon", self._polygon_points[:] + [[x, y]])
+            return
+        if self.active_tool == self.TOOL_POLYGON and self._polygon_points:
+            self.draft_changed.emit("polygon", self._polygon_points[:] + [[x, y]])
+            return
+        if self.active_tool == self.TOOL_RECTANGLE and self._rectangle_start is not None:
+            x0, y0 = self._rectangle_start
+            self.draft_changed.emit("rectangle", GeometryService.rectangle_to_polygon(x0, y0, x, y))
             return
         if self.active_tool == self.TOOL_BROWSE and self._dragging_vertex and self.selected_annotation_id:
             annotation = self._find_annotation(self.selected_annotation_id)
@@ -84,22 +97,25 @@ class SegmentationToolController(QObject):
             self.geometry_changed.emit(annotation.id, updated)
 
     def handle_release(self, payload) -> None:
-        if payload.button != int(Qt.LeftButton):
+        if payload.button != Qt.LeftButton:
             return
         x, y = payload.x, payload.y
         if self.active_tool == self.TOOL_RECTANGLE and self._rectangle_start is not None:
             x0, y0 = self._rectangle_start
             polygon = GeometryService.rectangle_to_polygon(x0, y0, x, y)
             self._rectangle_start = None
+            self.draft_changed.emit("clear", None)
             self.rectangle_finished.emit(polygon)
         self._dragging_vertex = False
 
     def finish_polygon(self) -> None:
         if len(self._polygon_points) < 3:
             self._polygon_points = []
+            self.draft_changed.emit("clear", None)
             return
         polygon = GeometryService.ensure_closed(self._polygon_points)
         self._polygon_points = []
+        self.draft_changed.emit("clear", None)
         self.polygon_finished.emit(polygon)
 
     def delete_selected(self) -> str | None:

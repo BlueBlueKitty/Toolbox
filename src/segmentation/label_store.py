@@ -11,8 +11,6 @@ from .models import LabelClass
 
 DEFAULT_LABELS = [
     ("类别 1", "#ff6b6b", "1"),
-    ("类别 2", "#4dabf7", "2"),
-    ("类别 3", "#51cf66", "3"),
 ]
 
 
