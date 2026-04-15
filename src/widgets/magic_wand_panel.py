@@ -83,7 +83,7 @@ class MagicWandPanel(QGroupBox):
         self.simplify_polygon_check.setChecked(True)
         form.addRow(self.simplify_polygon_check)
 
-        self.vector_smooth_slider, self.vector_smooth_value = self._make_slider(0, 12, 2)
+        self.vector_smooth_slider, self.vector_smooth_value = self._make_slider(0, 30, 2)
         self.vector_smooth_slider.setSingleStep(1)
         self.vector_smooth_slider.setPageStep(1)
         form.addRow("平滑矢量边界", self._slider_row(self.vector_smooth_slider, self.vector_smooth_value))

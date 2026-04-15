@@ -7,13 +7,17 @@ from __future__ import annotations
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
     QGroupBox,
     QHBoxLayout,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
     QColorDialog,
     QInputDialog,
+    QLabel,
     QVBoxLayout,
 )
 
@@ -91,18 +95,11 @@ class LabelPanelWidget(QGroupBox):
         if not (0 <= row < len(self._labels)):
             return
         label = self._labels[row]
-        name, ok = QInputDialog.getText(self, "编辑标签", "标签名称", text=label.name)
-        if not ok or not name.strip():
+        dialog = LabelEditDialog(label, self)
+        if dialog.exec() != QDialog.Accepted:
             return
-        color = QColorDialog.getColor(parent=self)
-        if not color.isValid():
-            color_name = label.color
-        else:
-            color_name = color.name()
-        shortcut, ok = QInputDialog.getText(self, "快捷键", "快捷键", text=label.shortcut)
-        if not ok or not shortcut.strip():
-            shortcut = label.shortcut
-        self._labels[row] = LabelClass(label.id, name.strip(), color_name, shortcut.strip(), label.visible, label.locked)
+        edited = dialog.label()
+        self._labels[row] = LabelClass(label.id, edited.name, edited.color, edited.shortcut, label.visible, label.locked)
         self.labels_changed.emit(self._labels[:])
         self.set_labels(self._labels, label.id)
 
@@ -110,3 +107,48 @@ class LabelPanelWidget(QGroupBox):
         pixmap = QPixmap(14, 14)
         pixmap.fill(QColor(color_name))
         return QIcon(pixmap)
+
+
+class LabelEditDialog(QDialog):
+    def __init__(self, label: LabelClass, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("编辑标签")
+        self._color = QColor(label.color)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("标签名称"))
+        self.name_edit = QLineEdit(label.name)
+        layout.addWidget(self.name_edit)
+        layout.addWidget(QLabel("快捷键"))
+        self.shortcut_edit = QLineEdit(label.shortcut)
+        layout.addWidget(self.shortcut_edit)
+        self.color_button = QPushButton()
+        self.color_button.clicked.connect(self._choose_color)
+        layout.addWidget(QLabel("标签颜色"))
+        layout.addWidget(self.color_button)
+        self._update_color_button()
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _choose_color(self):
+        color = QColorDialog.getColor(self._color, self, "选择标签颜色")
+        if color.isValid():
+            self._color = color
+            self._update_color_button()
+
+    def _update_color_button(self):
+        self.color_button.setText(f"选择颜色: {self._color.name()}")
+        self.color_button.setStyleSheet(
+            f"background-color: {self._color.name()}; color: {'#000000' if self._color.lightness() > 128 else '#ffffff'};"
+        )
+
+    def label(self) -> LabelClass:
+        return LabelClass(
+            id=0,
+            name=self.name_edit.text().strip() or "未命名标签",
+            color=self._color.name(),
+            shortcut=self.shortcut_edit.text().strip() or "",
+        )

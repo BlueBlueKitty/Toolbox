@@ -16,7 +16,7 @@ from src.segmentation.image_sources import BaseImageSource, RenderRequest
 from src.segmentation.image_sources.geotiff_source import GeoTiffImageSource
 from src.segmentation.rendering import default_render_config
 from src.segmentation.models import AnnotationObject, RenderTileResult, ViewportState
-from .annotation_overlay_items import DraftOverlayItem, PolygonOverlayItem, PreviewMaskItem
+from .annotation_overlay_items import DraftOverlayItem, PolygonOverlayItem, PreviewMaskItem, PreviewPolygonItem
 
 
 @dataclass
@@ -62,6 +62,7 @@ class SegmentationPgView(QWidget):
         self.last_render: RenderTileResult | None = None
         self.render_config = default_render_config()
         self._overlay_items: dict[str, PolygonOverlayItem] = {}
+        self._preview_polygon_items: list[PreviewPolygonItem] = []
         self._dynamic_source = False
         self._last_request_signature = None
 
@@ -211,6 +212,7 @@ class SegmentationPgView(QWidget):
         for overlay in self._overlay_items.values():
             self.view_box.removeItem(overlay.scatter)
             if overlay.path_item.scene() is not None:
+                overlay.path_item.setParentItem(None)
                 overlay.path_item.scene().removeItem(overlay.path_item)
         self._overlay_items = {}
         for annotation in annotations:
@@ -224,6 +226,17 @@ class SegmentationPgView(QWidget):
 
     def update_preview_mask(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None) -> None:
         self.preview_item.update_mask(mask, bbox)
+
+    def update_preview_polygons(self, annotations) -> None:
+        for item in self._preview_polygon_items:
+            if item.path_item.scene() is not None:
+                item.path_item.setParentItem(None)
+                item.path_item.scene().removeItem(item.path_item)
+        self._preview_polygon_items = []
+        for annotation in annotations or []:
+            item = PreviewPolygonItem(annotation)
+            item.path_item.setParentItem(self.view_box.childGroup)
+            self._preview_polygon_items.append(item)
 
     def update_draft(self, points: list[list[float]] | None) -> None:
         self.draft_item.update_geometry(points)

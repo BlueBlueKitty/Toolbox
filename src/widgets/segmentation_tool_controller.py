@@ -50,16 +50,20 @@ class SegmentationToolController(QObject):
             return
         x, y = payload.x, payload.y
         if self.active_tool == self.TOOL_RECTANGLE:
+            self._clear_selection_for_new_drawing()
             self._rectangle_start = (x, y)
             self.draft_changed.emit("rectangle", GeometryService.rectangle_to_polygon(x, y, x, y))
             return
         if self.active_tool == self.TOOL_POLYGON:
+            if not self._polygon_points:
+                self._clear_selection_for_new_drawing()
             self._append_polygon_point(x, y)
             self.draft_changed.emit("polygon", self._polygon_points[:])
             if payload.double_click:
                 self.finish_polygon()
             return
         if self.active_tool == self.TOOL_MAGIC_WAND:
+            self._clear_selection_for_new_drawing()
             self.magic_wand_requested.emit(int(round(x)), int(round(y)))
             return
         self._handle_selection_press(x, y)
@@ -221,3 +225,10 @@ class SegmentationToolController(QObject):
 
     def _distance(self, p1, p2) -> float:
         return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
+
+    def _clear_selection_for_new_drawing(self) -> None:
+        if self.selected_annotation_id is not None or self.selected_vertex_index is not None:
+            self.selected_annotation_id = None
+            self.selected_vertex_index = None
+            self._dragging_vertex = False
+            self.selection_changed.emit(None)

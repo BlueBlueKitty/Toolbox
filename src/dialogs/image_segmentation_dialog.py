@@ -599,9 +599,18 @@ class ImageSegmentationDialog(QDialog):
             contours=[],
             polygon_preview=[],
         )
+        preview_polygons = self._build_preview_from_mask(
+            self._preview_mask,
+            self._preview_bbox,
+            label_id=self.project.active_label_id,
+            source_tool="magic_wand_preview",
+        )
+        if preview_polygons:
+            self.preview_selection.polygon_preview = preview_polygons.polygon_preview
         self._last_magic_seed = (x, y)
         if self.preview_selection:
-            self.canvas.update_preview_mask(self.preview_selection.mask, self.preview_selection.bbox)
+            self.canvas.update_preview_mask(None, None)
+            self.canvas.update_preview_polygons(self.preview_selection.polygon_preview)
 
     def _schedule_magic_preview(self, _params) -> None:
         if self._last_magic_seed is None or self.tool_controller.active_tool != SegmentationToolController.TOOL_MAGIC_WAND:
@@ -619,6 +628,7 @@ class ImageSegmentationDialog(QDialog):
             self._preview_bbox = None
             self.preview_selection = None
             self.canvas.update_preview_mask(None, None)
+            self.canvas.update_preview_polygons([])
 
     def _confirm_magic_preview(self) -> None:
         if not self.preview_selection or self.project.active_label_id is None or self._preview_mask is None or self._preview_bbox is None:
@@ -648,6 +658,7 @@ class ImageSegmentationDialog(QDialog):
         self._preview_mask = None
         self._preview_bbox = None
         self.canvas.update_preview_mask(None, None)
+        self.canvas.update_preview_polygons([])
         self._refresh_canvas()
 
     def _on_layer_visibility_changed(self, layer_name: str, visible: bool) -> None:
@@ -727,6 +738,7 @@ class ImageSegmentationDialog(QDialog):
             label_id=target_label,
             simplify=self.magic_panel.params().simplify_polygon,
             vector_smoothness=self.magic_panel.params().vector_smoothness,
+            connectivity=self.magic_panel.params().connectivity,
             source_tool=source_tool,
         )
         from src.segmentation.models import PreviewSelection
