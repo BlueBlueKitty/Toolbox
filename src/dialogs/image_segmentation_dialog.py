@@ -41,10 +41,14 @@ from src.segmentation import (
     UpdateLabelAssignmentCommand,
     UpdateMaskPatchCommand,
 )
+from src.segmentation.models import DisplayState
 from src.segmentation.algorithms import MagicWandSegmenter
 from src.segmentation.exporters import (
+    export_coco,
     export_mask_file,
     export_vector_file,
+    export_voc,
+    export_yolo,
 )
 from src.segmentation.geometry_service import GeometryService
 from src.segmentation.image_sources import GeoTiffImageSource, StandardImageSource
@@ -239,7 +243,7 @@ class ImageSegmentationDialog(QDialog):
         splitter.setStretchFactor(1, 1)
 
         bottom_layout = QHBoxLayout()
-        self.mouse_pos_label = QLabel("行: -, 列: - | 渲染RGB: - | 原值: -")
+        self.mouse_pos_label = QLabel("行: -, 列: - | 渲染RGB: - | 原值: - | Mask 标签: 无标签")
         self.status_label = QLabel("未打开图像")
         bottom_layout.addWidget(self.mouse_pos_label)
         bottom_layout.addStretch(1)
@@ -577,16 +581,29 @@ class ImageSegmentationDialog(QDialog):
         self.operation_progress.fail_task(message)
         QApplication.processEvents()
 
+    def _format_exception_message(self, exc: Exception, default_message: str) -> str:
+        text = str(exc).strip()
+        if text:
+            return text
+        return f"{default_message}\n可能原因：目标文件正被其他程序占用，或当前没有写入权限。"
+
     def _sync_project_mask_from_annotations(self) -> None:
         if self.project.image_asset is None:
             self._set_project_mask(None)
             return
-        mask = GeometryService.rasterize_annotations(
-            self.project.annotations,
-            self.project.image_asset.width,
-            self.project.image_asset.height,
-        )
-        self._set_project_mask(mask)
+        # 运行时矢量转 Mask 入口暂时关闭，仅保留代码以便后续恢复。
+        # QMessageBox.information(
+        #     self,
+        #     "Mask 已恢复",
+        #     "当前项目中的 Mask 数据已缺失，已根据现有矢量重新栅格化生成 Mask。",
+        # )
+        # mask = GeometryService.rasterize_annotations(
+        #     self.project.annotations,
+        #     self.project.image_asset.width,
+        #     self.project.image_asset.height,
+        # )
+        # self._set_project_mask(mask)
+        self._ensure_project_mask_shape()
 
     def _ensure_project_mask_shape(self) -> None:
         if self.project.image_asset is None:
@@ -692,11 +709,14 @@ class ImageSegmentationDialog(QDialog):
         commands,
         affected_bbox: tuple[int, int, int, int] | None = None,
         update_mask: bool = True,
+        explicit_mask_patch: tuple[tuple[int, int, int, int], np.ndarray | None, np.ndarray | None] | None = None,
     ) -> None:
-        if not commands:
+        if not commands and explicit_mask_patch is None and not update_mask:
             return
         batch_commands = commands[:]
-        if update_mask:
+        if explicit_mask_patch is not None:
+            bbox, before_patch, after_patch = explicit_mask_patch
+        elif update_mask:
             bbox = affected_bbox
             before_patch = self._extract_mask_patch(bbox)
             after_annotations = self._annotations_after_commands(commands)
@@ -708,9 +728,100 @@ class ImageSegmentationDialog(QDialog):
         if bbox is not None:
             batch_commands.append(UpdateMaskPatchCommand(bbox, before_patch, after_patch))
         self.command_stack.push(BatchCommand(batch_commands))
-        if update_mask:
+        if update_mask or explicit_mask_patch is not None:
             self._mark_mask_overlay_dirty()
         self.tool_controller.set_annotations(self.project.annotations)
+
+    def _push_mask_only_patch(
+        self,
+        bbox: tuple[int, int, int, int],
+        after_patch: np.ndarray | None,
+    ) -> None:
+        before_patch = self._extract_mask_patch(bbox)
+        self._push_commands_with_mask_patch(
+            [],
+            affected_bbox=None,
+            update_mask=False,
+            explicit_mask_patch=(bbox, before_patch, after_patch),
+        )
+
+    def _apply_binary_preview_mask(
+        self,
+        preview_mask: np.ndarray,
+        preview_bbox: tuple[int, int, int, int],
+        label_id: int,
+    ) -> None:
+        x, y, width, height = preview_bbox
+        before_patch = self._extract_mask_patch(preview_bbox)
+        after_patch = np.zeros((height, width), dtype=np.uint16) if before_patch is None else before_patch.copy()
+        after_patch[preview_mask > 0] = int(label_id)
+        self._push_mask_only_patch(preview_bbox, after_patch)
+
+    def _apply_annotation_to_mask(
+        self,
+        annotation: AnnotationObject,
+    ) -> None:
+        bbox = GeometryService.affected_bbox_from_annotations(annotation)
+        if bbox is None:
+            return
+        before_patch = self._extract_mask_patch(bbox)
+        after_patch = np.zeros((bbox[3], bbox[2]), dtype=np.uint16) if before_patch is None else before_patch.copy()
+        raster_patch = self._rasterize_annotations_patch([annotation], bbox)
+        if raster_patch is not None:
+            after_patch[raster_patch > 0] = raster_patch[raster_patch > 0]
+        self._push_mask_only_patch(bbox, after_patch)
+
+    def _build_magic_mask_patch(
+        self,
+        new_annotations: list[AnnotationObject],
+        preview_mask: np.ndarray,
+        preview_bbox: tuple[int, int, int, int],
+    ) -> tuple[tuple[int, int, int, int], np.ndarray | None, np.ndarray | None]:
+        new_union = GeometryService.annotations_union(new_annotations)
+        affected_annotations: list[AnnotationObject] = []
+        if new_union is not None and not new_union.is_empty:
+            minx, miny, maxx, maxy = new_union.bounds
+            bounds_bbox = (minx, miny, maxx - minx, maxy - miny)
+            for annotation in self.project.annotations:
+                if not GeometryService.bbox_intersects(annotation.bbox, bounds_bbox):
+                    continue
+                polygon = GeometryService.annotation_to_polygon(annotation)
+                if polygon is None or polygon.is_empty or not polygon.intersects(new_union):
+                    continue
+                affected_annotations.append(annotation)
+
+        bbox = GeometryService.affected_bbox_from_annotations(affected_annotations, new_annotations) or preview_bbox
+        before_patch = self._extract_mask_patch(bbox)
+        x, y, width, height = bbox
+        after_patch = np.zeros((height, width), dtype=np.uint16)
+        if before_patch is not None:
+            after_patch[:] = before_patch
+
+        old_patch = self._rasterize_annotations_patch(affected_annotations, bbox)
+        if old_patch is not None:
+            after_patch[old_patch > 0] = 0
+
+        px, py, pw, ph = preview_bbox
+        patch_x0 = max(px, x)
+        patch_y0 = max(py, y)
+        patch_x1 = min(px + pw, x + width)
+        patch_y1 = min(py + ph, y + height)
+        if patch_x1 > patch_x0 and patch_y1 > patch_y0:
+            src_x0 = patch_x0 - px
+            src_y0 = patch_y0 - py
+            src_x1 = src_x0 + (patch_x1 - patch_x0)
+            src_y1 = src_y0 + (patch_y1 - patch_y0)
+            dst_x0 = patch_x0 - x
+            dst_y0 = patch_y0 - y
+            dst_x1 = dst_x0 + (patch_x1 - patch_x0)
+            dst_y1 = dst_y0 + (patch_y1 - patch_y0)
+            label_id = int(self.project.active_label_id or 1)
+            preview_patch = preview_mask[src_y0:src_y1, src_x0:src_x1]
+            region = after_patch[dst_y0:dst_y1, dst_x0:dst_x1]
+            region[preview_patch > 0] = label_id
+            after_patch[dst_y0:dst_y1, dst_x0:dst_x1] = region
+
+        return bbox, before_patch, after_patch
 
     def _prompt_save_project_if_needed(self) -> bool:
         if not self._dirty:
@@ -731,8 +842,9 @@ class ImageSegmentationDialog(QDialog):
     def _replace_labels(self, labels) -> None:
         self.project.labels = labels[:]
         self.label_store.set_labels(labels[:])
-        if self.project.active_label_id is None and labels:
-            self.project.active_label_id = labels[0].id
+        label_ids = {label.id for label in labels}
+        if self.project.active_label_id not in label_ids:
+            self.project.active_label_id = labels[0].id if labels else None
         self._refresh_label_ui()
         self._refresh_canvas()
         self._set_dirty(True)
@@ -903,7 +1015,8 @@ class ImageSegmentationDialog(QDialog):
         self._replace_labels(self.project.labels)
         self._clear_magic_preview()
         self._refresh_canvas()
-        self.canvas.set_one_to_one()
+        if reset_project:
+            self.canvas.set_one_to_one()
 
     def open_project(self) -> None:
         if not self._finish_node_edit_session():
@@ -927,6 +1040,7 @@ class ImageSegmentationDialog(QDialog):
         except Exception as exc:
             QMessageBox.warning(self, "打开失败", f"该文件不是有效的分割项目文件，或项目已损坏：\n{exc}")
             return
+        saved_display_state = copy.deepcopy(project.display_state)
         self.project = project
         self.label_store.set_labels(project.labels)
         self.current_project_path = file_path
@@ -943,13 +1057,12 @@ class ImageSegmentationDialog(QDialog):
             labels=project.labels,
             active_label_id=project.active_label_id,
         )
-        self.project.display_state = project.display_state
+        self.project.display_state = saved_display_state
         self.project.layer_visibility = project.layer_visibility
         self.project.export_prefs = project.export_prefs
+        self.canvas.restore_view_state(self.project.display_state)
         self.layer_panel.image_check.setChecked(self.project.layer_visibility.get("image", True))
-        self.layer_panel.annotation_check.setChecked(self.project.layer_visibility.get("annotations", True))
         self.layer_panel.raster_check.setChecked(self.project.layer_visibility.get("raster", True))
-        self.layer_panel.preview_vector_check.setChecked(self.project.layer_visibility.get("preview_vector", False))
         self.layer_panel.preview_mask_check.setChecked(self.project.layer_visibility.get("preview_mask", True))
         self._refresh_label_ui()
         self._refresh_canvas()
@@ -979,6 +1092,7 @@ class ImageSegmentationDialog(QDialog):
             self.current_project_path = file_path
         self._last_project_dir = os.path.dirname(self.current_project_path)
         self.project_manager.settings.setValue("last_project_dir", self._last_project_dir)
+        self._sync_display_state_from_canvas()
         self._start_progress("正在保存项目...")
         try:
             self._update_progress(30, "正在写入项目文件...", maximum=100)
@@ -1018,42 +1132,99 @@ class ImageSegmentationDialog(QDialog):
         exported_paths = []
         total_steps = int(settings["export_vector"]) + int(settings["export_mask"])
         step_index = 0
+        failed_exports = []
         self._start_progress("正在准备导出...", maximum=max(total_steps * 100, 100))
         try:
             if settings["export_vector"]:
-                vector_driver = {
-                    "GeoJSON": "GeoJSON",
-                    "Shapefile": "ESRI Shapefile",
-                    "GPKG": "GPKG",
-                }[settings["vector_format"]]
                 vector_path = output_dir / f"{settings['base_name']}{settings['vector_extension']}"
-                self._update_progress(step_index * 100 + 10, f"正在导出矢量: {vector_path.name}", maximum=max(total_steps * 100, 100))
-                export_vector_file(
-                    self.project,
-                    str(vector_path),
-                    vector_driver,
-                    coordinate_mode=settings["vector_coord_mode"],
-                )
-                exported_paths.append(str(vector_path))
+                try:
+                    self._update_progress(step_index * 100 + 10, f"正在导出矢量: {vector_path.name}", maximum=max(total_steps * 100, 100))
+                    export_project = self._build_export_project_from_mask()
+                    vector_format = settings["vector_format"]
+                    if vector_format in {"GeoJSON", "Shapefile", "GPKG"}:
+                        vector_driver = {
+                            "GeoJSON": "GeoJSON",
+                            "Shapefile": "ESRI Shapefile",
+                            "GPKG": "GPKG",
+                        }[vector_format]
+                        export_vector_file(
+                            export_project,
+                            str(vector_path),
+                            vector_driver,
+                            coordinate_mode=SegmentationExportDialog.coordinate_mode_for_format(
+                                vector_format,
+                                bool(self.project.image_asset and self.project.image_asset.has_georef),
+                            ),
+                        )
+                    elif vector_format == "COCO":
+                        export_coco(export_project, str(vector_path))
+                    elif vector_format == "YOLO":
+                        export_yolo(export_project, str(vector_path))
+                    elif vector_format == "VOC":
+                        export_voc(export_project, str(vector_path))
+                    else:
+                        raise RuntimeError(f"不支持的导出格式：{vector_format}")
+                    exported_paths.append(str(vector_path))
+                    self._update_progress(step_index * 100 + 90, f"矢量导出完成: {vector_path.name}", maximum=max(total_steps * 100, 100))
+                except Exception as exc:
+                    failed_exports.append(f"矢量导出失败（{vector_path.name}）：{self._format_exception_message(exc, '导出失败。')}")
                 step_index += 1
-                self._update_progress(step_index * 100, f"矢量导出完成: {vector_path.name}", maximum=max(total_steps * 100, 100))
+                self._update_progress(step_index * 100, maximum=max(total_steps * 100, 100))
             if settings["export_mask"]:
                 mask_path = output_dir / f"{settings['base_name']}{settings['mask_extension']}"
-                self._update_progress(step_index * 100 + 10, f"正在导出 Mask: {mask_path.name}", maximum=max(total_steps * 100, 100))
-                export_mask_file(
-                    self.project,
-                    str(mask_path),
-                    colored=settings["mask_colored"] and settings["mask_extension"] == ".tif",
-                )
-                exported_paths.append(str(mask_path))
+                try:
+                    if self.project.mask_data is None:
+                        raise RuntimeError("当前项目中没有可导出的 Mask。")
+                    self._update_progress(step_index * 100 + 10, f"正在导出 Mask: {mask_path.name}", maximum=max(total_steps * 100, 100))
+                    export_mask_file(
+                        self.project,
+                        str(mask_path),
+                        colored=settings["mask_colored"] and settings["mask_extension"] == ".tif",
+                    )
+                    exported_paths.append(str(mask_path))
+                    self._update_progress(step_index * 100 + 90, f"Mask 导出完成: {mask_path.name}", maximum=max(total_steps * 100, 100))
+                except Exception as exc:
+                    failed_exports.append(f"Mask 导出失败（{mask_path.name}）：{self._format_exception_message(exc, '导出失败。')}")
                 step_index += 1
-                self._update_progress(step_index * 100, f"Mask 导出完成: {mask_path.name}", maximum=max(total_steps * 100, 100))
+                self._update_progress(step_index * 100, maximum=max(total_steps * 100, 100))
             self.project.export_prefs = dict(settings)
-            self._finish_progress("导出完成")
-            QMessageBox.information(self, "导出成功", "已导出到:\n" + "\n".join(exported_paths))
+            if failed_exports:
+                final_message = []
+                if exported_paths:
+                    final_message.append("成功导出：")
+                    final_message.extend(exported_paths)
+                final_message.append("")
+                final_message.append("失败详情：")
+                final_message.extend(failed_exports)
+                self._fail_progress("部分导出失败")
+                QMessageBox.warning(self, "导出完成（部分失败）", "\n".join(final_message))
+            else:
+                self._finish_progress("导出完成")
+                QMessageBox.information(self, "导出成功", "已导出到:\n" + "\n".join(exported_paths))
         except Exception as exc:
             self._fail_progress("导出失败")
-            QMessageBox.warning(self, "导出失败", str(exc))
+            QMessageBox.warning(self, "导出失败", self._format_exception_message(exc, "导出失败。"))
+
+    def _build_export_project_from_mask(self):
+        if self.project.image_asset is None:
+            raise RuntimeError("缺少图像信息，无法导出矢量。")
+        if self.project.mask_data is None:
+            raise RuntimeError("当前项目中没有 Mask，无法导出矢量。")
+        export_project = copy.deepcopy(self.project)
+        export_project.annotations = []
+        unique_labels = [int(value) for value in np.unique(export_project.mask_data) if int(value) > 0]
+        for label_id in unique_labels:
+            binary_mask = np.where(export_project.mask_data == label_id, 255, 0).astype(np.uint8)
+            export_project.annotations.extend(
+                GeometryService.mask_to_annotations(
+                    binary_mask,
+                    bbox=(0, 0, export_project.image_asset.width, export_project.image_asset.height),
+                    label_id=label_id,
+                    connectivity=8,
+                    source_tool="export",
+                )
+            )
+        return export_project
 
     def undo(self) -> None:
         if self.tool_controller.is_node_edit_active():
@@ -1197,9 +1368,11 @@ class ImageSegmentationDialog(QDialog):
             exterior=polygon_points,
             source_tool="polygon",
         )
-        affected_bbox = GeometryService.affected_bbox_from_annotations(annotation)
-        self._push_commands_with_mask_patch([AddAnnotationCommand(annotation)], affected_bbox)
-        self.tool_controller.selected_annotation_id = annotation.id
+        # 运行时矢量新增入口暂时关闭，仅保留代码以便后续恢复。
+        # affected_bbox = GeometryService.affected_bbox_from_annotations(annotation)
+        # self._push_commands_with_mask_patch([AddAnnotationCommand(annotation)], affected_bbox)
+        # self.tool_controller.selected_annotation_id = annotation.id
+        self._apply_annotation_to_mask(annotation)
         self._refresh_canvas()
         self._set_dirty(True)
 
@@ -1212,9 +1385,11 @@ class ImageSegmentationDialog(QDialog):
             geom_type="rectangle",
             source_tool="rectangle",
         )
-        affected_bbox = GeometryService.affected_bbox_from_annotations(annotation)
-        self._push_commands_with_mask_patch([AddAnnotationCommand(annotation)], affected_bbox)
-        self.tool_controller.selected_annotation_id = annotation.id
+        # 运行时矢量新增入口暂时关闭，仅保留代码以便后续恢复。
+        # affected_bbox = GeometryService.affected_bbox_from_annotations(annotation)
+        # self._push_commands_with_mask_patch([AddAnnotationCommand(annotation)], affected_bbox)
+        # self.tool_controller.selected_annotation_id = annotation.id
+        self._apply_annotation_to_mask(annotation)
         self._refresh_canvas()
         self._set_dirty(True)
 
@@ -1273,12 +1448,9 @@ class ImageSegmentationDialog(QDialog):
         self.canvas.update_snap_indicator(snap_type, position)
 
     def _set_preview_vector_visibility(self, visible: bool, user_initiated: bool = False) -> None:
-        self.layer_panel.preview_vector_check.blockSignals(True)
-        self.layer_panel.preview_vector_check.setChecked(visible)
-        self.layer_panel.preview_vector_check.blockSignals(False)
-        self.project.layer_visibility["preview_vector"] = visible
-        if user_initiated:
-            self._preview_vector_user_enabled = visible
+        # 运行时矢量预览入口暂时关闭，仅保留代码以便后续恢复。
+        self.project.layer_visibility["preview_vector"] = False
+        self._preview_vector_user_enabled = False
 
     def _preview_result_touches_roi_boundary(self, preview, roi_width: int, roi_height: int) -> bool:
         bx, by, bw, bh = preview.bbox
@@ -1328,6 +1500,7 @@ class ImageSegmentationDialog(QDialog):
             return []
         if self.preview_selection.polygon_preview:
             return self.preview_selection.polygon_preview
+        # 这里始终只对当前预览的局部 mask+bbox 做矢量化，不会回落到整图 mask。
         preview = self._build_preview_from_mask(
             self._preview_mask,
             self._preview_bbox,
@@ -1340,6 +1513,40 @@ class ImageSegmentationDialog(QDialog):
         self.preview_selection.contours = [item.exterior for item in polygons]
         return polygons
 
+    def _refresh_preview_vector(
+        self,
+        source_tool: str = "magic_wand_preview",
+        *,
+        show_progress: bool = False,
+        progress_message: str = "正在将Mask矢量化...",
+        force: bool = False,
+    ):
+        if (
+            self.preview_selection is None
+            or self._preview_mask is None
+            or self._preview_bbox is None
+        ):
+            return []
+        should_show = force or self.project.layer_visibility.get("preview_vector", True)
+        if not should_show:
+            self.preview_selection.polygon_preview = []
+            self.preview_selection.contours = []
+            return []
+        if show_progress:
+            self._start_progress(progress_message, maximum=100)
+        try:
+            if show_progress:
+                self._update_progress(30, "正在将 Mask 矢量化...", maximum=100)
+            polygons = self._ensure_preview_polygons(source_tool, force=True)
+            self._update_preview_display()
+            if show_progress:
+                self._finish_progress("矢量预览已更新")
+            return polygons
+        except Exception:
+            if show_progress:
+                self._fail_progress("矢量预览生成失败")
+            raise
+
     def _run_magic_wand_preview(self, x: int, y: int) -> None:
         if self.current_source is None or self.project.image_asset is None:
             return
@@ -1347,34 +1554,44 @@ class ImageSegmentationDialog(QDialog):
         full_height = self.project.image_asset.height
         if not (0 <= x < full_width and 0 <= y < full_height):
             return
+        self._start_progress("正在识别魔法棒选区...", maximum=100)
         if self._last_magic_seed != (x, y):
             self._set_preview_vector_visibility(False, user_initiated=False)
-        mapped_mask, mapped_bbox = self._build_magic_preview_result(int(np.floor(x)), int(np.floor(y)))
-        if mapped_mask is None or mapped_bbox is None:
-            return
-        if self.magic_panel.merge_preview_enabled() and self._preview_mask is not None and self._preview_bbox is not None:
-            self._preview_mask, self._preview_bbox = GeometryService.merge_mask_bbox(
-                self._preview_mask,
-                self._preview_bbox,
-                mapped_mask,
-                mapped_bbox,
-                "add",
+        try:
+            self._update_progress(20, "正在计算局部识别区域...", maximum=100)
+            mapped_mask, mapped_bbox = self._build_magic_preview_result(int(np.floor(x)), int(np.floor(y)))
+            if mapped_mask is None or mapped_bbox is None:
+                self._finish_progress("没有识别到有效选区")
+                return
+            self._update_progress(70, "正在合并预览 Mask...", maximum=100)
+            if self.magic_panel.merge_preview_enabled() and self._preview_mask is not None and self._preview_bbox is not None:
+                self._preview_mask, self._preview_bbox = GeometryService.merge_mask_bbox(
+                    self._preview_mask,
+                    self._preview_bbox,
+                    mapped_mask,
+                    mapped_bbox,
+                    "add",
+                )
+            else:
+                self._preview_mask = mapped_mask
+                self._preview_bbox = mapped_bbox
+            from src.segmentation.models import PreviewSelection
+            self.preview_selection = PreviewSelection(
+                seed_point=self._last_magic_seed or (x, y),
+                params=self.magic_panel.params(),
+                bbox=self._preview_bbox,
+                mask=self._preview_mask,
+                contours=[],
+                polygon_preview=[],
             )
-        else:
-            self._preview_mask = mapped_mask
-            self._preview_bbox = mapped_bbox
-        from src.segmentation.models import PreviewSelection
-        self.preview_selection = PreviewSelection(
-            seed_point=self._last_magic_seed or (x, y),
-            params=self.magic_panel.params(),
-            bbox=self._preview_bbox,
-            mask=self._preview_mask,
-            contours=[],
-            polygon_preview=[],
-        )
-        self._last_magic_seed = (x, y)
-        if self.preview_selection:
-            self._update_preview_display()
+            self._last_magic_seed = (x, y)
+            if self.preview_selection:
+                self._update_progress(95, "正在刷新预览显示...", maximum=100)
+                self._update_preview_display()
+            self._finish_progress("魔法棒识别完成")
+        except Exception:
+            self._fail_progress("魔法棒识别失败")
+            raise
 
     def _schedule_magic_preview(self, _params) -> None:
         if self._last_magic_seed is None or self.tool_controller.active_tool != SegmentationToolController.TOOL_MAGIC_WAND:
@@ -1396,18 +1613,23 @@ class ImageSegmentationDialog(QDialog):
     def _confirm_magic_preview(self) -> None:
         if not self.preview_selection or self.project.active_label_id is None or self._preview_mask is None or self._preview_bbox is None:
             return
-        polygon_preview = self.preview_selection.polygon_preview or self._ensure_preview_polygons("magic_wand", force=True)
-        if not polygon_preview:
+        self._start_progress("正在确认魔法棒预览...", maximum=100)
+        try:
+            self._update_progress(20, "正在准备 Mask 预览...", maximum=100)
+            if self._preview_mask is None or self._preview_bbox is None:
+                self._clear_magic_preview()
+                self._finish_progress("没有可确认的预览结果")
+                return
+
+            self._update_progress(80, "正在写入 Mask...", maximum=100)
+            self._apply_binary_preview_mask(self._preview_mask, self._preview_bbox, self.project.active_label_id)
             self._clear_magic_preview()
-            return
-        commands, affected_bbox = self._build_magic_commit_commands(polygon_preview)
-        if commands:
-            self._push_commands_with_mask_patch(commands, affected_bbox)
-        if polygon_preview:
-            self.tool_controller.selected_annotation_id = polygon_preview[-1].id
-        self._clear_magic_preview()
-        self._refresh_canvas()
-        self._set_dirty(True)
+            self._refresh_canvas()
+            self._set_dirty(True)
+            self._finish_progress("魔法棒预览已确认")
+        except Exception:
+            self._fail_progress("确认魔法棒预览失败")
+            raise
 
     def _clear_magic_preview(self) -> None:
         self.preview_selection = None
@@ -1423,10 +1645,6 @@ class ImageSegmentationDialog(QDialog):
             self.canvas.image_item.setVisible(visible)
         elif layer_name == "preview":
             self.canvas.preview_item.setVisible(visible)
-        elif layer_name == "preview_vector":
-            self._preview_vector_user_enabled = visible
-            if visible and self.preview_selection is not None and not self.preview_selection.polygon_preview:
-                self._ensure_preview_polygons("magic_wand_preview")
         self._refresh_canvas()
 
     def _selected_annotation(self) -> AnnotationObject | None:
@@ -1527,14 +1745,16 @@ class ImageSegmentationDialog(QDialog):
 
     def _refresh_canvas(self) -> None:
         label_lookup = {label.id: label for label in self.project.labels}
-        annotations = self.project.annotations if self.project.layer_visibility.get("annotations", True) else []
-        self.canvas.update_annotations(
-            annotations,
-            label_lookup,
-            self.tool_controller.selected_annotation_ids,
-            editable_annotation_id=self.tool_controller.editable_annotation_id(),
-            active_vertex=self.tool_controller.selected_vertex_index,
-        )
+        # 运行时矢量显示入口暂时关闭，仅保留代码以便后续恢复。
+        # annotations = self.project.annotations if self.project.layer_visibility.get("annotations", True) else []
+        # self.canvas.update_annotations(
+        #     annotations,
+        #     label_lookup,
+        #     self.tool_controller.selected_annotation_ids,
+        #     editable_annotation_id=self.tool_controller.editable_annotation_id(),
+        #     active_vertex=self.tool_controller.selected_vertex_index,
+        # )
+        self.canvas.update_annotations([], label_lookup, set(), editable_annotation_id=None, active_vertex=None)
         raster_rgba, raster_bbox = self._current_raster_overlay(label_lookup)
         self.canvas.update_raster_mask(raster_rgba, raster_bbox)
         self._update_preview_display()
@@ -1603,36 +1823,36 @@ class ImageSegmentationDialog(QDialog):
         self.tool_controller.set_view_state(state)
         if self.project.image_asset is None:
             return
+        self.project.display_state = DisplayState(
+            zoom=self.project.display_state.zoom,
+            center=(float(state.center_x), float(state.center_y)),
+            center_x=float(state.center_x),
+            center_y=float(state.center_y),
+            scale_x=float(state.scale_x),
+            scale_y=float(state.scale_y),
+            viewport_width=float(state.viewport_width),
+            viewport_height=float(state.viewport_height),
+            show_image=self.project.display_state.show_image,
+            show_annotations=self.project.display_state.show_annotations,
+            show_raster=self.project.display_state.show_raster,
+            show_preview=self.project.display_state.show_preview,
+            show_preview_vector=self.project.display_state.show_preview_vector,
+            show_preview_mask=self.project.display_state.show_preview_mask,
+        )
         self._update_image_stats_to_render_settings()
         label_lookup = {label.id: label for label in self.project.labels}
         raster_rgba, raster_bbox = self._current_raster_overlay(label_lookup)
         self.canvas.update_raster_mask(raster_rgba, raster_bbox)
         self._update_preview_display()
 
+    def _sync_display_state_from_canvas(self) -> None:
+        if self.project.image_asset is None:
+            return
+        self._on_view_state_changed(self.canvas.current_view_state())
+
     def _build_preview_from_mask(self, mask, bbox, label_id: int | None = None, source_tool: str = "magic_wand_preview", force: bool = False):
-        if mask is None or bbox is None:
-            return None
-        if not force and not self.project.layer_visibility.get("preview_vector", True):
-            return None
-        target_label = label_id or (self.project.active_label_id or 1)
-        polygons = GeometryService.mask_to_annotations(
-            mask,
-            bbox,
-            label_id=target_label,
-            simplify=self.magic_panel.params().simplify_polygon,
-            vector_smoothness=self.magic_panel.params().vector_smoothness,
-            connectivity=self.magic_panel.params().connectivity,
-            source_tool=source_tool,
-        )
-        from src.segmentation.models import PreviewSelection
-        return PreviewSelection(
-            seed_point=self._last_magic_seed or (0, 0),
-            params=self.magic_panel.params(),
-            bbox=bbox,
-            mask=mask,
-            contours=[item.exterior for item in polygons],
-            polygon_preview=polygons,
-        )
+        # 运行时矢量预览入口暂时关闭，仅保留代码以便后续恢复。
+        return None
 
     def _handle_pending_magic_session(self) -> bool:
         if self._preview_mask is None:
@@ -1671,47 +1891,50 @@ class ImageSegmentationDialog(QDialog):
         return local_mask.astype(np.uint8), mapped_bbox
 
     def _build_magic_commit_commands(self, new_annotations):
+        # 运行时矢量提交入口暂时关闭，仅保留代码以便后续恢复。
         commands = []
-        new_union = GeometryService.annotations_union(new_annotations)
-        if new_union is None or new_union.is_empty:
+        if not new_annotations:
             return commands, None
-        minx, miny, maxx, maxy = new_union.bounds
-        bounds_bbox = (minx, miny, maxx - minx, maxy - miny)
-        affected_annotations = list(new_annotations)
-        for annotation in self.project.annotations:
-            if not GeometryService.bbox_intersects(annotation.bbox, bounds_bbox):
-                continue
-            polygon = GeometryService.annotation_to_polygon(annotation)
-            if polygon is None or polygon.is_empty or not polygon.intersects(new_union):
-                continue
-            affected_annotations.append(annotation)
-            diff = polygon.difference(new_union)
-            if diff.is_empty:
-                commands.append(DeleteAnnotationCommand(annotation))
-                continue
-            updated_objects = GeometryService.polygon_to_annotation_objects(diff, annotation.label_id, annotation.source_tool)
-            if not updated_objects:
-                commands.append(DeleteAnnotationCommand(annotation))
-                continue
-            first = updated_objects[0]
-            first.id = annotation.id
-            commands.append(UpdateGeometryCommand(annotation.id, annotation, first))
-            for extra in updated_objects[1:]:
-                extra.label_id = annotation.label_id
-                commands.append(AddAnnotationCommand(extra))
+        clipped_annotations = []
+
         for annotation in new_annotations:
+            polygon = GeometryService.annotation_to_polygon(annotation)
+            if polygon is None or polygon.is_empty:
+                continue
+            intersecting_polygon = None
+            for existing_annotation in self.project.annotations:
+                if not GeometryService.bbox_intersects(existing_annotation.bbox, GeometryService.affected_bbox_from_annotations(annotation)):
+                    continue
+                existing_polygon = GeometryService.annotation_to_polygon(existing_annotation)
+                if existing_polygon is None or existing_polygon.is_empty:
+                    continue
+                if existing_polygon.intersects(polygon):
+                    intersecting_polygon = existing_polygon
+                    break
+            result_geometry = polygon.difference(intersecting_polygon) if intersecting_polygon is not None else polygon
+            if result_geometry.is_empty:
+                continue
+            clipped_annotations.extend(
+                GeometryService.polygon_to_annotation_objects(result_geometry, annotation.label_id, annotation.source_tool)
+            )
+
+        if not clipped_annotations:
+            return [], None
+
+        for annotation in clipped_annotations:
             commands.append(AddAnnotationCommand(annotation))
-        return commands, GeometryService.affected_bbox_from_annotations(affected_annotations)
+        return commands, GeometryService.affected_bbox_from_annotations(clipped_annotations)
 
     def _update_mouse_position(self, payload) -> None:
         if not self.project.image_asset:
-            self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: -")
+            self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: - | Mask 标签: 无标签")
             return
         row = int(np.floor(payload.y))
         col = int(np.floor(payload.x))
         if 0 <= row < self.project.image_asset.height and 0 <= col < self.project.image_asset.width:
             original_value = self.current_source.read_pixel(col, row) if self.current_source else None
             rendered_rgb = self.canvas.rendered_rgb_at(col, row) or self._rendered_rgb_from_original(original_value)
+            mask_label_name = self._mask_label_name_at(col, row)
             rgb_text = (
                 f"({rendered_rgb[0]}, {rendered_rgb[1]}, {rendered_rgb[2]})"
                 if rendered_rgb is not None else "-"
@@ -1726,10 +1949,23 @@ class ImageSegmentationDialog(QDialog):
                 if lon is not None and lat is not None:
                     geo_text = f" | 地理坐标: ({lon:.6f}, {lat:.6f})"
             self.mouse_pos_label.setText(
-                f"行: {row}, 列: {col} | 渲染RGB: {rgb_text} | 原值: {original_text}{geo_text}"
+                f"行: {row}, 列: {col} | 渲染RGB: {rgb_text} | 原值: {original_text} | Mask 标签: {mask_label_name}{geo_text}"
             )
         else:
-            self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: -")
+            self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: - | Mask 标签: 无标签")
+
+    def _mask_label_name_at(self, col: int, row: int) -> str:
+        if self.project.mask_data is None:
+            return "无标签"
+        if not (0 <= row < self.project.mask_data.shape[0] and 0 <= col < self.project.mask_data.shape[1]):
+            return "无标签"
+        label_id = int(self.project.mask_data[row, col])
+        if label_id <= 0:
+            return "无标签"
+        for label in self.project.labels:
+            if label.id == label_id:
+                return label.name
+        return "无标签"
 
     def _rendered_rgb_from_original(self, original_value):
         if original_value is None:
@@ -1744,12 +1980,12 @@ class ImageSegmentationDialog(QDialog):
         return [int(rgb[0, 0, 0]), int(rgb[0, 0, 1]), int(rgb[0, 0, 2])]
 
     def clear_all_annotations(self) -> None:
-        if not self.project.annotations:
+        if self.project.mask_data is None or not np.any(self.project.mask_data):
             return
         reply = QMessageBox.question(
             self,
             "清空绘制",
-            "确定要删除当前所有绘制的矢量对象吗？此操作可撤销。",
+            "确定要清空当前 Mask 吗？此操作可撤销。",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -1757,12 +1993,10 @@ class ImageSegmentationDialog(QDialog):
             return
         if not self._finish_node_edit_session():
             return
-        commands = [DeleteAnnotationCommand(annotation) for annotation in self.project.annotations]
-        if commands:
-            affected_bbox = None
-            if self.project.image_asset is not None:
-                affected_bbox = (0, 0, self.project.image_asset.width, self.project.image_asset.height)
-            self._push_commands_with_mask_patch(commands, affected_bbox=affected_bbox, update_mask=True)
+        if self.project.image_asset is not None:
+            bbox = (0, 0, self.project.image_asset.width, self.project.image_asset.height)
+            after_patch = np.zeros((bbox[3], bbox[2]), dtype=np.uint16)
+            self._push_mask_only_patch(bbox, after_patch)
             self.tool_controller.set_annotations(self.project.annotations)
             self.tool_controller.selected_annotation_id = None
             self._refresh_canvas()
@@ -1783,10 +2017,8 @@ class ImageSegmentationDialog(QDialog):
             self.canvas.update_preview_mask(self._preview_mask, self._preview_bbox, color)
         else:
             self.canvas.update_preview_mask(None, None, color)
-        if self.project.layer_visibility.get("preview_vector", True) and self.preview_selection is not None:
-            self.canvas.update_preview_polygons(self.preview_selection.polygon_preview, color)
-        else:
-            self.canvas.update_preview_polygons([], color)
+        # 运行时矢量预览显示入口暂时关闭，仅保留代码以便后续恢复。
+        self.canvas.update_preview_polygons([], color)
 
     def closeEvent(self, event) -> None:
         if not self._finish_node_edit_session():
