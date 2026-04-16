@@ -76,6 +76,8 @@ class SegmentationPgView(QWidget):
         self._dynamic_source = False
         self._last_request_signature = None
         self._interaction_mode = "browse"
+        self._is_panning = False
+        self._dynamic_render_margin_ratio = 0.35
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(120)
@@ -89,6 +91,8 @@ class SegmentationPgView(QWidget):
     def eventFilter(self, obj, event):
         if obj is self.graphics.viewport():
             if event.type() == QEvent.MouseButtonPress:
+                if hasattr(event, "button") and event.button() == Qt.MiddleButton:
+                    self._begin_pan_interaction()
                 if self._should_forward_mouse_event(event):
                     self.mouse_pressed.emit(self._payload_from_event(event))
                 if self._should_consume_left_mouse(event):
@@ -103,11 +107,24 @@ class SegmentationPgView(QWidget):
                 if self._should_consume_left_drag(event):
                     return True
             elif event.type() == QEvent.MouseButtonRelease:
+                if hasattr(event, "button") and event.button() == Qt.MiddleButton:
+                    self._end_pan_interaction()
                 if self._should_forward_mouse_event(event):
                     self.mouse_released.emit(self._payload_from_event(event))
                 if self._should_consume_left_mouse(event):
                     return True
         return super().eventFilter(obj, event)
+
+    def _begin_pan_interaction(self) -> None:
+        self._is_panning = True
+        if self._dynamic_source:
+            self._refresh_timer.stop()
+
+    def _end_pan_interaction(self) -> None:
+        was_panning = self._is_panning
+        self._is_panning = False
+        if self._dynamic_source and was_panning:
+            self._refresh_timer.start()
 
     def _should_forward_mouse_event(self, event) -> bool:
         return hasattr(event, "button") and event.button() in (Qt.LeftButton, Qt.RightButton)
@@ -192,6 +209,9 @@ class SegmentationPgView(QWidget):
 
     def _on_view_range_changed(self, *_args) -> None:
         if self._dynamic_source:
+            if self._is_panning:
+                self.view_state_changed.emit(self.current_view_state())
+                return
             self._refresh_timer.start()
         else:
             self.view_state_changed.emit(self.current_view_state())
@@ -199,11 +219,20 @@ class SegmentationPgView(QWidget):
     def current_render_request(self) -> RenderRequest:
         ((x0, x1), (y0, y1)) = self.view_box.viewRange()
         view_rect = self.graphics.viewport().rect()
+        width = max(x1 - x0, 1)
+        height = max(y1 - y0, 1)
+        if self._dynamic_source:
+            margin_x = width * self._dynamic_render_margin_ratio
+            margin_y = height * self._dynamic_render_margin_ratio
+            x0 -= margin_x
+            y0 -= margin_y
+            width += margin_x * 2.0
+            height += margin_y * 2.0
         return RenderRequest(
             x=x0,
             y=y0,
-            width=max(x1 - x0, 1),
-            height=max(y1 - y0, 1),
+            width=width,
+            height=height,
             screen_width=max(view_rect.width(), 1),
             screen_height=max(view_rect.height(), 1),
         )

@@ -1880,7 +1880,6 @@ class ImageSegmentationDialog(QDialog):
         if not self.project.image_asset or not self.canvas.last_render or not self.project.layer_visibility.get("raster", True):
             return None, None
         x0, y0, width, height = self.canvas.last_render.source_window
-        rect_x, rect_y, rect_w, rect_h = self.canvas.last_render.image_rect
         if width <= 0 or height <= 0:
             return None, None
         source_mask = self.project.mask_data
@@ -1897,10 +1896,10 @@ class ImageSegmentationDialog(QDialog):
             label_signature,
         )
         if cache_key == self._raster_overlay_cache_key:
-            cached_rgba, _cached_bbox = self._raster_overlay_cache_value
+            cached_rgba, cached_bbox = self._raster_overlay_cache_value
             if cached_rgba is None:
                 return None, None
-            return cached_rgba, (rect_x, rect_y, rect_w, rect_h)
+            return cached_rgba, cached_bbox
         x1 = min(x0 + width, source_mask.shape[1])
         y1 = min(y0 + height, source_mask.shape[0])
         clipped_mask = source_mask[y0:y1, x0:x1]
@@ -1911,7 +1910,7 @@ class ImageSegmentationDialog(QDialog):
         raster_rgba = GeometryService.colorize_mask(clipped_mask.astype(np.uint16), label_lookup)
         self._raster_overlay_cache_key = cache_key
         self._raster_overlay_cache_value = (raster_rgba, (x0, y0, clipped_mask.shape[1], clipped_mask.shape[0]))
-        return raster_rgba, (rect_x, rect_y, rect_w, rect_h)
+        return raster_rgba, (x0, y0, clipped_mask.shape[1], clipped_mask.shape[0])
 
     def _on_view_state_changed(self, state) -> None:
         self.tool_controller.set_view_state(state)
