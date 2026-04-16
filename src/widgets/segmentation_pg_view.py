@@ -89,11 +89,13 @@ class SegmentationPgView(QWidget):
     def eventFilter(self, obj, event):
         if obj is self.graphics.viewport():
             if event.type() == QEvent.MouseButtonPress:
-                self.mouse_pressed.emit(self._payload_from_event(event))
+                if self._should_forward_mouse_event(event):
+                    self.mouse_pressed.emit(self._payload_from_event(event))
                 if self._should_consume_left_mouse(event):
                     return True
             elif event.type() == QEvent.MouseButtonDblClick:
-                self.mouse_pressed.emit(self._payload_from_event(event, double_click=True))
+                if self._should_forward_mouse_event(event):
+                    self.mouse_pressed.emit(self._payload_from_event(event, double_click=True))
                 if self._should_consume_left_mouse(event):
                     return True
             elif event.type() == QEvent.MouseMove:
@@ -101,16 +103,17 @@ class SegmentationPgView(QWidget):
                 if self._should_consume_left_drag(event):
                     return True
             elif event.type() == QEvent.MouseButtonRelease:
-                self.mouse_released.emit(self._payload_from_event(event))
+                if self._should_forward_mouse_event(event):
+                    self.mouse_released.emit(self._payload_from_event(event))
                 if self._should_consume_left_mouse(event):
                     return True
         return super().eventFilter(obj, event)
 
+    def _should_forward_mouse_event(self, event) -> bool:
+        return hasattr(event, "button") and event.button() in (Qt.LeftButton, Qt.RightButton)
+
     def _should_consume_left_mouse(self, event) -> bool:
-        return (
-            hasattr(event, "button")
-            and event.button() in (Qt.LeftButton, Qt.RightButton)
-        )
+        return self._should_forward_mouse_event(event)
 
     def _should_consume_left_drag(self, event) -> bool:
         return (
@@ -239,6 +242,28 @@ class SegmentationPgView(QWidget):
             padding=0,
         )
         self.refresh_view()
+
+    def restore_view_state(self, state) -> bool:
+        if self.source is None or state is None:
+            return False
+        rect = self.graphics.viewport().rect()
+        viewport_width = max(rect.width(), 1)
+        viewport_height = max(rect.height(), 1)
+        scale_x = float(getattr(state, "scale_x", 0.0) or 0.0)
+        scale_y = float(getattr(state, "scale_y", 0.0) or 0.0)
+        if scale_x <= 0 or scale_y <= 0:
+            return False
+        center_x = float(getattr(state, "center_x", 0.0) or 0.0)
+        center_y = float(getattr(state, "center_y", 0.0) or 0.0)
+        width = max(scale_x * viewport_width, 1.0)
+        height = max(scale_y * viewport_height, 1.0)
+        self.view_box.setRange(
+            xRange=(center_x - width / 2.0, center_x + width / 2.0),
+            yRange=(center_y - height / 2.0, center_y + height / 2.0),
+            padding=0,
+        )
+        self.refresh_view()
+        return True
 
     def update_annotations(
         self,

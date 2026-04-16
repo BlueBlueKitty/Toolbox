@@ -34,16 +34,18 @@ class SegmentationProjectManager:
                 image_asset["path"], project_path
             )
         if project_path:
-            vector_path = self.vector_sidecar_path(project_path)
-            Path(vector_path).write_text(
-                json.dumps([annotation.to_dict() for annotation in project.annotations], ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            payload["annotations_asset"] = {
-                "path_mode": "relative",
-                "path": Path(vector_path).name,
-                "format": "json",
-            }
+            # 运行时矢量自动保存入口暂时关闭，仅保留代码路径以便后续恢复。
+            # vector_path = self.vector_sidecar_path(project_path)
+            # Path(vector_path).write_text(
+            #     json.dumps([annotation.to_dict() for annotation in project.annotations], ensure_ascii=False, indent=2),
+            #     encoding="utf-8",
+            # )
+            # payload["annotations_asset"] = {
+            #     "path_mode": "relative",
+            #     "path": Path(vector_path).name,
+            #     "format": "json",
+            # }
+            payload["annotations_asset"] = {}
             if project.mask_data is not None:
                 mask_path = self.mask_sidecar_path(project_path)
                 np.savez_compressed(mask_path, mask=project.mask_data)

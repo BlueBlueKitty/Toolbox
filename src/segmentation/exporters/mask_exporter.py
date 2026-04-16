@@ -34,12 +34,13 @@ def export_mask_file(
         mask = np.where(mask == binary_label_id, binary_label_id, 0).astype(mask.dtype)
     lower = output_path.lower()
     if lower.endswith(".png"):
-        Image.fromarray(mask).save(output_path)
+        Image.fromarray(_colorize_mask_rgb(mask, project)).save(output_path)
         return
 
     driver = gdal.GetDriverByName("GTiff")
+    creation_options = ["BIGTIFF=IF_SAFER"]
     if colored:
-        dataset = driver.Create(output_path, width, height, 1, gdal.GDT_UInt16)
+        dataset = driver.Create(output_path, width, height, 1, gdal.GDT_UInt16, options=creation_options)
         band = dataset.GetRasterBand(1)
         band.WriteArray(mask)
         band.SetNoDataValue(0)
@@ -54,7 +55,7 @@ def export_mask_file(
         band.SetRasterColorTable(color_table)
         band.SetRasterColorInterpretation(gdal.GCI_PaletteIndex)
     else:
-        dataset = driver.Create(output_path, width, height, 1, gdal.GDT_UInt16)
+        dataset = driver.Create(output_path, width, height, 1, gdal.GDT_UInt16, options=creation_options)
         dataset.GetRasterBand(1).WriteArray(mask)
         dataset.GetRasterBand(1).SetNoDataValue(0)
     if project.image_asset.geotransform:
@@ -63,3 +64,14 @@ def export_mask_file(
         dataset.SetProjection(project.image_asset.crs_wkt)
     dataset.FlushCache()
     dataset = None
+
+
+def _colorize_mask_rgb(mask: np.ndarray, project: SegmentationProject) -> np.ndarray:
+    rgb_mask = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
+    for label in project.labels:
+        color = label.color.lstrip("#")
+        if len(color) != 6:
+            continue
+        rgb = [int(color[index:index + 2], 16) for index in (0, 2, 4)]
+        rgb_mask[mask == int(label.id)] = rgb
+    return rgb_mask

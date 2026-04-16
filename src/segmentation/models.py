@@ -141,8 +141,6 @@ class MagicWandParams:
     similarity_mode: str = "rgba"
     fill_small_holes: bool = False
     fill_all_holes: bool = False
-    simplify_polygon: bool = True
-    vector_smoothness: int = 2
 
 
 @dataclass
@@ -159,12 +157,33 @@ class PreviewSelection:
 class DisplayState:
     zoom: float = 1.0
     center: tuple[float, float] = (0.0, 0.0)
+    center_x: float = 0.0
+    center_y: float = 0.0
+    scale_x: float = 1.0
+    scale_y: float = 1.0
+    viewport_width: float = 0.0
+    viewport_height: float = 0.0
     show_image: bool = True
     show_annotations: bool = True
     show_raster: bool = True
     show_preview: bool = True
     show_preview_vector: bool = False
     show_preview_mask: bool = True
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "DisplayState":
+        payload = dict(payload or {})
+        center = payload.get("center", (0.0, 0.0))
+        if isinstance(center, (list, tuple)) and len(center) >= 2:
+            payload.setdefault("center_x", float(center[0]))
+            payload.setdefault("center_y", float(center[1]))
+        else:
+            payload["center"] = (0.0, 0.0)
+        payload["center"] = (
+            float(payload.get("center_x", 0.0)),
+            float(payload.get("center_y", 0.0)),
+        )
+        return cls(**payload)
 
 
 @dataclass
@@ -227,7 +246,7 @@ class SegmentationProject:
             annotations=[],
             annotations_asset=payload.get("annotations_asset", {}),
             mask_asset=payload.get("mask_asset", {}),
-            display_state=DisplayState(**payload.get("display_state", {})),
+            display_state=DisplayState.from_dict(payload.get("display_state", {})),
             active_tool=payload.get("active_tool", "browse"),
             active_label_id=payload.get("active_label_id"),
             layer_visibility=payload.get("layer_visibility", {}),

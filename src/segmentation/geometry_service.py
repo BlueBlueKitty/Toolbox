@@ -87,10 +87,13 @@ class GeometryService:
         return polygon
 
     @staticmethod
-    def _simplify_polygon_geometry(geometry):
+    def _simplify_polygon_geometry(geometry, tolerance: float | None = None):
         if geometry is None or getattr(geometry, "is_empty", True):
             return geometry
-        simplified = geometry.simplify(GeometryService._SIMPLIFY_EPSILON, preserve_topology=True)
+        epsilon = GeometryService._SIMPLIFY_EPSILON if tolerance is None else max(0.0, float(tolerance))
+        if epsilon <= 0:
+            return geometry
+        simplified = geometry.simplify(epsilon, preserve_topology=True)
         if simplified.is_empty:
             return geometry
         if not simplified.is_valid:
@@ -182,8 +185,6 @@ class GeometryService:
         mask: np.ndarray,
         bbox: tuple[int, int, int, int],
         label_id: int,
-        simplify: bool = True,
-        vector_smoothness: int = 0,
         connectivity: int = 8,
         source_tool: str = "magic_wand",
     ) -> list[AnnotationObject]:
@@ -191,13 +192,11 @@ class GeometryService:
             mask,
             bbox,
             label_id,
-            simplify,
-            vector_smoothness,
             connectivity,
             source_tool,
         )
         if annotations is None:
-            raise RuntimeError("mask_to_annotations 需要 GDAL 和 Shapely 依赖")
+            raise RuntimeError("mask_to_annotations 需要 GDAL + Shapely 依赖")
         return annotations
 
     @staticmethod
@@ -267,15 +266,13 @@ class GeometryService:
         mask: np.ndarray,
         bbox: tuple[int, int, int, int],
         label_id: int,
-        simplify: bool,
-        vector_smoothness: int,
         connectivity: int,
         source_tool: str,
     ) -> list[AnnotationObject] | None:
         if gdal is None or ogr is None or shapely_wkb is None:
             return None
         try:
-            binary = GeometryService._prepare_binary_mask(mask, vector_smoothness)
+            binary = (mask > 0).astype(np.uint8)
             height, width = binary.shape[:2]
             mem_driver = gdal.GetDriverByName("MEM")
             raster = mem_driver.Create("", width, height, 1, gdal.GDT_Byte)
@@ -308,28 +305,10 @@ class GeometryService:
                 for polygon in GeometryService._extract_polygon_geometries(shapely_geom):
                     if polygon.is_empty:
                         continue
-                    if not polygon.is_valid:
-                        polygon = make_valid(polygon) if make_valid is not None else polygon.buffer(0)
-                    if not simplify and vector_smoothness <= 0:
-                        exterior = [[float(x), float(y)] for x, y in polygon.exterior.coords]
-                        holes = [
-                            [[float(x), float(y)] for x, y in ring.coords]
-                            for ring in polygon.interiors
-                        ]
-                        annotations.append(
-                            AnnotationObject.from_polygon(
-                                label_id=label_id,
-                                exterior=exterior,
-                                holes=holes,
-                                source_tool=source_tool,
-                            )
-                        )
-                        continue
-                    rebuilt = polygon
-                    if simplify:
-                        rebuilt = GeometryService._simplify_polygon_geometry(polygon)
+                    # if not polygon.is_valid:
+                    #     polygon = make_valid(polygon) if make_valid is not None else polygon.buffer(0)
                     annotations.extend(
-                        GeometryService.polygon_to_annotation_objects(rebuilt, label_id, source_tool)
+                        GeometryService.polygon_to_annotation_objects(polygon, label_id, source_tool)
                     )
             return annotations
         except Exception:
@@ -403,128 +382,6 @@ class GeometryService:
         bx1 = bx0 + bw
         by1 = by0 + bh
         return not (ax1 < bx0 or bx1 < ax0 or ay1 < by0 or by1 < ay0)
-
-    @staticmethod
-    def _prepare_binary_mask(mask: np.ndarray, vector_smoothness: int) -> np.ndarray:
-        binary = (mask > 0).astype(np.uint8)
-        if vector_smoothness <= 0 or cv2 is None:
-            return binary
-        return GeometryService._gauss_blur_only_border(binary, int(vector_smoothness))
-
-    @staticmethod
-    def _gauss_blur_only_border(mask: np.ndarray, radius: int) -> np.ndarray:
-        if radius <= 0 or mask.size == 0:
-            return mask.astype(np.uint8, copy=True)
-
-        binary = np.ascontiguousarray((mask > 0).astype(np.uint8))
-        bounds = GeometryService._compute_mask_bounds(binary)
-        if bounds is None:
-            return binary
-        border_mask = GeometryService._create_border_mask(binary, bounds)
-        if not np.any(border_mask):
-            return binary
-
-        candidate_mask = GeometryService._expand_border_mask(border_mask, radius)
-        weights = GeometryService._build_border_blur_weights(radius)
-        binary_float = binary.astype(np.float32, copy=False)
-        horizontal = cv2.filter2D(
-            binary_float,
-            ddepth=-1,
-            kernel=weights.reshape(1, -1),
-            borderType=cv2.BORDER_CONSTANT,
-        )
-        vertical = cv2.filter2D(
-            binary_float,
-            ddepth=-1,
-            kernel=weights.reshape(-1, 1),
-            borderType=cv2.BORDER_CONSTANT,
-        )
-
-        result = binary.copy()
-        candidate = candidate_mask.astype(bool)
-        combined = np.where(horizontal > 0.5, 1, np.where(horizontal + vertical > 0.5, 1, 0)).astype(np.uint8)
-        result[candidate] = combined[candidate]
-        return result
-
-    @staticmethod
-    def _compute_mask_bounds(mask: np.ndarray) -> tuple[int, int, int, int] | None:
-        height, width = mask.shape[:2]
-        if height == 0 or width == 0:
-            return None
-        ys, xs = np.where(mask > 0)
-        if len(xs) == 0 or len(ys) == 0:
-            return None
-        return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
-
-    @staticmethod
-    def _create_border_mask(
-        mask: np.ndarray,
-        bounds: tuple[int, int, int, int],
-    ) -> np.ndarray:
-        height, width = mask.shape[:2]
-        if height == 0 or width == 0:
-            return np.zeros((height, width), dtype=np.uint8)
-
-        min_x, min_y, max_x, max_y = bounds
-        border_mask = np.zeros((height, width), dtype=np.uint8)
-
-        x0 = max(min_x, 1)
-        x1 = min(max_x, width - 2)
-        y0 = max(min_y, 1)
-        y1 = min(max_y, height - 2)
-
-        if x0 <= x1 and y0 <= y1:
-            inner = mask[y0:y1 + 1, x0:x1 + 1] > 0
-            neighbors_all = (
-                (mask[y0 - 1:y1, x0 - 1:x1] > 0)
-                & (mask[y0 - 1:y1, x0:x1 + 1] > 0)
-                & (mask[y0 - 1:y1, x0 + 1:x1 + 2] > 0)
-                & (mask[y0:y1 + 1, x0 - 1:x1] > 0)
-                & (mask[y0:y1 + 1, x0 + 1:x1 + 2] > 0)
-                & (mask[y0 + 1:y1 + 2, x0 - 1:x1] > 0)
-                & (mask[y0 + 1:y1 + 2, x0:x1 + 1] > 0)
-                & (mask[y0 + 1:y1 + 2, x0 + 1:x1 + 2] > 0)
-            )
-            border_mask[y0:y1 + 1, x0:x1 + 1] = (inner & ~neighbors_all).astype(np.uint8)
-
-        if min_x == 0:
-            border_mask[min_y:max_y + 1, 0] |= (mask[min_y:max_y + 1, 0] > 0).astype(np.uint8)
-        if max_x == width - 1:
-            border_mask[min_y:max_y + 1, max_x] |= (mask[min_y:max_y + 1, max_x] > 0).astype(np.uint8)
-        if min_y == 0:
-            border_mask[0, min_x:max_x + 1] |= (mask[0, min_x:max_x + 1] > 0).astype(np.uint8)
-        if max_y == height - 1:
-            border_mask[max_y, min_x:max_x + 1] |= (mask[max_y, min_x:max_x + 1] > 0).astype(np.uint8)
-        return border_mask
-
-    @staticmethod
-    def _expand_border_mask(border_mask: np.ndarray, radius: int) -> np.ndarray:
-        if radius <= 0:
-            return border_mask.astype(np.uint8, copy=True)
-        kernel_size = radius * 2 + 1
-        kernel = np.zeros((kernel_size, kernel_size), dtype=np.uint8)
-        kernel[radius, :] = 1
-        kernel[:, radius] = 1
-        return cv2.dilate(border_mask.astype(np.uint8), kernel, iterations=1)
-
-    @staticmethod
-    def _build_border_blur_weights(radius: int) -> np.ndarray:
-        kernel_size = radius * 2 + 1
-        if radius <= 0:
-            return np.ones(1, dtype=np.float32)
-        sigma_term = 2.0 * radius * radius
-        weights = np.zeros(kernel_size, dtype=np.float32)
-        total = 0.0
-        for index in range(radius):
-            distance_sq = float((radius - index) * (radius - index))
-            weight = float(np.exp(-distance_sq / sigma_term) / np.pi)
-            weights[radius + index] = weight
-            weights[radius - index] = weight
-            total += 2.0 * weight
-        if total <= 0.0:
-            weights.fill(1.0 / kernel_size)
-            return weights
-        return weights / total
 
     @staticmethod
     def colorize_mask(mask: np.ndarray, label_lookup: dict[int, object]) -> np.ndarray:
