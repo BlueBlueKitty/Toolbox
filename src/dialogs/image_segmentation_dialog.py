@@ -7,6 +7,7 @@ from __future__ import annotations
 import copy
 import os
 import time
+from collections import OrderedDict
 from pathlib import Path
 import numpy as np
 
@@ -111,6 +112,10 @@ class ImageSegmentationDialog(QDialog):
         self._analysis_full_rgb_cache: np.ndarray | None = None
         self._analysis_full_rgb_cache_signature = None
         self._analysis_tile_cache: dict[tuple, np.ndarray] = {}
+        self._analysis_prepared_cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
+        self._analysis_prepared_cache_bytes = 0
+        self._analysis_prepared_cache_limit_bytes = 256 * 1024 * 1024
+        self._last_magic_roi_hint = None
         self._preview_vector_user_enabled = False
         self._mask_overlay_revision = 0
         self._raster_overlay_cache_key = None
@@ -436,6 +441,80 @@ class ImageSegmentationDialog(QDialog):
         self._analysis_full_rgb_cache = None
         self._analysis_full_rgb_cache_signature = None
         self._analysis_tile_cache.clear()
+        self._analysis_prepared_cache.clear()
+        self._analysis_prepared_cache_bytes = 0
+        self._last_magic_roi_hint = None
+
+    def _prepared_analysis_key(self, x0: int, y0: int, width: int, height: int, params) -> tuple:
+        return (
+            self._analysis_cache_signature(),
+            params.similarity_mode,
+            int(x0),
+            int(y0),
+            int(width),
+            int(height),
+        )
+
+    def _prepare_magic_analysis_image(
+        self,
+        rgb_image: np.ndarray,
+        x0: int,
+        y0: int,
+        width: int,
+        height: int,
+        params,
+    ) -> np.ndarray:
+        key = self._prepared_analysis_key(x0, y0, width, height, params)
+        cached = self._analysis_prepared_cache.get(key)
+        if cached is not None:
+            self._analysis_prepared_cache.move_to_end(key)
+            return cached
+        prepared = self.segmenter.prepare_image(rgb_image, params)
+        self._cache_prepared_analysis_image(key, prepared)
+        return prepared
+
+    def _cache_prepared_analysis_image(self, key: tuple, prepared: np.ndarray) -> None:
+        prepared_size = int(getattr(prepared, "nbytes", 0))
+        if prepared_size > self._analysis_prepared_cache_limit_bytes:
+            return
+        self._analysis_prepared_cache[key] = prepared
+        self._analysis_prepared_cache_bytes += prepared_size
+        while (
+            self._analysis_prepared_cache
+            and self._analysis_prepared_cache_bytes > self._analysis_prepared_cache_limit_bytes
+        ):
+            _old_key, old_value = self._analysis_prepared_cache.popitem(last=False)
+            self._analysis_prepared_cache_bytes -= int(getattr(old_value, "nbytes", 0))
+
+    def _magic_roi_hint_key(self, x: int, y: int, params) -> tuple:
+        return (
+            self._analysis_cache_signature(),
+            params.similarity_mode,
+            int(params.connectivity),
+            int(x),
+            int(y),
+        )
+
+    def _initial_magic_roi_radius(self, x: int, y: int, params) -> int:
+        key = self._magic_roi_hint_key(x, y, params)
+        if self._last_magic_roi_hint and self._last_magic_roi_hint[0] == key:
+            return int(self._last_magic_roi_hint[1])
+        return self._viewport_magic_roi_radius()
+
+    def _viewport_magic_roi_radius(self) -> int:
+        if self.project.image_asset is None:
+            return 512
+        try:
+            request = self.canvas.current_render_request()
+            visible_side = max(float(request.width), float(request.height))
+        except Exception:
+            visible_side = 1024.0
+        tile_size = self._analysis_tile_size()
+        radius = int(np.ceil(max(visible_side / 2.0, tile_size) / tile_size) * tile_size)
+        return max(tile_size, min(radius, self._analysis_max_roi_side()))
+
+    def _remember_magic_roi_radius(self, x: int, y: int, params, radius: int) -> None:
+        self._last_magic_roi_hint = (self._magic_roi_hint_key(x, y, params), int(radius))
 
     def _geo_should_cache_full_render(self) -> bool:
         if self.project.image_asset is None or self.current_source is None:
@@ -1461,24 +1540,38 @@ class ImageSegmentationDialog(QDialog):
     def _build_magic_preview_result(self, x: int, y: int):
         if self.current_source is None or self.project.image_asset is None:
             return None, None
+        params = self.magic_panel.params()
         full_rgb = self._ensure_full_analysis_rgb()
         if full_rgb is not None:
-            preview = self.segmenter.run(full_rgb, (x, y), self.magic_panel.params())
+            prepared = self._prepare_magic_analysis_image(
+                full_rgb,
+                0,
+                0,
+                self.project.image_asset.width,
+                self.project.image_asset.height,
+                params,
+            )
+            preview = self.segmenter.run_prepared(prepared, (x, y), params)
             if preview.bbox[2] <= 0 or preview.bbox[3] <= 0:
                 return None, None
+            self._remember_magic_roi_radius(x, y, params, max(self.project.image_asset.width, self.project.image_asset.height))
             return preview.mask.astype(np.uint8), preview.bbox
 
-        radius = 512
+        radius = self._initial_magic_roi_radius(x, y, params)
         max_side = self._analysis_max_roi_side()
         image_width = self.project.image_asset.width
         image_height = self.project.image_asset.height
         while True:
+            radius = min(radius, max_side)
             x0 = max(0, x - radius)
             y0 = max(0, y - radius)
             x1 = min(image_width, x + radius)
             y1 = min(image_height, y + radius)
-            roi_rgb = self._get_analysis_rgb_roi(x0, y0, x1 - x0, y1 - y0)
-            preview = self.segmenter.run(roi_rgb, (x - x0, y - y0), self.magic_panel.params())
+            width = x1 - x0
+            height = y1 - y0
+            roi_rgb = self._get_analysis_rgb_roi(x0, y0, width, height)
+            prepared = self._prepare_magic_analysis_image(roi_rgb, x0, y0, width, height, params)
+            preview = self.segmenter.run_prepared(prepared, (x - x0, y - y0), params)
             if preview.bbox[2] <= 0 or preview.bbox[3] <= 0:
                 return None, None
             if (
@@ -1489,6 +1582,7 @@ class ImageSegmentationDialog(QDialog):
                 radius = min(radius * 2, max_side)
                 continue
             bx, by, bw, bh = preview.bbox
+            self._remember_magic_roi_radius(x, y, params, max(x - x0, y - y0, x1 - x, y1 - y))
             return preview.mask.astype(np.uint8), (x0 + bx, y0 + by, bw, bh)
 
     def _ensure_preview_polygons(self, source_tool: str = "magic_wand_preview", force: bool = False):
@@ -1561,7 +1655,7 @@ class ImageSegmentationDialog(QDialog):
             self._update_progress(20, "正在计算局部识别区域...", maximum=100)
             mapped_mask, mapped_bbox = self._build_magic_preview_result(int(np.floor(x)), int(np.floor(y)))
             if mapped_mask is None or mapped_bbox is None:
-                self._finish_progress("没有识别到有效选区")
+                self._finish_progress("没有识别到有效选区，可能是阈值太小或者最小面积参数太大了")
                 return
             self._update_progress(70, "正在合并预览 Mask...", maximum=100)
             if self.magic_panel.merge_preview_enabled() and self._preview_mask is not None and self._preview_bbox is not None:

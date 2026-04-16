@@ -17,6 +17,10 @@ from .base import BaseSegmenter
 
 
 class MagicWandSegmenter(BaseSegmenter):
+    def __init__(self):
+        self._flood_mask: np.ndarray | None = None
+        self._flood_mask_shape: tuple[int, int] | None = None
+
     def run(
         self,
         image: np.ndarray,
@@ -31,8 +35,24 @@ class MagicWandSegmenter(BaseSegmenter):
         if not (0 <= sx < width and 0 <= sy < height):
             return PreviewSelection(seed_point, params, (0, 0, 0, 0), np.zeros((1, 1), dtype=np.uint8))
 
-        working = self._prepare_image(image, params)
-        mask = self._grow_region(working, seed_point, params)
+        working = self.prepare_image(image, params)
+        return self.run_prepared(working, seed_point, params)
+
+    def run_prepared(
+        self,
+        prepared_image: np.ndarray,
+        seed_point: tuple[int, int],
+        params: MagicWandParams,
+    ) -> PreviewSelection:
+        if cv2 is None:
+            raise RuntimeError("魔法棒需要 opencv-python 依赖")
+
+        height, width = prepared_image.shape[:2]
+        sx, sy = seed_point
+        if not (0 <= sx < width and 0 <= sy < height):
+            return PreviewSelection(seed_point, params, (0, 0, 0, 0), np.zeros((1, 1), dtype=np.uint8))
+
+        mask = self._grow_region(prepared_image, seed_point, params)
         area = int(mask.sum())
         if area < params.min_area:
             return PreviewSelection(seed_point, params, (0, 0, 0, 0), np.zeros((1, 1), dtype=np.uint8))
@@ -59,6 +79,9 @@ class MagicWandSegmenter(BaseSegmenter):
             polygon_preview=[],
         )
 
+    def prepare_image(self, image: np.ndarray, params: MagicWandParams) -> np.ndarray:
+        return self._prepare_image(image, params)
+
     def _prepare_image(self, image: np.ndarray, params: MagicWandParams) -> np.ndarray:
         if image.ndim == 2:
             base = image[..., None]
@@ -73,7 +96,7 @@ class MagicWandSegmenter(BaseSegmenter):
             index = {"r": 0, "g": 1, "b": 2}[mode]
             return rgb[..., index:index + 1]
         if mode in {"h", "s", "v"}:
-            hsv = cv2.cvtColor(np.ascontiguousarray(rgb.astype(np.uint8)), cv2.COLOR_RGB2HSV)
+            hsv = cv2.cvtColor(self._as_uint8_contiguous(rgb), cv2.COLOR_RGB2HSV)
             index = {"h": 0, "s": 1, "v": 2}[mode]
             return hsv[..., index:index + 1]
         return rgb
@@ -86,8 +109,8 @@ class MagicWandSegmenter(BaseSegmenter):
 
     def _grow_region_flood_fill(self, image: np.ndarray, seed_point: tuple[int, int], threshold: int, connectivity: int) -> np.ndarray:
         height, width = image.shape[:2]
-        work = np.ascontiguousarray(image.astype(np.uint8))
-        flood_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
+        work = self._as_uint8_contiguous(image)
+        flood_mask = self._reusable_flood_mask(height, width)
         flags = connectivity | cv2.FLOODFILL_MASK_ONLY | cv2.FLOODFILL_FIXED_RANGE | (255 << 8)
         if work.ndim == 2 or (work.ndim == 3 and work.shape[2] == 1):
             diff = threshold
@@ -96,3 +119,19 @@ class MagicWandSegmenter(BaseSegmenter):
             diff = tuple([threshold] * channels)
         cv2.floodFill(work.copy(), flood_mask, seedPoint=seed_point, newVal=0, loDiff=diff, upDiff=diff, flags=flags)
         return (flood_mask[1:-1, 1:-1] > 0).astype(np.uint8)
+
+    def _as_uint8_contiguous(self, image: np.ndarray) -> np.ndarray:
+        if image.dtype == np.uint8 and image.flags["C_CONTIGUOUS"]:
+            return image
+        if image.dtype == np.uint8:
+            return np.ascontiguousarray(image)
+        return np.ascontiguousarray(image.astype(np.uint8, copy=False))
+
+    def _reusable_flood_mask(self, height: int, width: int) -> np.ndarray:
+        shape = (height + 2, width + 2)
+        if self._flood_mask is None or self._flood_mask_shape != shape:
+            self._flood_mask = np.zeros(shape, dtype=np.uint8)
+            self._flood_mask_shape = shape
+        else:
+            self._flood_mask.fill(0)
+        return self._flood_mask
