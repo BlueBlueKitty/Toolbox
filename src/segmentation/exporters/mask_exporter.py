@@ -39,12 +39,20 @@ def export_mask_file(
 
     driver = gdal.GetDriverByName("GTiff")
     if colored:
-        rgba = GeometryService.colorize_mask(mask.astype(np.uint16), {label.id: label for label in project.labels})
-        dataset = driver.Create(output_path, width, height, 4, gdal.GDT_Byte)
-        for band_index in range(4):
-            dataset.GetRasterBand(band_index + 1).WriteArray(rgba[:, :, band_index])
-            if band_index == 3:
-                dataset.GetRasterBand(band_index + 1).SetNoDataValue(0)
+        dataset = driver.Create(output_path, width, height, 1, gdal.GDT_UInt16)
+        band = dataset.GetRasterBand(1)
+        band.WriteArray(mask)
+        band.SetNoDataValue(0)
+        color_table = gdal.ColorTable()
+        color_table.SetColorEntry(0, (0, 0, 0, 0))
+        for label in project.labels:
+            color = label.color.lstrip("#")
+            if len(color) != 6:
+                continue
+            rgb = tuple(int(color[index:index + 2], 16) for index in (0, 2, 4))
+            color_table.SetColorEntry(int(label.id), (*rgb, 255))
+        band.SetRasterColorTable(color_table)
+        band.SetRasterColorInterpretation(gdal.GCI_PaletteIndex)
     else:
         dataset = driver.Create(output_path, width, height, 1, gdal.GDT_UInt16)
         dataset.GetRasterBand(1).WriteArray(mask)

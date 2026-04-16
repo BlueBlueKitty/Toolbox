@@ -44,7 +44,12 @@ def choose_overview_for_scale(overviews: list[OverviewInfo], target_downsample: 
     return sorted_overviews[-1]
 
 
-def build_overviews(file_path: str, levels: list[int] | None = None, resample: str = "AVERAGE") -> tuple[bool, list[int]]:
+def build_overviews(
+    file_path: str,
+    levels: list[int] | None = None,
+    resample: str = "AVERAGE",
+    progress_callback=None,
+) -> tuple[bool, list[int]]:
     dataset = gdal.Open(file_path, gdal.GA_Update)
     if dataset is None:
         return False, []
@@ -59,7 +64,14 @@ def build_overviews(file_path: str, levels: list[int] | None = None, resample: s
                 factor *= 2
             if factor not in levels:
                 levels.append(factor)
-        dataset.BuildOverviews(resample, levels)
+        callback = None
+        if progress_callback is not None:
+            def callback(complete, _message, _data):
+                progress_callback(int(max(0.0, min(1.0, complete)) * 100), "正在创建金字塔...")
+                return 1
+        dataset.BuildOverviews(resample, levels, callback=callback)
+        if progress_callback is not None:
+            progress_callback(100, "金字塔创建完成")
         return True, levels
     finally:
         dataset = None

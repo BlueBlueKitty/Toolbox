@@ -18,6 +18,14 @@ def new_id() -> str:
     return uuid.uuid4().hex
 
 
+def round_image_coord(value: float) -> float:
+    return round(float(value), 3)
+
+
+def round_image_ring(points: list[list[float]]) -> list[list[float]]:
+    return [[round_image_coord(x), round_image_coord(y)] for x, y in points]
+
+
 @dataclass
 class OverviewInfo:
     level_index: int
@@ -89,7 +97,12 @@ class AnnotationObject:
         return AnnotationObject.from_dict(self.to_dict())
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["exterior"] = round_image_ring(self.exterior)
+        payload["holes"] = [round_image_ring(hole) for hole in self.holes]
+        if self.bbox is not None:
+            payload["bbox"] = [round_image_coord(value) for value in self.bbox]
+        return payload
 
     @classmethod
     def from_polygon(
@@ -100,6 +113,8 @@ class AnnotationObject:
         geom_type: str = "polygon",
         source_tool: str = "polygon",
     ) -> "AnnotationObject":
+        exterior = round_image_ring(exterior)
+        holes = [round_image_ring(hole) for hole in (holes or [])]
         xs = [pt[0] for pt in exterior]
         ys = [pt[1] for pt in exterior]
         bbox = [min(xs), min(ys), max(xs), max(ys)] if exterior else None
@@ -108,7 +123,7 @@ class AnnotationObject:
             label_id=label_id,
             geom_type=geom_type,
             exterior=exterior,
-            holes=holes or [],
+            holes=holes,
             bbox=bbox,
             source_tool=source_tool,
         )
@@ -124,7 +139,8 @@ class MagicWandParams:
     connectivity: int = 8
     min_area: int = 16
     similarity_mode: str = "rgba"
-    fill_holes: bool = False
+    fill_small_holes: bool = False
+    fill_all_holes: bool = False
     simplify_polygon: bool = True
     vector_smoothness: int = 2
 
@@ -147,7 +163,7 @@ class DisplayState:
     show_annotations: bool = True
     show_raster: bool = True
     show_preview: bool = True
-    show_preview_vector: bool = True
+    show_preview_vector: bool = False
     show_preview_mask: bool = True
 
 
@@ -169,7 +185,7 @@ class SegmentationProject:
             "annotations": True,
             "raster": True,
             "preview": True,
-            "preview_vector": True,
+            "preview_vector": False,
             "preview_mask": True,
         }
     )

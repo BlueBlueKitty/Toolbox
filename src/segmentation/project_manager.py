@@ -20,7 +20,8 @@ def get_settings() -> QSettings:
 
 
 class SegmentationProjectManager:
-    PROJECT_SUFFIX = ".toolbox-seg.json"
+    PROJECT_SUFFIX = ".seg_proj"
+    LEGACY_PROJECT_SUFFIX = ".toolbox-seg.json"
 
     def __init__(self):
         self.settings = get_settings()

@@ -49,8 +49,8 @@ class GeoTiffImageSource(BaseImageSource):
     def metadata(self) -> ImageAsset:
         return self._metadata
 
-    def build_overviews(self) -> tuple[bool, list[int]]:
-        success, levels = build_overviews(self.file_path)
+    def build_overviews(self, progress_callback=None) -> tuple[bool, list[int]]:
+        success, levels = build_overviews(self.file_path, progress_callback=progress_callback)
         if success:
             self.dataset = None
             self.dataset = gdal.Open(str(self.file_path))
@@ -58,10 +58,17 @@ class GeoTiffImageSource(BaseImageSource):
         return success, levels
 
     def render(self, request: RenderRequest, render_config: SegmentationRenderConfig) -> RenderTileResult:
-        x0 = max(0, int(request.x))
-        y0 = max(0, int(request.y))
-        width = max(1, int(min(self._metadata.width - x0, request.width)))
-        height = max(1, int(min(self._metadata.height - y0, request.height)))
+        req_x0 = max(0.0, min(float(request.x), float(self._metadata.width - 1)))
+        req_y0 = max(0.0, min(float(request.y), float(self._metadata.height - 1)))
+        req_x1 = max(req_x0 + 1.0, min(float(request.x + request.width), float(self._metadata.width)))
+        req_y1 = max(req_y0 + 1.0, min(float(request.y + request.height), float(self._metadata.height)))
+
+        x0 = max(0, int(np.floor(req_x0)))
+        y0 = max(0, int(np.floor(req_y0)))
+        x1 = min(self._metadata.width, max(x0 + 1, int(np.ceil(req_x1))))
+        y1 = min(self._metadata.height, max(y0 + 1, int(np.ceil(req_y1))))
+        width = max(1, x1 - x0)
+        height = max(1, y1 - y0)
         target_downsample = max(
             width / max(request.screen_width, 1),
             height / max(request.screen_height, 1),
@@ -104,7 +111,7 @@ class GeoTiffImageSource(BaseImageSource):
         return RenderTileResult(
             raw_array=raw,
             display_rgb=display_rgb,
-            image_rect=(x0, y0, width, height),
+            image_rect=(req_x0, req_y0, req_x1 - req_x0, req_y1 - req_y0),
             overview_level=overview,
             source_window=(x0, y0, width, height),
         )

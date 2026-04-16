@@ -17,7 +17,13 @@ from src.segmentation.image_sources.render_request import RenderRequest
 from src.segmentation.image_sources.geotiff_source import GeoTiffImageSource
 from src.segmentation.rendering import default_render_config
 from src.segmentation.models import AnnotationObject, RenderTileResult, ViewportState
-from .annotation_overlay_items import DraftOverlayItem, PolygonOverlayItem, PreviewMaskItem, PreviewPolygonItem
+from .annotation_overlay_items import (
+    DraftOverlayItem,
+    PolygonOverlayItem,
+    PreviewMaskItem,
+    PreviewPolygonItem,
+    SnapIndicatorItem,
+)
 
 
 @dataclass
@@ -53,11 +59,13 @@ class SegmentationPgView(QWidget):
         self.raster_item = pg.ImageItem(axisOrder="row-major")
         self.preview_item = PreviewMaskItem()
         self.draft_item = DraftOverlayItem()
+        self.snap_item = SnapIndicatorItem()
         self.view_box.addItem(self.image_item)
         self.view_box.addItem(self.raster_item)
         self.view_box.addItem(self.preview_item)
         self.view_box.addItem(self.draft_item.scatter)
         self.draft_item.path_item.setParentItem(self.view_box.childGroup)
+        self.snap_item.path_item.setParentItem(self.view_box.childGroup)
         self.raster_item.setOpacity(0.45)
 
         self.source: BaseImageSource | None = None
@@ -289,6 +297,12 @@ class SegmentationPgView(QWidget):
             self.raster_item.setRect(QRectF(0, 0, rgba_mask.shape[1], rgba_mask.shape[0]))
         else:
             self.raster_item.setRect(QRectF(*bbox))
+
+    def update_snap_indicator(self, snap_type: str | None, position: tuple[float, float] | None = None) -> None:
+        if snap_type is None or position is None:
+            self.snap_item.clear()
+            return
+        self.snap_item.update_indicator(snap_type, position[0], position[1])
 
     def viewport_image(self) -> np.ndarray | None:
         if self.last_render is None:

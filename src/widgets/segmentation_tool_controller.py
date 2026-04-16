@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, Qt, Signal
 from shapely.geometry import Point, box as shapely_box
 
 from src.segmentation.geometry_service import GeometryService
-from src.segmentation.models import AnnotationObject
+from src.segmentation.models import AnnotationObject, ViewportState
 
 
 class SegmentationToolController(QObject):
@@ -21,6 +21,7 @@ class SegmentationToolController(QObject):
     geometry_changed = Signal(str, object)
     geometry_committed = Signal(str, object, object)
     draft_changed = Signal(str, object)
+    snap_indicator_changed = Signal(object, object)
     message_requested = Signal(str)
 
     TOOL_BROWSE = "browse"
@@ -35,6 +36,7 @@ class SegmentationToolController(QObject):
         self.selected_annotation_id: str | None = None
         self.selected_annotation_ids: set[str] = set()
         self.selected_vertex_index = None
+        self._last_edited_vertex_ref = None
         self._polygon_points: list[list[float]] = []
         self._rectangle_start: tuple[float, float] | None = None
         self._dragging_vertex = False
@@ -44,11 +46,17 @@ class SegmentationToolController(QObject):
         self._selection_box_click_target: str | None = None
         self._drag_origin_annotation: AnnotationObject | None = None
         self._drag_last_annotation: AnnotationObject | None = None
-        self._snap_grid_size = 10.0
-        self._snap_tolerance = 8.0
+        self._viewport_state = ViewportState()
+        self._screen_snap_tolerance = {
+            "vertex": 18.0,
+            "edge": 16.0,
+        }
 
     def set_annotations(self, annotations: list[AnnotationObject]) -> None:
         self.annotations = annotations[:]
+
+    def set_view_state(self, state: ViewportState) -> None:
+        self._viewport_state = state
 
     def set_tool(self, tool_name: str) -> None:
         self.active_tool = tool_name
@@ -57,6 +65,8 @@ class SegmentationToolController(QObject):
         self._rectangle_start = None
         self._dragging_vertex = False
         self.draft_changed.emit("clear", None)
+        self.snap_indicator_changed.emit(None, None)
+        self._last_edited_vertex_ref = None
 
     def handle_press(self, payload) -> None:
         x, y = payload.x, payload.y
@@ -105,13 +115,31 @@ class SegmentationToolController(QObject):
                 annotation = self._find_annotation(self.selected_annotation_id)
                 if annotation is None:
                     return
+                normalized_vertex_ref = self._normalize_vertex_ref(annotation, self.selected_vertex_index)
+                self.selected_vertex_index = normalized_vertex_ref
+                current_point = self._current_vertex_point(annotation.id, normalized_vertex_ref)
+                trial = annotation.clone()
+                self._update_ring_vertex(trial, normalized_vertex_ref, x, y)
+                free_drag_valid = GeometryService.is_annotation_geometry_valid(trial)
+                actual_x, actual_y = (x, y) if free_drag_valid else (
+                    (current_point[0], current_point[1]) if current_point is not None else (x, y)
+                )
+
                 updated = annotation.clone()
-                snapped_x, snapped_y = self._apply_snapping(x, y, annotation.id, self.selected_vertex_index)
-                self._update_ring_vertex(updated, self.selected_vertex_index, snapped_x, snapped_y)
+                snapped_x, snapped_y, snap_meta = self._apply_snapping(actual_x, actual_y, annotation.id, normalized_vertex_ref)
+                if snap_meta is None:
+                    self.snap_indicator_changed.emit(None, None)
+                else:
+                    self.snap_indicator_changed.emit(snap_meta["type"], snap_meta["position"])
+                self._update_ring_vertex(updated, normalized_vertex_ref, snapped_x, snapped_y)
+                self.selected_vertex_index = normalized_vertex_ref
                 if not GeometryService.is_annotation_geometry_valid(updated):
-                    return
+                    updated = trial if free_drag_valid else annotation.clone()
+                    if not free_drag_valid and not GeometryService.is_annotation_geometry_valid(updated):
+                        return
                 GeometryService.refresh_annotation_metadata(updated)
                 self._drag_last_annotation = updated.clone()
+                self._last_edited_vertex_ref = normalized_vertex_ref
                 self.geometry_changed.emit(annotation.id, updated)
                 return
             if self._distance(self._selection_box_start, [x, y]) >= 3:
@@ -136,6 +164,23 @@ class SegmentationToolController(QObject):
                     and self._drag_origin_annotation is not None
                     and self._drag_last_annotation is not None
                 ):
+                    final_annotation = self._drag_last_annotation.clone()
+                    if self.selected_vertex_index is not None:
+                        current_annotation = self._find_annotation(self.selected_annotation_id)
+                        if current_annotation is not None:
+                            self.selected_vertex_index = self._normalize_vertex_ref(current_annotation, self.selected_vertex_index)
+                        snapped_x, snapped_y, snap_meta = self._apply_snapping(
+                            x, y, self.selected_annotation_id, self.selected_vertex_index
+                        )
+                        if snap_meta is not None:
+                            self._update_ring_vertex(final_annotation, self.selected_vertex_index, snapped_x, snapped_y)
+                            if GeometryService.is_annotation_geometry_valid(final_annotation):
+                                GeometryService.refresh_annotation_metadata(final_annotation)
+                                self._drag_last_annotation = final_annotation.clone()
+                    
+                    if self.selected_vertex_index is not None:
+                        self._last_edited_vertex_ref = self.selected_vertex_index            
+                                
                     self.geometry_committed.emit(
                         self.selected_annotation_id,
                         self._drag_origin_annotation.clone(),
@@ -145,6 +190,7 @@ class SegmentationToolController(QObject):
                 self._selection_box_active = False
                 self._selection_box_additive = False
                 self._selection_box_click_target = None
+                self.snap_indicator_changed.emit(None, None)
             elif self._selection_box_active:
                 self._apply_box_selection(self._selection_box_start, (x, y), self._selection_box_additive)
                 self._selection_box_start = None
@@ -162,6 +208,7 @@ class SegmentationToolController(QObject):
         self._dragging_vertex = False
         self._drag_origin_annotation = None
         self._drag_last_annotation = None
+        self.snap_indicator_changed.emit(None, None)
 
     def finish_polygon(self) -> None:
         if len(self._polygon_points) < 3:
@@ -179,6 +226,7 @@ class SegmentationToolController(QObject):
         self.selected_annotation_ids.clear()
         self.selected_vertex_index = None
         self.selection_changed.emit(set())
+        self._last_edited_vertex_ref = None
         return selected
 
     def remove_selected_vertex(self) -> AnnotationObject | None:
@@ -258,14 +306,42 @@ class SegmentationToolController(QObject):
         return None
 
     def _hit_vertex(self, annotation: AnnotationObject, x: float, y: float):
+        tolerance = self._screen_distance_to_image("vertex", fallback=6.0)
+        candidates = []
+
         for index, point in enumerate(annotation.exterior[:-1]):
-            if self._distance(point, [x, y]) <= 6:
-                return ("exterior", -1, index)
+            dist = self._distance(point, [x, y])
+            if dist <= tolerance:
+                candidates.append((dist, ("exterior", -1, index)))
+
         for hole_index, hole in enumerate(annotation.holes):
             for index, point in enumerate(hole[:-1]):
-                if self._distance(point, [x, y]) <= 6:
-                    return ("hole", hole_index, index)
-        return None
+                dist = self._distance(point, [x, y])
+                if dist <= tolerance:
+                    candidates.append((dist, ("hole", hole_index, index)))
+
+        if not candidates:
+            return None
+
+        # 先按距离排序
+        candidates.sort(key=lambda item: item[0])
+
+        # 1. 优先返回当前选中的顶点
+        if annotation.id == self.selected_annotation_id and self.selected_vertex_index is not None:
+            normalized_selected = self._normalize_vertex_ref(annotation, self.selected_vertex_index)
+            for _, ref in candidates:
+                if ref == normalized_selected:
+                    return ref
+
+        # 2. 再优先返回最近一次编辑的顶点
+        if annotation.id == self.selected_annotation_id and self._last_edited_vertex_ref is not None:
+            normalized_last = self._normalize_vertex_ref(annotation, self._last_edited_vertex_ref)
+            for _, ref in candidates:
+                if ref == normalized_last:
+                    return ref
+
+        # 3. 否则返回最近的那个
+        return candidates[0][1]
 
     def _hit_segment(self, annotation: AnnotationObject, x: float, y: float):
         rings = [("exterior", -1, annotation.exterior)] + [
@@ -274,7 +350,7 @@ class SegmentationToolController(QObject):
         for ring_type, hole_index, points in rings:
             for index in range(len(points) - 1):
                 dist = self._distance_to_segment([x, y], points[index], points[index + 1])
-                if dist <= 4:
+                if dist <= self._screen_distance_to_image("edge", fallback=4.0):
                     return (ring_type, hole_index, index)
         return None
 
@@ -318,27 +394,39 @@ class SegmentationToolController(QObject):
     def _distance(self, p1, p2) -> float:
         return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
-    def _apply_snapping(self, x: float, y: float, annotation_id: str, vertex_ref) -> tuple[float, float]:
+    def _apply_snapping(self, x: float, y: float, annotation_id: str, vertex_ref) -> tuple[float, float, dict | None]:
         snapped_x, snapped_y = x, y
-        best_distance = self._snap_tolerance + 1.0
+        vertex_tolerance = self._screen_distance_to_image("vertex")
+        edge_tolerance = self._screen_distance_to_image("edge")
 
-        grid_x = round(x / self._snap_grid_size) * self._snap_grid_size
-        grid_y = round(y / self._snap_grid_size) * self._snap_grid_size
-        grid_distance = math.hypot(grid_x - x, grid_y - y)
-        if grid_distance <= self._snap_tolerance:
-            snapped_x, snapped_y = grid_x, grid_y
-            best_distance = grid_distance
+        connected_edges = self._connected_segment_refs(annotation_id, vertex_ref)
+        best_vertex_distance = float("inf")
+        best_vertex = None
 
         for annotation in self.annotations:
-            rings = [annotation.exterior] + annotation.holes
-            for ring in rings:
+            rings = [("exterior", -1, annotation.exterior)] + [
+                ("hole", idx, hole) for idx, hole in enumerate(annotation.holes)
+            ]
+            for ring_type, hole_index, ring in rings:
                 for index, point in enumerate(ring[:-1]):
-                    if annotation.id == annotation_id and vertex_ref == ("exterior", -1, index):
-                        continue
+                    if annotation.id == annotation_id:
+                        current_ref = self._normalize_vertex_ref(annotation, vertex_ref)
+                        candidate_ref = (ring_type, hole_index, index)
+                        if candidate_ref == current_ref:
+                            continue
                     distance = self._distance(point, [x, y])
-                    if distance < best_distance and distance <= self._snap_tolerance:
-                        snapped_x, snapped_y = point[0], point[1]
-                        best_distance = distance
+                    if distance < best_vertex_distance and distance <= vertex_tolerance:
+                        best_vertex_distance = distance
+                        best_vertex = point
+
+        if best_vertex is not None:
+            return best_vertex[0], best_vertex[1], {
+                "type": "vertex",
+                "position": (best_vertex[0], best_vertex[1]),
+            }
+
+        best_distance = float("inf")
+        snap_meta = None
 
         for annotation in self.annotations:
             rings = [("exterior", -1, annotation.exterior)] + [("hole", idx, hole) for idx, hole in enumerate(annotation.holes)]
@@ -346,17 +434,19 @@ class SegmentationToolController(QObject):
                 for index in range(len(ring) - 1):
                     start = ring[index]
                     end = ring[index + 1]
-                    if annotation.id == annotation_id and {index, index + 1} & {vertex_ref[2], 0 if vertex_ref[2] == len(ring) - 2 else -1}:
+                    segment_ref = (annotation.id, ring_type, hole_index, index)
+                    if segment_ref in connected_edges:
                         continue
                     projection = self._project_point_to_segment([x, y], start, end)
                     if projection is None:
                         continue
                     distance = self._distance(projection, [x, y])
-                    if distance < best_distance and distance <= self._snap_tolerance:
+                    if distance < best_distance and distance <= edge_tolerance:
                         snapped_x, snapped_y = projection[0], projection[1]
                         best_distance = distance
+                        snap_meta = {"type": "edge", "position": (projection[0], projection[1])}
 
-        return snapped_x, snapped_y
+        return snapped_x, snapped_y, snap_meta
 
     def _project_point_to_segment(self, point, start, end):
         px, py = point
@@ -377,6 +467,8 @@ class SegmentationToolController(QObject):
             self.selected_vertex_index = None
             self._dragging_vertex = False
             self.selection_changed.emit(set())
+            self._last_edited_vertex_ref = None
+        self.snap_indicator_changed.emit(None, None)
 
     def select_all(self) -> None:
         self.selected_annotation_ids = {annotation.id for annotation in self.annotations}
@@ -384,6 +476,7 @@ class SegmentationToolController(QObject):
         self.selected_vertex_index = None
         self._dragging_vertex = False
         self.selection_changed.emit(set(self.selected_annotation_ids))
+        self.snap_indicator_changed.emit(None, None)
 
     def _apply_click_selection(self, annotation_id: str | None, additive: bool) -> None:
         if additive:
@@ -399,6 +492,8 @@ class SegmentationToolController(QObject):
             self.selected_annotation_id = annotation_id
         self.selected_vertex_index = None
         self.selection_changed.emit(set(self.selected_annotation_ids))
+        self.snap_indicator_changed.emit(None, None)
+        self._last_edited_vertex_ref = None
 
     def _apply_box_selection(self, start: tuple[float, float], end: tuple[float, float], additive: bool) -> None:
         x0, y0 = start
@@ -421,6 +516,7 @@ class SegmentationToolController(QObject):
         self.selected_annotation_id = next(iter(selected), None)
         self.selected_vertex_index = None
         self.selection_changed.emit(set(self.selected_annotation_ids))
+        self.snap_indicator_changed.emit(None, None)
 
     def _get_ring_points(self, annotation: AnnotationObject, vertex_ref):
         ring_type, hole_index, _ = vertex_ref
@@ -434,13 +530,24 @@ class SegmentationToolController(QObject):
             annotation.holes[hole_index] = points
 
     def _update_ring_vertex(self, annotation: AnnotationObject, vertex_ref, x: float, y: float) -> None:
-        _, _, vertex_index = vertex_ref
-        points = [point[:] for point in self._get_ring_points(annotation, vertex_ref)]
-        points[vertex_index] = [x, y]
-        if vertex_index == 0 or vertex_index == len(points) - 1:
-            points[0] = [x, y]
-            points[-1] = [x, y]
-        self._set_ring_points(annotation, vertex_ref, GeometryService.ensure_closed(points[:-1]) if len(points) > 2 else points)
+        ring_type, hole_index, vertex_index = self._normalize_vertex_ref(annotation, vertex_ref)
+        points = [point[:] for point in self._get_ring_points(annotation, (ring_type, hole_index, vertex_index))]
+        if not points:
+            return
+        if len(points) == 1:
+            self._set_ring_points(annotation, (ring_type, hole_index, vertex_index), [[x, y]])
+            return
+
+        unique_points = [point[:] for point in points[:-1]]
+        if not unique_points:
+            return
+
+        vertex_index = max(0, min(vertex_index, len(unique_points) - 1))
+        unique_points[vertex_index] = [x, y]
+
+        # 闭合环始终显式追加首点，避免当首点与其它点重合时被 ensure_closed 意外压缩。
+        closed_points = unique_points + [unique_points[0][:]]
+        self._set_ring_points(annotation, (ring_type, hole_index, vertex_index), closed_points)
 
     def _insert_ring_vertex(self, annotation: AnnotationObject, segment_ref, x: float, y: float) -> None:
         ring_type, hole_index, segment_index = segment_ref
@@ -457,3 +564,46 @@ class SegmentationToolController(QObject):
         del points[vertex_ref[2]]
         self._set_ring_points(annotation, base_ref, GeometryService.ensure_closed(points))
         return True
+
+    def _screen_distance_to_image(self, snap_type: str, fallback: float | None = None) -> float:
+        base = self._screen_snap_tolerance.get(snap_type, fallback if fallback is not None else 8.0)
+        pixel_scale = max(
+            float(getattr(self._viewport_state, "scale_x", 1.0) or 1.0),
+            float(getattr(self._viewport_state, "scale_y", 1.0) or 1.0),
+        )
+        return max(base * pixel_scale, pixel_scale)
+
+    def _connected_segment_refs(self, annotation_id: str, vertex_ref) -> set[tuple[str, str, int, int]]:
+        annotation = self._find_annotation(annotation_id)
+        if annotation is None:
+            return set()
+        ring_type, hole_index, vertex_index = vertex_ref
+        ring = annotation.exterior if ring_type == "exterior" else annotation.holes[hole_index]
+        if len(ring) < 2:
+            return set()
+        unique_count = max(len(ring) - 1, 1)
+        prev_index = (vertex_index - 1) % unique_count
+        next_index = vertex_index % unique_count
+        return {
+            (annotation_id, ring_type, hole_index, prev_index),
+            (annotation_id, ring_type, hole_index, next_index),
+        }
+
+    def _current_vertex_point(self, annotation_id: str, vertex_ref):
+        annotation = self._find_annotation(annotation_id)
+        if annotation is None:
+            return None
+        ring_type, hole_index, vertex_index = self._normalize_vertex_ref(annotation, vertex_ref)
+        ring = annotation.exterior if ring_type == "exterior" else annotation.holes[hole_index]
+        if 0 <= vertex_index < len(ring):
+            return ring[vertex_index]
+        return None
+
+    def _normalize_vertex_ref(self, annotation: AnnotationObject, vertex_ref):
+        ring_type, hole_index, vertex_index = vertex_ref
+        ring = annotation.exterior if ring_type == "exterior" else annotation.holes[hole_index]
+        if not ring:
+            return ring_type, hole_index, 0
+        unique_count = max(len(ring) - 1, 1)
+        normalized_index = max(0, min(int(vertex_index), unique_count - 1))
+        return ring_type, hole_index, normalized_index

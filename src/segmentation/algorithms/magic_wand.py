@@ -44,7 +44,9 @@ class MagicWandSegmenter(BaseSegmenter):
         x0, x1 = int(xs.min()), int(xs.max())
         y0, y1 = int(ys.min()), int(ys.max())
         local_binary = mask[y0:y1 + 1, x0:x1 + 1].astype(np.uint8)
-        if params.fill_holes:
+        if params.fill_all_holes:
+            local_binary = GeometryService.fill_all_holes(local_binary)
+        elif params.fill_small_holes:
             local_binary = GeometryService.fill_small_holes(local_binary, params.min_area)
         alpha_mask = np.where(local_binary > 0, 255, 0).astype(np.uint8)
         bbox = (x0, y0, x1 - x0 + 1, y1 - y0 + 1)

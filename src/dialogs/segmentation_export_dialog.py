@@ -35,7 +35,7 @@ class SegmentationExportDialog(QDialog):
 
     MASK_FORMATS = {
         "PNG Mask": ".png",
-        "TIFF Mask": ".tif",
+        "GeoTIFF": ".tif",
     }
 
     def __init__(self, default_name: str, default_dir: str, has_geo: bool, prefer_tif_mask: bool, parent=None):
@@ -83,14 +83,16 @@ class SegmentationExportDialog(QDialog):
         if not has_geo:
             self.vector_coord_combo.model().item(1).setEnabled(False)
             self.vector_coord_combo.setCurrentIndex(0)
+        else:
+            self.vector_coord_combo.setCurrentIndex(1)
         form.addRow("矢量坐标", self.vector_coord_combo)
 
         self.mask_format_combo = QComboBox()
         self.mask_format_combo.addItems(self.MASK_FORMATS.keys())
-        self.mask_format_combo.setCurrentText("TIFF Mask" if prefer_tif_mask else "PNG Mask")
+        self.mask_format_combo.setCurrentText("GeoTIFF" if prefer_tif_mask else "PNG Mask")
         form.addRow("Mask 格式", self.mask_format_combo)
 
-        self.mask_colored_check = QCheckBox("TIFF 导出带标签着色层")
+        self.mask_colored_check = QCheckBox("写入标签着色表")
         self.mask_colored_check.setChecked(True)
         form.addRow("Mask 选项", self.mask_colored_check)
 
@@ -121,7 +123,7 @@ class SegmentationExportDialog(QDialog):
         self.vector_format_combo.setEnabled(vector_enabled)
         self.vector_coord_combo.setEnabled(vector_enabled)
         self.mask_format_combo.setEnabled(mask_enabled)
-        self.mask_colored_check.setEnabled(mask_enabled and self.mask_format_combo.currentText() == "TIFF Mask")
+        self.mask_colored_check.setEnabled(mask_enabled and self.mask_format_combo.currentText() == "GeoTIFF")
 
     def _accept(self) -> None:
         output_dir = self.dir_edit.text().strip()

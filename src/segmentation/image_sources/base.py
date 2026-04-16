@@ -22,7 +22,7 @@ class BaseImageSource:
     def read_window_native(self, x: int, y: int, width: int, height: int):
         raise NotImplementedError
 
-    def build_overviews(self) -> tuple[bool, list[int]]:
+    def build_overviews(self, progress_callback=None) -> tuple[bool, list[int]]:
         return False, []
 
     def band_minmax(self, band_index: int) -> tuple[float, float] | None:

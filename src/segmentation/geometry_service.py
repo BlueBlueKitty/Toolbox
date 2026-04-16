@@ -82,7 +82,7 @@ class GeometryService:
         if polygon.is_empty:
             return None
         if not polygon.is_valid:
-            print("警告: 构建多边形时发现无效几何，正在尝试修复...")
+            # print("警告: 构建多边形时发现无效几何，正在尝试修复...")
             polygon = make_valid(polygon) if make_valid is not None else polygon.buffer(0)
         return polygon
 
@@ -117,6 +117,11 @@ class GeometryService:
 
     @staticmethod
     def refresh_annotation_metadata(annotation: AnnotationObject) -> None:
+        annotation.exterior = [[round(float(pt[0]), 3), round(float(pt[1]), 3)] for pt in annotation.exterior]
+        annotation.holes = [
+            [[round(float(pt[0]), 3), round(float(pt[1]), 3)] for pt in hole]
+            for hole in annotation.holes
+        ]
         if not annotation.exterior:
             annotation.bbox = None
             return
@@ -200,21 +205,62 @@ class GeometryService:
         binary = (mask > 0).astype(np.uint8)
         if max_hole_area <= 0 or cv2 is None or binary.size == 0:
             return binary
+
         inverted = 1 - binary
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(inverted, connectivity=8)
-        result = binary.copy()
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            inverted, connectivity=8
+        )
+
+        if num_labels <= 1:
+            return binary
+
         height, width = binary.shape[:2]
-        for label_index in range(1, num_labels):
-            area = int(stats[label_index, cv2.CC_STAT_AREA])
-            if area > max_hole_area:
-                continue
-            ys, xs = np.where(labels == label_index)
-            if len(xs) == 0 or len(ys) == 0:
-                continue
-            if xs.min() == 0 or ys.min() == 0 or xs.max() == width - 1 or ys.max() == height - 1:
-                continue
-            result[labels == label_index] = 1
-        return result.astype(np.uint8)
+
+        # 直接从 stats 里取连通域属性，避免对每个连通域做 np.where
+        left = stats[:, cv2.CC_STAT_LEFT]
+        top = stats[:, cv2.CC_STAT_TOP]
+        comp_width = stats[:, cv2.CC_STAT_WIDTH]
+        comp_height = stats[:, cv2.CC_STAT_HEIGHT]
+        area = stats[:, cv2.CC_STAT_AREA]
+
+        # 是否接触图像边界：接触边界的不是“孔洞”，不能填
+        touches_border = (
+            (left == 0) |
+            (top == 0) |
+            (left + comp_width >= width) |
+            (top + comp_height >= height)
+        )
+
+        # 需要填补的 label
+        fill_lut = (area <= max_hole_area) & (~touches_border)
+
+        # label 0 是 inverted 的背景，不处理
+        fill_lut[0] = False
+
+        # 一次性回填，避免每个 label 都扫描整张 labels 图
+        binary[fill_lut[labels]] = 1
+
+        return binary
+
+    @staticmethod
+    def fill_all_holes(mask: np.ndarray) -> np.ndarray:
+        binary = (mask > 0).astype(np.uint8)
+        if cv2 is None or binary.size == 0:
+            return binary
+
+        height, width = binary.shape[:2]
+        padded = np.pad(binary, 1, mode="constant", constant_values=0)
+        inverted = (1 - padded).astype(np.uint8)
+        flood_mask = np.zeros((height + 4, width + 4), dtype=np.uint8)
+        cv2.floodFill(inverted, flood_mask, seedPoint=(0, 0), newVal=0, flags=4)
+
+        # 剩余的前景 1 即为被完全包围的孔洞，一次性并回原区域。
+        holes = inverted[1:-1, 1:-1]
+        if not np.any(holes):
+            return binary
+        filled = binary.copy()
+        filled[holes > 0] = 1
+        return filled
 
     @staticmethod
     def _mask_to_annotations_gdal(
@@ -492,7 +538,7 @@ class GeometryService:
             if len(color) != 6:
                 continue
             rgb = [int(color[i:i + 2], 16) for i in (0, 2, 4)]
-            rgba[mask == label_id] = [rgb[0], rgb[1], rgb[2], 96]
+            rgba[mask == label_id] = [rgb[0], rgb[1], rgb[2], 156]
         return rgba
 
     @staticmethod

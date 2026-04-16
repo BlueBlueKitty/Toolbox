@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QFormLayout,
@@ -14,7 +15,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QRadioButton,
     QSlider,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -50,7 +53,7 @@ class MagicWandPanel(QGroupBox):
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignLeft)
         form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
-        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("RGB", "rgb")
         self.mode_combo.addItem("R", "r")
@@ -72,7 +75,7 @@ class MagicWandPanel(QGroupBox):
         self.connectivity_combo.setToolTip("控制区域生长的连通方式。8 连通更容易连上对角相邻像素。")
         form.addRow(self._form_label("连通方式", "控制区域生长的连通方式。8 连通更容易连上对角相邻像素。"), self.connectivity_combo)
 
-        self.tolerance_slider, self.tolerance_value = self._make_slider(0, 80, 15)
+        self.tolerance_slider, self.tolerance_value = self._make_slider(0, 50, 15)
         self.tolerance_slider.setToolTip("允许与种子点颜色的最大差值。越大，选中的区域越多。")
         form.addRow(self._form_label("阈值", "允许与种子点颜色的最大差值。越大，选中的区域越多。"), self._slider_row(self.tolerance_slider, self.tolerance_value))
 
@@ -80,10 +83,23 @@ class MagicWandPanel(QGroupBox):
         self.min_area_edit.setToolTip("小于该面积的识别结果会被忽略，用于过滤零碎噪声。")
         form.addRow(self._form_label("最小面积", "小于该面积的识别结果会被忽略，用于过滤零碎噪声。"), self.min_area_edit)
 
-        self.fill_holes_check = QCheckBox("填充孔洞")
-        self.fill_holes_check.setChecked(False)
-        self.fill_holes_check.setToolTip("将识别区域内部的小孔洞直接填满。")
-        form.addRow(self.fill_holes_check)
+        self.fill_small_holes_radio = QRadioButton("填补小孔洞")
+        self.fill_small_holes_radio.setChecked(True)
+        self.fill_small_holes_radio.setToolTip("只填补面积较小的内部孔洞，适合保留大孔洞结构。")
+        self.fill_all_holes_radio = QRadioButton("填补所有孔洞")
+        self.fill_all_holes_radio.setToolTip("使用更快的整区孔洞填补算法，直接填满所有被包围的孔洞。")
+        self.fill_holes_group = QButtonGroup(self)
+        self.fill_holes_group.setExclusive(True)
+        self.fill_holes_group.addButton(self.fill_small_holes_radio)
+        self.fill_holes_group.addButton(self.fill_all_holes_radio)
+        fill_holes_row = QWidget()
+        fill_holes_layout = QHBoxLayout(fill_holes_row)
+        fill_holes_layout.setContentsMargins(0, 0, 0, 0)
+        fill_holes_layout.setSpacing(12)
+        fill_holes_layout.addWidget(self.fill_small_holes_radio)
+        fill_holes_layout.addWidget(self.fill_all_holes_radio)
+        fill_holes_layout.addStretch(1)
+        form.addRow(fill_holes_row)
 
         self.vector_header = QLabel("矢量控制")
         self.vector_header.setStyleSheet("font-weight: 700; color: #475569; padding-top: 6px;")
@@ -94,7 +110,7 @@ class MagicWandPanel(QGroupBox):
         self.simplify_polygon_check.setToolTip("对生成的矢量边界做适度简化，减少锯齿和顶点数量。")
         form.addRow(self.simplify_polygon_check)
 
-        self.vector_smooth_slider, self.vector_smooth_value = self._make_slider(0, 30, 2)
+        self.vector_smooth_slider, self.vector_smooth_value = self._make_slider(0, 15, 2)
         self.vector_smooth_slider.setSingleStep(1)
         self.vector_smooth_slider.setPageStep(1)
         self.vector_smooth_slider.setToolTip("先平滑 mask 边界再矢量化。越大边界越圆滑，也越容易抹掉小孔洞。")
@@ -104,6 +120,8 @@ class MagicWandPanel(QGroupBox):
 
         self.confirm_button = QPushButton("确认预览")
         self.cancel_button = QPushButton("取消预览")
+        self.confirm_button.setFixedWidth(110)
+        self.cancel_button.setFixedWidth(110)
         layout.addWidget(self.confirm_button)
         layout.addWidget(self.cancel_button)
 
@@ -114,7 +132,8 @@ class MagicWandPanel(QGroupBox):
             self.connectivity_combo,
             self.tolerance_slider,
             self.min_area_edit,
-            self.fill_holes_check,
+            self.fill_small_holes_radio,
+            self.fill_all_holes_radio,
             self.simplify_polygon_check,
             self.vector_smooth_slider,
         ]:
@@ -133,7 +152,8 @@ class MagicWandPanel(QGroupBox):
             connectivity=int(self.connectivity_combo.currentText()),
             min_area=min_area,
             similarity_mode=str(self.mode_combo.currentData()),
-            fill_holes=self.fill_holes_check.isChecked(),
+            fill_small_holes=self.fill_small_holes_radio.isChecked(),
+            fill_all_holes=self.fill_all_holes_radio.isChecked(),
             simplify_polygon=self.simplify_polygon_check.isChecked(),
             vector_smoothness=self.vector_smooth_slider.value(),
         )
@@ -157,7 +177,7 @@ class MagicWandPanel(QGroupBox):
         slider = QSlider(Qt.Horizontal)
         slider.setRange(minimum, maximum)
         slider.setValue(value)
-        slider.setFixedWidth(150)
+        slider.setFixedWidth(110)
         label = QLabel(str(value))
         label.setMinimumWidth(48)
         slider.valueChanged.connect(lambda current, target=label: target.setText(str(current)))
@@ -170,6 +190,7 @@ class MagicWandPanel(QGroupBox):
 
     def _slider_row(self, slider: QSlider, label: QLabel) -> QWidget:
         widget = QWidget()
+        widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(slider, 0, Qt.AlignLeft)

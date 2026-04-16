@@ -5,8 +5,9 @@
 from __future__ import annotations
 
 import numpy as np
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainterPath, QPen, QBrush
-from PySide6.QtWidgets import QGraphicsPathItem
+from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsSimpleTextItem
 
 import pyqtgraph as pg
 
@@ -109,7 +110,7 @@ class PreviewMaskItem(pg.ImageItem):
             return
         rgba = np.zeros((mask.shape[0], mask.shape[1], 4), dtype=np.uint8)
         color = QColor(color_name)
-        rgba[mask > 0] = [color.red(), color.green(), color.blue(), 120]
+        rgba[mask > 0] = [color.red(), color.green(), color.blue(), 176]
         self.setImage(rgba, autoLevels=False)
         x, y, width, height = bbox
         self.setRect(pg.QtCore.QRectF(x, y, width, height))
@@ -165,3 +166,58 @@ class DraftOverlayItem:
             self.scatter.setData(pos=pts)
         else:
             self.scatter.setData(pos=np.empty((0, 2)))
+
+
+class SnapIndicatorItem:
+    def __init__(self):
+        self.path_item = QGraphicsPathItem()
+        self.path_item.setZValue(10_000)
+        self.path_item.setFlag(QGraphicsPathItem.ItemIgnoresTransformations, True)
+        self.text_item = QGraphicsSimpleTextItem()
+        self.text_item.setZValue(10_001)
+        self.text_item.setFlag(QGraphicsSimpleTextItem.ItemIgnoresTransformations, True)
+        self.text_item.setParentItem(self.path_item)
+        self.clear()
+
+    def update_indicator(self, snap_type: str | None, x: float | None, y: float | None) -> None:
+        if snap_type is None or x is None or y is None:
+            self.clear()
+            return
+
+        path = QPainterPath()
+        size = 10.0
+        label_text = ""
+        if snap_type == "vertex":
+            path.addRect(-size, -size, size * 2.0, size * 2.0)
+            label_text = "节点"
+        elif snap_type == "edge":
+            path.addEllipse(-size, -size, size * 2.0, size * 2.0)
+            path.moveTo(-size * 0.6, 0)
+            path.lineTo(size * 0.6, 0)
+            path.moveTo(0, -size * 0.6)
+            path.lineTo(0, size * 0.6)
+            label_text = "边"
+        else:
+            self.clear()
+            return
+
+        self.path_item.setPos(x, y)
+        self.path_item.setPath(path)
+        self.path_item.setVisible(True)
+
+        pen = QPen(QColor("#dc2626"), 1.6)
+        pen.setCosmetic(True)
+        self.path_item.setPen(pen)
+        self.path_item.setBrush(QBrush(Qt.NoBrush))
+        self.text_item.setBrush(QBrush(QColor("#dc2626")))
+        self.text_item.setText(label_text)
+        self.text_item.setPos(size + 6.0, -size - 4.0)
+        self.text_item.setVisible(True)
+
+    def clear(self) -> None:
+        self.path_item.setPos(0.0, 0.0)
+        self.path_item.setPath(QPainterPath())
+        self.path_item.setVisible(False)
+        self.text_item.setPos(0.0, 0.0)
+        self.text_item.setText("")
+        self.text_item.setVisible(False)
