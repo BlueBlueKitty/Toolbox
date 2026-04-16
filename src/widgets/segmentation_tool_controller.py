@@ -19,6 +19,7 @@ class SegmentationToolController(QObject):
     magic_wand_requested = Signal(int, int)
     selection_changed = Signal(object)
     geometry_changed = Signal(str, object)
+    geometry_committed = Signal(str, object, object)
     draft_changed = Signal(str, object)
     message_requested = Signal(str)
 
@@ -41,6 +42,10 @@ class SegmentationToolController(QObject):
         self._selection_box_active = False
         self._selection_box_additive = False
         self._selection_box_click_target: str | None = None
+        self._drag_origin_annotation: AnnotationObject | None = None
+        self._drag_last_annotation: AnnotationObject | None = None
+        self._snap_grid_size = 10.0
+        self._snap_tolerance = 8.0
 
     def set_annotations(self, annotations: list[AnnotationObject]) -> None:
         self.annotations = annotations[:]
@@ -54,9 +59,12 @@ class SegmentationToolController(QObject):
         self.draft_changed.emit("clear", None)
 
     def handle_press(self, payload) -> None:
+        x, y = payload.x, payload.y
+        if payload.button == Qt.RightButton and self.active_tool == self.TOOL_BROWSE:
+            self._handle_right_click_insert(x, y)
+            return
         if payload.button != Qt.LeftButton:
             return
-        x, y = payload.x, payload.y
         if self.active_tool == self.TOOL_RECTANGLE:
             self._clear_selection_for_new_drawing()
             self._rectangle_start = (x, y)
@@ -98,10 +106,12 @@ class SegmentationToolController(QObject):
                 if annotation is None:
                     return
                 updated = annotation.clone()
-                self._update_ring_vertex(updated, self.selected_vertex_index, x, y)
+                snapped_x, snapped_y = self._apply_snapping(x, y, annotation.id, self.selected_vertex_index)
+                self._update_ring_vertex(updated, self.selected_vertex_index, snapped_x, snapped_y)
                 if not GeometryService.is_annotation_geometry_valid(updated):
                     return
                 GeometryService.refresh_annotation_metadata(updated)
+                self._drag_last_annotation = updated.clone()
                 self.geometry_changed.emit(annotation.id, updated)
                 return
             if self._distance(self._selection_box_start, [x, y]) >= 3:
@@ -121,6 +131,16 @@ class SegmentationToolController(QObject):
             self.rectangle_finished.emit(polygon)
         elif self.active_tool == self.TOOL_BROWSE and self._selection_box_start is not None:
             if self._dragging_vertex:
+                if (
+                    self.selected_annotation_id
+                    and self._drag_origin_annotation is not None
+                    and self._drag_last_annotation is not None
+                ):
+                    self.geometry_committed.emit(
+                        self.selected_annotation_id,
+                        self._drag_origin_annotation.clone(),
+                        self._drag_last_annotation.clone(),
+                    )
                 self._selection_box_start = None
                 self._selection_box_active = False
                 self._selection_box_additive = False
@@ -140,6 +160,8 @@ class SegmentationToolController(QObject):
                 self._selection_box_click_target = None
                 self.draft_changed.emit("clear", None)
         self._dragging_vertex = False
+        self._drag_origin_annotation = None
+        self._drag_last_annotation = None
 
     def finish_polygon(self) -> None:
         if len(self._polygon_points) < 3:
@@ -167,6 +189,7 @@ class SegmentationToolController(QObject):
         annotation = self._find_annotation(self.selected_annotation_id)
         if annotation is None or self.selected_vertex_index is None:
             return None
+        before = annotation.clone()
         updated = annotation.clone()
         if not self._remove_ring_vertex(updated, self.selected_vertex_index):
             self.message_requested.emit("多边形至少需要保留 3 个节点。")
@@ -176,6 +199,7 @@ class SegmentationToolController(QObject):
             return None
         GeometryService.refresh_annotation_metadata(updated)
         self.geometry_changed.emit(annotation.id, updated)
+        self.geometry_committed.emit(annotation.id, before, updated)
         self.selected_vertex_index = None
         return updated
 
@@ -207,23 +231,6 @@ class SegmentationToolController(QObject):
                 hit_annotation = annotation
                 hit_vertex = vertex_index
                 break
-            segment_index = self._hit_segment(annotation, x, y)
-            if segment_index is not None:
-                if additive or len(self.selected_annotation_ids) > 1:
-                    self.message_requested.emit("当前为多选状态。节点编辑仅支持单选对象，请先单选一个对象。")
-                    hit_annotation = annotation
-                    break
-                updated = annotation.clone()
-                self._insert_ring_vertex(updated, segment_index, x, y)
-                if not GeometryService.is_annotation_geometry_valid(updated):
-                    self.message_requested.emit("插入该节点会导致几何无效，已取消。")
-                    hit_annotation = annotation
-                    break
-                GeometryService.refresh_annotation_metadata(updated)
-                self.geometry_changed.emit(annotation.id, updated)
-                hit_annotation = updated
-                hit_vertex = (segment_index[0], segment_index[1], segment_index[2] + 1)
-                break
             polygon = GeometryService.annotation_to_polygon(annotation)
             if polygon is not None and not polygon.is_empty and polygon.covers(Point(x, y)):
                 hit_annotation = annotation
@@ -231,6 +238,8 @@ class SegmentationToolController(QObject):
 
         self.selected_vertex_index = hit_vertex
         self._dragging_vertex = hit_vertex is not None
+        self._drag_origin_annotation = hit_annotation.clone() if hit_vertex is not None and hit_annotation is not None else None
+        self._drag_last_annotation = hit_annotation.clone() if hit_vertex is not None and hit_annotation is not None else None
         self._selection_box_start = (x, y)
         self._selection_box_active = False
         self._selection_box_additive = additive
@@ -269,6 +278,30 @@ class SegmentationToolController(QObject):
                     return (ring_type, hole_index, index)
         return None
 
+    def _handle_right_click_insert(self, x: float, y: float) -> None:
+        if len(self.selected_annotation_ids) > 1:
+            self.message_requested.emit("当前为多选状态。节点编辑仅支持单选对象，请先单选一个对象。")
+            return
+        for annotation in reversed(self.annotations):
+            segment_index = self._hit_segment(annotation, x, y)
+            if segment_index is None:
+                continue
+            before = annotation.clone()
+            updated = annotation.clone()
+            self._insert_ring_vertex(updated, segment_index, x, y)
+            if not GeometryService.is_annotation_geometry_valid(updated):
+                self.message_requested.emit("插入该节点会导致几何无效，已取消。")
+                return
+            GeometryService.refresh_annotation_metadata(updated)
+            hit_vertex = (segment_index[0], segment_index[1], segment_index[2] + 1)
+            self.selected_annotation_id = annotation.id
+            self.selected_annotation_ids = {annotation.id}
+            self.selected_vertex_index = hit_vertex
+            self.geometry_changed.emit(annotation.id, updated)
+            self.geometry_committed.emit(annotation.id, before, updated)
+            self.selection_changed.emit(set(self.selected_annotation_ids))
+            return
+
     def _distance_to_segment(self, point, start, end) -> float:
         px, py = point
         x1, y1 = start
@@ -284,6 +317,58 @@ class SegmentationToolController(QObject):
 
     def _distance(self, p1, p2) -> float:
         return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
+
+    def _apply_snapping(self, x: float, y: float, annotation_id: str, vertex_ref) -> tuple[float, float]:
+        snapped_x, snapped_y = x, y
+        best_distance = self._snap_tolerance + 1.0
+
+        grid_x = round(x / self._snap_grid_size) * self._snap_grid_size
+        grid_y = round(y / self._snap_grid_size) * self._snap_grid_size
+        grid_distance = math.hypot(grid_x - x, grid_y - y)
+        if grid_distance <= self._snap_tolerance:
+            snapped_x, snapped_y = grid_x, grid_y
+            best_distance = grid_distance
+
+        for annotation in self.annotations:
+            rings = [annotation.exterior] + annotation.holes
+            for ring in rings:
+                for index, point in enumerate(ring[:-1]):
+                    if annotation.id == annotation_id and vertex_ref == ("exterior", -1, index):
+                        continue
+                    distance = self._distance(point, [x, y])
+                    if distance < best_distance and distance <= self._snap_tolerance:
+                        snapped_x, snapped_y = point[0], point[1]
+                        best_distance = distance
+
+        for annotation in self.annotations:
+            rings = [("exterior", -1, annotation.exterior)] + [("hole", idx, hole) for idx, hole in enumerate(annotation.holes)]
+            for ring_type, hole_index, ring in rings:
+                for index in range(len(ring) - 1):
+                    start = ring[index]
+                    end = ring[index + 1]
+                    if annotation.id == annotation_id and {index, index + 1} & {vertex_ref[2], 0 if vertex_ref[2] == len(ring) - 2 else -1}:
+                        continue
+                    projection = self._project_point_to_segment([x, y], start, end)
+                    if projection is None:
+                        continue
+                    distance = self._distance(projection, [x, y])
+                    if distance < best_distance and distance <= self._snap_tolerance:
+                        snapped_x, snapped_y = projection[0], projection[1]
+                        best_distance = distance
+
+        return snapped_x, snapped_y
+
+    def _project_point_to_segment(self, point, start, end):
+        px, py = point
+        x1, y1 = start
+        x2, y2 = end
+        dx = x2 - x1
+        dy = y2 - y1
+        denom = dx * dx + dy * dy
+        if denom == 0:
+            return None
+        t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / denom))
+        return [x1 + t * dx, y1 + t * dy]
 
     def _clear_selection_for_new_drawing(self) -> None:
         if self.selected_annotation_ids or self.selected_vertex_index is not None:

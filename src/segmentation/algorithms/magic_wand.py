@@ -11,6 +11,7 @@ try:
 except Exception:  # pragma: no cover
     cv2 = None
 
+from ..geometry_service import GeometryService
 from ..models import MagicWandParams, PreviewSelection
 from .base import BaseSegmenter
 
@@ -36,16 +37,16 @@ class MagicWandSegmenter(BaseSegmenter):
         if area < params.min_area:
             return PreviewSelection(seed_point, params, (0, 0, 0, 0), np.zeros((1, 1), dtype=np.uint8))
 
-        alpha_mask = (mask * 255).astype(np.uint8)
-        if params.fill_holes:
-            alpha_mask = self._fill_holes(alpha_mask)
-
-        ys, xs = np.where(alpha_mask > 0)
+        ys, xs = np.where(mask > 0)
         if len(xs) == 0 or len(ys) == 0:
             return PreviewSelection(seed_point, params, (0, 0, 0, 0), np.zeros((1, 1), dtype=np.uint8))
 
         x0, x1 = int(xs.min()), int(xs.max())
         y0, y1 = int(ys.min()), int(ys.max())
+        local_binary = mask[y0:y1 + 1, x0:x1 + 1].astype(np.uint8)
+        if params.fill_holes:
+            local_binary = GeometryService.fill_small_holes(local_binary, params.min_area)
+        alpha_mask = np.where(local_binary > 0, 255, 0).astype(np.uint8)
         bbox = (x0, y0, x1 - x0 + 1, y1 - y0 + 1)
         return PreviewSelection(
             seed_point=seed_point,
@@ -93,13 +94,3 @@ class MagicWandSegmenter(BaseSegmenter):
             diff = tuple([threshold] * channels)
         cv2.floodFill(work.copy(), flood_mask, seedPoint=seed_point, newVal=0, loDiff=diff, upDiff=diff, flags=flags)
         return (flood_mask[1:-1, 1:-1] > 0).astype(np.uint8)
-
-    def _fill_holes(self, alpha_mask: np.ndarray) -> np.ndarray:
-        binary = (alpha_mask > 0).astype(np.uint8)
-        flood = binary.copy()
-        height, width = flood.shape[:2]
-        fill_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
-        cv2.floodFill(flood, fill_mask, (0, 0), 1)
-        holes = 1 - flood
-        merged = np.maximum(binary, holes)
-        return np.where(merged > 0, 255, 0).astype(np.uint8)

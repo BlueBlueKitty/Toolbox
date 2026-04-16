@@ -157,6 +157,9 @@ class SegmentationProject:
     image_asset: Optional[ImageAsset]
     labels: list[LabelClass] = field(default_factory=list)
     annotations: list[AnnotationObject] = field(default_factory=list)
+    annotations_asset: dict[str, Any] = field(default_factory=dict)
+    mask_asset: dict[str, Any] = field(default_factory=dict)
+    mask_data: Any = field(default=None, repr=False, compare=False)
     display_state: DisplayState = field(default_factory=DisplayState)
     active_tool: str = "browse"
     active_label_id: Optional[int] = None
@@ -178,7 +181,8 @@ class SegmentationProject:
             "project_version": self.project_version,
             "image_asset": image_asset,
             "labels": [asdict(label) for label in self.labels],
-            "annotations": [annotation.to_dict() for annotation in self.annotations],
+            "annotations_asset": dict(self.annotations_asset),
+            "mask_asset": dict(self.mask_asset),
             "display_state": asdict(self.display_state),
             "active_tool": self.active_tool,
             "active_label_id": self.active_label_id,
@@ -204,10 +208,9 @@ class SegmentationProject:
             project_version=payload.get("project_version", "1.0"),
             image_asset=image_asset,
             labels=[LabelClass(**item) for item in payload.get("labels", [])],
-            annotations=[
-                AnnotationObject.from_dict(item)
-                for item in payload.get("annotations", [])
-            ],
+            annotations=[],
+            annotations_asset=payload.get("annotations_asset", {}),
+            mask_asset=payload.get("mask_asset", {}),
             display_state=DisplayState(**payload.get("display_state", {})),
             active_tool=payload.get("active_tool", "browse"),
             active_label_id=payload.get("active_label_id"),

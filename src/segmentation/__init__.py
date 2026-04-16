@@ -21,6 +21,7 @@ from .commands import (
     DeleteAnnotationCommand,
     UpdateGeometryCommand,
     UpdateLabelAssignmentCommand,
+    UpdateMaskPatchCommand,
 )
 from .label_store import LabelStore
 from .project_manager import SegmentationProjectManager
@@ -42,6 +43,7 @@ __all__ = [
     "DeleteAnnotationCommand",
     "UpdateGeometryCommand",
     "UpdateLabelAssignmentCommand",
+    "UpdateMaskPatchCommand",
     "LabelStore",
     "SegmentationProjectManager",
 ]

@@ -4,13 +4,18 @@
 
 from __future__ import annotations
 
-from osgeo import ogr, osr
+from osgeo import gdal, ogr, osr
 
 from ..geometry_service import GeometryService
 from ..models import SegmentationProject
 
 
-def export_vector_file(project: SegmentationProject, output_path: str, driver_name: str) -> None:
+def export_vector_file(
+    project: SegmentationProject,
+    output_path: str,
+    driver_name: str,
+    coordinate_mode: str = "image",
+) -> None:
     driver = ogr.GetDriverByName(driver_name)
     if driver is None:
         raise ValueError(f"不支持的矢量驱动: {driver_name}")
@@ -20,7 +25,7 @@ def export_vector_file(project: SegmentationProject, output_path: str, driver_na
         raise RuntimeError(f"无法创建矢量文件: {output_path}")
 
     spatial_ref = None
-    if project.image_asset and project.image_asset.crs_wkt:
+    if coordinate_mode == "geo" and project.image_asset and project.image_asset.crs_wkt:
         spatial_ref = osr.SpatialReference()
         spatial_ref.ImportFromWkt(project.image_asset.crs_wkt)
 
@@ -33,6 +38,8 @@ def export_vector_file(project: SegmentationProject, output_path: str, driver_na
         polygon = GeometryService.annotation_to_polygon(annotation)
         if polygon is None:
             continue
+        if coordinate_mode == "geo":
+            polygon = _polygon_to_geo_coords(polygon, project)
         feature = ogr.Feature(definition)
         feature.SetField("label_id", annotation.label_id)
         feature.SetField("label", labels.get(annotation.label_id, str(annotation.label_id)))
@@ -41,3 +48,23 @@ def export_vector_file(project: SegmentationProject, output_path: str, driver_na
         layer.CreateFeature(feature)
         feature = None
     datasource = None
+
+
+def _polygon_to_geo_coords(polygon, project: SegmentationProject):
+    if project.image_asset is None or project.image_asset.geotransform is None:
+        return polygon
+    from shapely.geometry import Polygon
+
+    geotransform = project.image_asset.geotransform
+
+    def transform_ring(coords):
+        transformed = []
+        for x, y in coords:
+            map_x, map_y = gdal.ApplyGeoTransform(geotransform, x, y)
+            transformed.append((map_x, map_y))
+        return transformed
+
+    return Polygon(
+        transform_ring(polygon.exterior.coords),
+        [transform_ring(interior.coords) for interior in polygon.interiors],
+    )

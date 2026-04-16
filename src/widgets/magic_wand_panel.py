@@ -102,8 +102,8 @@ class MagicWandPanel(QGroupBox):
 
         layout.addLayout(form)
 
-        self.confirm_button = QPushButton("确认/应用")
-        self.cancel_button = QPushButton("取消")
+        self.confirm_button = QPushButton("确认预览")
+        self.cancel_button = QPushButton("取消预览")
         layout.addWidget(self.confirm_button)
         layout.addWidget(self.cancel_button)
 
@@ -157,9 +157,9 @@ class MagicWandPanel(QGroupBox):
         slider = QSlider(Qt.Horizontal)
         slider.setRange(minimum, maximum)
         slider.setValue(value)
-        slider.setFixedWidth(100)
+        slider.setFixedWidth(150)
         label = QLabel(str(value))
-        label.setMinimumWidth(36)
+        label.setMinimumWidth(48)
         slider.valueChanged.connect(lambda current, target=label: target.setText(str(current)))
         return slider, label
 
@@ -173,6 +173,7 @@ class MagicWandPanel(QGroupBox):
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(slider, 0, Qt.AlignLeft)
+        layout.addSpacing(8)
         layout.addWidget(label)
         layout.addStretch(1)
         return widget

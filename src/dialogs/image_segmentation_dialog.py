@@ -4,11 +4,12 @@
 
 from __future__ import annotations
 
+import copy
 import os
 from pathlib import Path
 import numpy as np
 
-from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtCore import QObject, QPointF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QFontDatabase, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
@@ -36,18 +37,18 @@ from src.segmentation import (
     SegmentationProjectManager,
     UpdateGeometryCommand,
     UpdateLabelAssignmentCommand,
+    UpdateMaskPatchCommand,
 )
 from src.segmentation.algorithms import MagicWandSegmenter
 from src.segmentation.exporters import (
-    export_coco,
     export_mask_file,
     export_vector_file,
-    export_voc,
-    export_yolo,
 )
 from src.segmentation.geometry_service import GeometryService
 from src.segmentation.image_sources import GeoTiffImageSource, StandardImageSource
 from src.segmentation.rendering import default_render_config, render_base_rgb
+from src.utils.image_io import pixel_to_lonlat
+from src.dialogs.segmentation_export_dialog import SegmentationExportDialog
 from src.widgets.colormap_combobox import ColormapComboBox
 from src.widgets.layer_panel_widget import LayerPanelWidget
 from src.widgets.label_panel_widget import LabelPanelWidget
@@ -55,6 +56,23 @@ from src.widgets.magic_wand_panel import MagicWandPanel
 from src.widgets.render_settings_widget import RenderSettingsWidget
 from src.widgets.segmentation_pg_view import SegmentationPgView
 from src.widgets.segmentation_tool_controller import SegmentationToolController
+
+
+class AutosaveWorker(QObject):
+    finished = Signal(bool, str)
+
+    def __init__(self, project_manager: SegmentationProjectManager, project_snapshot: SegmentationProject, project_path: str):
+        super().__init__()
+        self.project_manager = project_manager
+        self.project_snapshot = project_snapshot
+        self.project_path = project_path
+
+    def run(self) -> None:
+        try:
+            self.project_manager.save_autosave(self.project_snapshot, self.project_path)
+            self.finished.emit(True, "")
+        except Exception as exc:  # pragma: no cover
+            self.finished.emit(False, str(exc))
 
 
 class ImageSegmentationDialog(QDialog):
@@ -77,13 +95,18 @@ class ImageSegmentationDialog(QDialog):
         self._preview_mask = None
         self._preview_bbox = None
         self._dirty = False
-        self._vertex_update_pending: dict[str, AnnotationObject] = {}
         self._node_edit_session_annotation_id: str | None = None
         self._node_edit_original_annotation: AnnotationObject | None = None
         self._node_edit_session_dirty = False
-        self._node_edit_mask_snapshot_annotations: list[AnnotationObject] = []
-        self._raster_overlay_override_annotations: list[AnnotationObject] | None = None
+        self._node_edit_session_undo_depth = 0
+        self._node_edit_mask_snapshot = None
         self._suspend_selection_sync = False
+        self._analysis_full_rgb_cache: np.ndarray | None = None
+        self._analysis_full_rgb_cache_signature = None
+        self._analysis_tile_cache: dict[tuple, np.ndarray] = {}
+        self._preview_vector_user_enabled = False
+        self._autosave_thread: QThread | None = None
+        self._autosave_worker: AutosaveWorker | None = None
         self._magic_preview_timer = QTimer(self)
         self._magic_preview_timer.setInterval(250)
         self._magic_preview_timer.setSingleShot(True)
@@ -95,6 +118,11 @@ class ImageSegmentationDialog(QDialog):
         self._material_icon_family = self._load_material_icon_font()
         self._last_image_dir = self.project_manager.settings.value("last_image_dir", "", type=str)
         self._last_project_dir = self.project_manager.settings.value("last_project_dir", "", type=str)
+        self._geotiff_full_render_cache_limit_mb = self.project_manager.settings.value(
+            "segmentation/geotiff_full_render_cache_limit_mb",
+            512,
+            type=int,
+        )
 
         self._create_ui()
         self._bind_signals()
@@ -233,6 +261,7 @@ class ImageSegmentationDialog(QDialog):
         self.tool_controller.magic_wand_requested.connect(self._run_magic_wand_preview)
         self.tool_controller.selection_changed.connect(self._on_selection_changed)
         self.tool_controller.geometry_changed.connect(self._on_geometry_changed)
+        self.tool_controller.geometry_committed.connect(self._on_geometry_committed)
         self.tool_controller.draft_changed.connect(self._on_draft_changed)
         self.tool_controller.message_requested.connect(self._show_tool_message)
 
@@ -368,10 +397,254 @@ class ImageSegmentationDialog(QDialog):
         settings.setValue("render/std_dev_n", current["std_dev_n"])
         settings.setValue("render/colormap", self.colormap_combo.currentText())
 
+    def _analysis_cache_signature(self):
+        return (
+            self.render_config.display_mode,
+            self.render_config.gray_band,
+            tuple(self.render_config.rgb_bands),
+            self.render_config.gamma,
+            self.render_config.stretch_mode,
+            tuple(self.render_config.percent_clip),
+            self.render_config.std_dev_n,
+            self.render_config.auto_range,
+            tuple(self.render_config.value_range),
+            tuple(self.render_config.global_value_range) if self.render_config.global_value_range else None,
+            self.render_config.colormap_name,
+            self.render_config.colormap_reversed,
+        )
+
+    def _clear_analysis_cache(self) -> None:
+        self._analysis_full_rgb_cache = None
+        self._analysis_full_rgb_cache_signature = None
+        self._analysis_tile_cache.clear()
+
+    def _geo_should_cache_full_render(self) -> bool:
+        if self.project.image_asset is None or self.current_source is None:
+            return False
+        if not isinstance(self.current_source, GeoTiffImageSource):
+            return False
+        try:
+            file_size_mb = Path(self.project.image_asset.path).stat().st_size / (1024 * 1024)
+        except Exception:
+            return False
+        return file_size_mb <= max(64, self._geotiff_full_render_cache_limit_mb)
+
+    def _ensure_full_analysis_rgb(self) -> np.ndarray | None:
+        if self.current_source is None or self.project.image_asset is None:
+            return None
+        signature = self._analysis_cache_signature()
+        if self._analysis_full_rgb_cache is not None and self._analysis_full_rgb_cache_signature == signature:
+            return self._analysis_full_rgb_cache
+        if isinstance(self.current_source, StandardImageSource) or self._geo_should_cache_full_render():
+            raw = self.current_source.read_window_native(
+                0,
+                0,
+                self.project.image_asset.width,
+                self.project.image_asset.height,
+            )
+            self._analysis_full_rgb_cache = render_base_rgb(
+                raw,
+                self.render_config,
+                nodata_value=self.project.image_asset.nodata,
+            )
+            self._analysis_full_rgb_cache_signature = signature
+            return self._analysis_full_rgb_cache
+        return None
+
+    def _analysis_tile_size(self) -> int:
+        return 512
+
+    def _analysis_max_roi_side(self) -> int:
+        if self.project.image_asset is None:
+            return 4096
+        max_dim = max(self.project.image_asset.width, self.project.image_asset.height)
+        return min(max_dim, max(4096, min(16384, 1 << int(np.ceil(np.log2(max(2048, min(max_dim, 16384))))))))
+
+    def _fetch_rendered_tile(self, tile_x: int, tile_y: int) -> np.ndarray:
+        if self.current_source is None or self.project.image_asset is None:
+            return np.zeros((1, 1, 3), dtype=np.uint8)
+        tile_size = self._analysis_tile_size()
+        signature = self._analysis_cache_signature()
+        key = (signature, tile_x, tile_y)
+        cached = self._analysis_tile_cache.get(key)
+        if cached is not None:
+            return cached
+        x0 = tile_x * tile_size
+        y0 = tile_y * tile_size
+        width = min(tile_size, self.project.image_asset.width - x0)
+        height = min(tile_size, self.project.image_asset.height - y0)
+        raw = self.current_source.read_window_native(x0, y0, width, height)
+        rendered = render_base_rgb(raw, self.render_config, nodata_value=self.project.image_asset.nodata)
+        self._analysis_tile_cache[key] = rendered
+        return rendered
+
+    def _get_analysis_rgb_roi(self, x0: int, y0: int, width: int, height: int) -> np.ndarray:
+        full_cache = self._ensure_full_analysis_rgb()
+        if full_cache is not None:
+            return full_cache[y0:y0 + height, x0:x0 + width].copy()
+        tile_size = self._analysis_tile_size()
+        roi = np.zeros((height, width, 3), dtype=np.uint8)
+        start_tile_x = x0 // tile_size
+        end_tile_x = (x0 + width - 1) // tile_size
+        start_tile_y = y0 // tile_size
+        end_tile_y = (y0 + height - 1) // tile_size
+        for tile_y in range(start_tile_y, end_tile_y + 1):
+            for tile_x in range(start_tile_x, end_tile_x + 1):
+                tile = self._fetch_rendered_tile(tile_x, tile_y)
+                tile_origin_x = tile_x * tile_size
+                tile_origin_y = tile_y * tile_size
+                src_x0 = max(x0 - tile_origin_x, 0)
+                src_y0 = max(y0 - tile_origin_y, 0)
+                src_x1 = min(x0 + width - tile_origin_x, tile.shape[1])
+                src_y1 = min(y0 + height - tile_origin_y, tile.shape[0])
+                dst_x0 = tile_origin_x + src_x0 - x0
+                dst_y0 = tile_origin_y + src_y0 - y0
+                dst_x1 = dst_x0 + (src_x1 - src_x0)
+                dst_y1 = dst_y0 + (src_y1 - src_y0)
+                roi[dst_y0:dst_y1, dst_x0:dst_x1] = tile[src_y0:src_y1, src_x0:src_x1]
+        return roi
+
     def _set_display_mode(self, mode: str) -> None:
         if mode not in {"灰度", "RGB"}:
             mode = "灰度"
         self.render_settings.display_mode_combo.setCurrentText(mode)
+
+    def _configure_default_render_for_source(self, source) -> None:
+        metadata = source.metadata()
+        if metadata.band_count >= 3:
+            self._set_display_mode("RGB")
+            self.render_settings.set_stretch_mode(self.render_settings.STRETCH_NONE)
+            self.render_settings.auto_range_check.setChecked(True)
+            self.colormap_combo.setCurrentText("gray")
+        else:
+            self._set_display_mode("灰度")
+
+    def _current_global_range(self, settings: dict) -> tuple[float, float] | None:
+        if self.current_source is None:
+            return None
+        if settings["display_mode"] == "RGB":
+            band_indices = settings["rgb_bands"]
+            min_values = []
+            max_values = []
+            for band_index in band_indices:
+                min_max = self.current_source.band_minmax(band_index)
+                if min_max is None:
+                    continue
+                min_values.append(min_max[0])
+                max_values.append(min_max[1])
+            if not min_values:
+                return None
+            return float(min(min_values)), float(max(max_values))
+        return self.current_source.band_minmax(settings["gray_band"])
+
+    def _set_project_mask(self, mask) -> None:
+        self.project.mask_data = None if mask is None else np.asarray(mask, dtype=np.uint16).copy()
+
+    def _sync_project_mask_from_annotations(self) -> None:
+        if self.project.image_asset is None:
+            self._set_project_mask(None)
+            return
+        mask = GeometryService.rasterize_annotations(
+            self.project.annotations,
+            self.project.image_asset.width,
+            self.project.image_asset.height,
+        )
+        self._set_project_mask(mask)
+
+    def _ensure_project_mask_shape(self) -> None:
+        if self.project.image_asset is None:
+            return
+        height = self.project.image_asset.height
+        width = self.project.image_asset.width
+        if self.project.mask_data is None:
+            self.project.mask_data = np.zeros((height, width), dtype=np.uint16)
+            return
+        if self.project.mask_data.shape != (height, width):
+            updated = np.zeros((height, width), dtype=np.uint16)
+            min_h = min(height, self.project.mask_data.shape[0])
+            min_w = min(width, self.project.mask_data.shape[1])
+            updated[:min_h, :min_w] = self.project.mask_data[:min_h, :min_w]
+            self.project.mask_data = updated
+
+    def _extract_mask_patch(self, bbox: tuple[int, int, int, int] | None) -> np.ndarray | None:
+        if bbox is None or self.project.image_asset is None:
+            return None
+        self._ensure_project_mask_shape()
+        x, y, width, height = bbox
+        if width <= 0 or height <= 0:
+            return None
+        return self.project.mask_data[y:y + height, x:x + width].copy()
+
+    def _rasterize_annotations_patch(self, annotations, bbox: tuple[int, int, int, int] | None) -> np.ndarray | None:
+        if bbox is None:
+            return None
+        x, y, width, height = bbox
+        if width <= 0 or height <= 0:
+            return None
+        shifted = []
+        for annotation in annotations:
+            if not GeometryService.bbox_intersects(annotation.bbox, bbox):
+                continue
+            clone = annotation.clone()
+            clone.exterior = [[pt[0] - x, pt[1] - y] for pt in clone.exterior]
+            clone.holes = [[[pt[0] - x, pt[1] - y] for pt in hole] for hole in clone.holes]
+            GeometryService.refresh_annotation_metadata(clone)
+            shifted.append(clone)
+        if not shifted:
+            return np.zeros((height, width), dtype=np.uint16)
+        return GeometryService.rasterize_annotations(shifted, width, height)
+
+    def _annotations_after_commands(self, commands, base_annotations=None) -> list[AnnotationObject]:
+        annotations = [item.clone() for item in (base_annotations if base_annotations is not None else self.project.annotations)]
+        for command in commands:
+            if isinstance(command, BatchCommand):
+                annotations = self._annotations_after_commands(command.commands, annotations)
+            elif isinstance(command, AddAnnotationCommand):
+                annotations.append(command.annotation.clone())
+            elif isinstance(command, DeleteAnnotationCommand):
+                annotations = [item for item in annotations if item.id != command.annotation.id]
+            elif isinstance(command, UpdateGeometryCommand):
+                annotations = [command.after.clone() if item.id == command.annotation_id else item for item in annotations]
+            elif isinstance(command, UpdateLabelAssignmentCommand):
+                updated = []
+                for item in annotations:
+                    if item.id == command.annotation_id:
+                        clone = item.clone()
+                        clone.label_id = command.after_label_id
+                        updated.append(clone)
+                    else:
+                        updated.append(item)
+                annotations = updated
+        return annotations
+
+    def _push_commands_with_mask_patch(self, commands, affected_bbox: tuple[int, int, int, int] | None = None) -> None:
+        if not commands:
+            return
+        bbox = affected_bbox
+        before_patch = self._extract_mask_patch(bbox)
+        after_annotations = self._annotations_after_commands(commands)
+        after_patch = self._rasterize_annotations_patch(after_annotations, bbox)
+        batch_commands = commands[:]
+        if bbox is not None:
+            batch_commands.append(UpdateMaskPatchCommand(bbox, before_patch, after_patch))
+        self.command_stack.push(BatchCommand(batch_commands))
+        self.tool_controller.set_annotations(self.project.annotations)
+
+    def _prompt_save_project_if_needed(self) -> bool:
+        if not self._dirty:
+            return True
+        reply = QMessageBox.question(
+            self,
+            "保存项目",
+            "当前项目有未保存的更改。是否先保存项目？",
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.Yes,
+        )
+        if reply == QMessageBox.Cancel:
+            return False
+        if reply == QMessageBox.Yes:
+            return self.save_project()
+        return True
 
     def _replace_labels(self, labels) -> None:
         self.project.labels = labels[:]
@@ -429,10 +702,12 @@ class ImageSegmentationDialog(QDialog):
         self.render_config.std_dev_n = settings["std_dev_n"]
         self.render_config.auto_range = settings["auto_range"]
         self.render_config.value_range = tuple(settings["value_range"])
+        self.render_config.global_value_range = self._current_global_range(settings)
         self.render_config.colormap_reversed = settings["colormap_reversed"]
         self.render_config.colormap_name = self.colormap_combo.currentText()
         self.render_config.smooth_display = settings.get("smooth_display", False)
         self._save_render_preferences()
+        self._clear_analysis_cache()
         if self.current_source is not None:
             self.canvas.set_render_config(self.render_config)
             self._refresh_canvas()
@@ -443,23 +718,18 @@ class ImageSegmentationDialog(QDialog):
         self.render_settings.set_num_bands(max(1, self.project.image_asset.band_count))
 
     def _update_image_stats_to_render_settings(self) -> None:
-        if self.canvas.last_render is None:
+        settings = self.render_settings.get_all_settings()
+        value_range = self._current_global_range(settings)
+        if value_range is None:
             return
-        arr = self.canvas.last_render.raw_array
-        if arr is None:
-            return
-        nodata_value = self.project.image_asset.nodata if self.project.image_asset else None
-        valid_mask = np.isfinite(arr)
-        if nodata_value is not None:
-            valid_mask = valid_mask & (arr != nodata_value)
-        if np.any(valid_mask):
-            valid_data = arr[valid_mask]
-            self.render_settings.set_image_stats(float(np.min(valid_data)), float(np.max(valid_data)))
+        self.render_settings.set_image_stats(*value_range)
 
     def open_image(self) -> None:
         if not self._finish_node_edit_session():
             return
         if not self._handle_pending_magic_session():
+            return
+        if not self._prompt_save_project_if_needed():
             return
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -490,6 +760,7 @@ class ImageSegmentationDialog(QDialog):
                     source.build_overviews()
         else:
             source = StandardImageSource(file_path)
+        self._configure_default_render_for_source(source)
         self._apply_source(
             source,
             reset_project=True,
@@ -523,9 +794,11 @@ class ImageSegmentationDialog(QDialog):
             self.project.labels = labels
             self.project.annotations = annotations
             self.project.active_label_id = active_label_id
+        if self.project.mask_data is None:
+            self._sync_project_mask_from_annotations()
         self.command_stack = CommandStack(self.project)
-        self._vertex_update_pending.clear()
         self._clear_node_edit_session_state(clear_override=True)
+        self._clear_analysis_cache()
         self.canvas.set_render_config(self.render_config)
         self.canvas.set_image_source(source)
         self.canvas.set_interaction_mode(self.tool_controller.active_tool)
@@ -544,6 +817,8 @@ class ImageSegmentationDialog(QDialog):
             return
         if not self._handle_pending_magic_session():
             return
+        if not self._prompt_save_project_if_needed():
+            return
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "打开项目",
@@ -554,7 +829,11 @@ class ImageSegmentationDialog(QDialog):
             return
         self._last_project_dir = os.path.dirname(file_path)
         self.project_manager.settings.setValue("last_project_dir", self._last_project_dir)
-        project = self.project_manager.load_project(file_path)
+        try:
+            project = self.project_manager.load_project(file_path)
+        except Exception as exc:
+            QMessageBox.warning(self, "打开失败", f"该文件不是有效的分割项目文件，或项目已损坏：\n{exc}")
+            return
         self.project = project
         self.label_store.set_labels(project.labels)
         self.current_project_path = file_path
@@ -582,12 +861,12 @@ class ImageSegmentationDialog(QDialog):
         self._refresh_canvas()
         self._set_dirty(False)
 
-    def save_project(self) -> None:
+    def save_project(self) -> bool:
         if not self._finish_node_edit_session():
-            return
+            return False
         if self.project.image_asset is None:
             QMessageBox.warning(self, "提示", "请先打开图像。")
-            return
+            return False
         if not self.current_project_path:
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
@@ -600,49 +879,67 @@ class ImageSegmentationDialog(QDialog):
                 f"Segmentation Project (*{self.project_manager.PROJECT_SUFFIX})",
             )
             if not file_path:
-                return
+                return False
             self.current_project_path = file_path
         self._last_project_dir = os.path.dirname(self.current_project_path)
         self.project_manager.settings.setValue("last_project_dir", self._last_project_dir)
         self.project_manager.save_project(self.project, self.current_project_path)
         self._set_dirty(False)
-        QMessageBox.information(self, "保存成功", f"项目已保存到:\n{self.current_project_path}")
+        QMessageBox.information(
+            self,
+            "保存成功",
+            f"项目已保存到:\n{self.current_project_path}",
+        )
+        return True
 
     def export_data(self) -> None:
         if not self._finish_node_edit_session():
             return
         if self.project.image_asset is None:
             return
-        export_type, ok = QFileDialog.getSaveFileName(
-            self,
-            "导出数据",
-            "",
-            "GeoJSON (*.geojson);;Shapefile (*.shp);;GPKG (*.gpkg);;COCO (*.json);;YOLO (*.txt);;Pascal VOC (*.xml);;PNG Mask (*.png);;TIFF Mask (*.tif)",
+        default_name = Path(self.project.image_asset.path).stem
+        default_dir = self._last_project_dir or self._last_image_dir or str(Path(self.project.image_asset.path).parent)
+        settings = SegmentationExportDialog.get_settings(
+            default_name=default_name,
+            default_dir=default_dir,
+            has_geo=bool(self.project.image_asset.has_georef),
+            prefer_tif_mask=self.project.image_asset.path.lower().endswith((".tif", ".tiff")),
+            parent=self,
         )
-        if not export_type:
+        if not settings:
             return
-        lower = export_type.lower()
-        if lower.endswith(".geojson"):
-            export_vector_file(self.project, export_type, "GeoJSON")
-        elif lower.endswith(".shp"):
-            export_vector_file(self.project, export_type, "ESRI Shapefile")
-        elif lower.endswith(".gpkg"):
-            export_vector_file(self.project, export_type, "GPKG")
-        elif lower.endswith(".json"):
-            export_coco(self.project, export_type)
-        elif lower.endswith(".txt"):
-            export_yolo(self.project, export_type)
-        elif lower.endswith(".xml"):
-            export_voc(self.project, export_type)
-        else:
-            export_mask_file(self.project, export_type)
-        QMessageBox.information(self, "导出成功", f"已导出到:\n{export_type}")
+        output_dir = Path(settings["output_dir"])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        exported_paths = []
+        if settings["export_vector"]:
+            vector_driver = {
+                "GeoJSON": "GeoJSON",
+                "Shapefile": "ESRI Shapefile",
+                "GPKG": "GPKG",
+            }[settings["vector_format"]]
+            vector_path = output_dir / f"{settings['base_name']}{settings['vector_extension']}"
+            export_vector_file(
+                self.project,
+                str(vector_path),
+                vector_driver,
+                coordinate_mode=settings["vector_coord_mode"],
+            )
+            exported_paths.append(str(vector_path))
+        if settings["export_mask"]:
+            mask_path = output_dir / f"{settings['base_name']}{settings['mask_extension']}"
+            export_mask_file(
+                self.project,
+                str(mask_path),
+                colored=settings["mask_colored"] and settings["mask_extension"] == ".tif",
+            )
+            exported_paths.append(str(mask_path))
+        self.project.export_prefs = dict(settings)
+        QMessageBox.information(self, "导出成功", "已导出到:\n" + "\n".join(exported_paths))
 
     def undo(self) -> None:
         if not self._finish_node_edit_session():
             return
         if self.command_stack.undo():
-            self._raster_overlay_override_annotations = None
             self.tool_controller.set_annotations(self.project.annotations)
             self._refresh_canvas()
             self._set_dirty(True)
@@ -651,7 +948,6 @@ class ImageSegmentationDialog(QDialog):
         if not self._finish_node_edit_session():
             return
         if self.command_stack.redo():
-            self._raster_overlay_override_annotations = None
             self.tool_controller.set_annotations(self.project.annotations)
             self._refresh_canvas()
             self._set_dirty(True)
@@ -671,7 +967,6 @@ class ImageSegmentationDialog(QDialog):
         if not selected_items:
             return
         self.command_stack.push(BatchCommand([DeleteAnnotationCommand(item) for item in selected_items]))
-        self._raster_overlay_override_annotations = None
         self.tool_controller.set_annotations(self.project.annotations)
         self.tool_controller.selected_annotation_id = None
         self.tool_controller.selected_annotation_ids.clear()
@@ -745,9 +1040,8 @@ class ImageSegmentationDialog(QDialog):
             exterior=polygon_points,
             source_tool="polygon",
         )
-        self._raster_overlay_override_annotations = None
-        self.command_stack.push(AddAnnotationCommand(annotation))
-        self.tool_controller.set_annotations(self.project.annotations)
+        affected_bbox = GeometryService.affected_bbox_from_annotations(annotation)
+        self._push_commands_with_mask_patch([AddAnnotationCommand(annotation)], affected_bbox)
         self.tool_controller.selected_annotation_id = annotation.id
         self._refresh_canvas()
         self._set_dirty(True)
@@ -761,9 +1055,8 @@ class ImageSegmentationDialog(QDialog):
             geom_type="rectangle",
             source_tool="rectangle",
         )
-        self._raster_overlay_override_annotations = None
-        self.command_stack.push(AddAnnotationCommand(annotation))
-        self.tool_controller.set_annotations(self.project.annotations)
+        affected_bbox = GeometryService.affected_bbox_from_annotations(annotation)
+        self._push_commands_with_mask_patch([AddAnnotationCommand(annotation)], affected_bbox)
         self.tool_controller.selected_annotation_id = annotation.id
         self._refresh_canvas()
         self._set_dirty(True)
@@ -792,13 +1085,19 @@ class ImageSegmentationDialog(QDialog):
 
     def _on_geometry_changed(self, annotation_id: str, updated: AnnotationObject) -> None:
         self._ensure_node_edit_session(annotation_id)
-        self._vertex_update_pending[annotation_id] = updated.clone()
         self.project.annotations = [
             updated.clone() if item.id == annotation_id else item
             for item in self.project.annotations
         ]
-        self._node_edit_session_dirty = True
         self.tool_controller.set_annotations(self.project.annotations)
+        self._refresh_canvas()
+
+    def _on_geometry_committed(self, annotation_id: str, before: AnnotationObject, after: AnnotationObject) -> None:
+        self._ensure_node_edit_session(annotation_id)
+        affected_bbox = GeometryService.affected_bbox_from_annotations(before, after)
+        self._push_commands_with_mask_patch([UpdateGeometryCommand(annotation_id, before, after)], affected_bbox)
+        self._node_edit_session_dirty = True
+        self._set_dirty(True)
         self._refresh_canvas()
 
     def _on_draft_changed(self, draft_type: str, points) -> None:
@@ -810,6 +1109,74 @@ class ImageSegmentationDialog(QDialog):
         else:
             self.canvas.update_draft(points, color_name=self._active_label_color())
 
+    def _set_preview_vector_visibility(self, visible: bool, user_initiated: bool = False) -> None:
+        self.layer_panel.preview_vector_check.blockSignals(True)
+        self.layer_panel.preview_vector_check.setChecked(visible)
+        self.layer_panel.preview_vector_check.blockSignals(False)
+        self.project.layer_visibility["preview_vector"] = visible
+        if user_initiated:
+            self._preview_vector_user_enabled = visible
+
+    def _preview_result_touches_roi_boundary(self, preview, roi_width: int, roi_height: int) -> bool:
+        bx, by, bw, bh = preview.bbox
+        if bw <= 0 or bh <= 0:
+            return False
+        return bx <= 0 or by <= 0 or bx + bw >= roi_width or by + bh >= roi_height
+
+    def _build_magic_preview_result(self, x: int, y: int):
+        if self.current_source is None or self.project.image_asset is None:
+            return None, None
+        full_rgb = self._ensure_full_analysis_rgb()
+        if full_rgb is not None:
+            preview = self.segmenter.run(full_rgb, (x, y), self.magic_panel.params())
+            if preview.bbox[2] <= 0 or preview.bbox[3] <= 0:
+                return None, None
+            return preview.mask.astype(np.uint8), preview.bbox
+
+        radius = 512
+        max_side = self._analysis_max_roi_side()
+        image_width = self.project.image_asset.width
+        image_height = self.project.image_asset.height
+        while True:
+            x0 = max(0, x - radius)
+            y0 = max(0, y - radius)
+            x1 = min(image_width, x + radius)
+            y1 = min(image_height, y + radius)
+            roi_rgb = self._get_analysis_rgb_roi(x0, y0, x1 - x0, y1 - y0)
+            preview = self.segmenter.run(roi_rgb, (x - x0, y - y0), self.magic_panel.params())
+            if preview.bbox[2] <= 0 or preview.bbox[3] <= 0:
+                return None, None
+            if (
+                self._preview_result_touches_roi_boundary(preview, roi_rgb.shape[1], roi_rgb.shape[0])
+                and max(x1 - x0, y1 - y0) < max_side
+                and (x0 > 0 or y0 > 0 or x1 < image_width or y1 < image_height)
+            ):
+                radius = min(radius * 2, max_side)
+                continue
+            bx, by, bw, bh = preview.bbox
+            return preview.mask.astype(np.uint8), (x0 + bx, y0 + by, bw, bh)
+
+    def _ensure_preview_polygons(self, source_tool: str = "magic_wand_preview", force: bool = False):
+        if (
+            self.preview_selection is None
+            or self._preview_mask is None
+            or self._preview_bbox is None
+        ):
+            return []
+        if self.preview_selection.polygon_preview:
+            return self.preview_selection.polygon_preview
+        preview = self._build_preview_from_mask(
+            self._preview_mask,
+            self._preview_bbox,
+            label_id=self.project.active_label_id,
+            source_tool=source_tool,
+            force=force,
+        )
+        polygons = preview.polygon_preview if preview else []
+        self.preview_selection.polygon_preview = polygons
+        self.preview_selection.contours = [item.exterior for item in polygons]
+        return polygons
+
     def _run_magic_wand_preview(self, x: int, y: int) -> None:
         if self.current_source is None or self.project.image_asset is None:
             return
@@ -817,18 +1184,9 @@ class ImageSegmentationDialog(QDialog):
         full_height = self.project.image_asset.height
         if not (0 <= x < full_width and 0 <= y < full_height):
             return
-        native_window = self.current_source.read_window_native(0, 0, full_width, full_height)
-        native_rgb = render_base_rgb(
-            native_window,
-            self.render_config,
-            nodata_value=self.project.image_asset.nodata if self.project.image_asset else None,
-        )
-        seed_x = int(np.floor(x))
-        seed_y = int(np.floor(y))
-        preview = self.segmenter.run(native_rgb, (seed_x, seed_y), self.magic_panel.params())
-        bx, by, bw, bh = preview.bbox
-        mapped_bbox = preview.bbox
-        mapped_mask = preview.mask[by:by + bh, bx:bx + bw].astype(np.uint8) if bw > 0 and bh > 0 else None
+        if self._last_magic_seed != (x, y):
+            self._set_preview_vector_visibility(False, user_initiated=False)
+        mapped_mask, mapped_bbox = self._build_magic_preview_result(int(np.floor(x)), int(np.floor(y)))
         if mapped_mask is None or mapped_bbox is None:
             return
         if self.magic_panel.merge_preview_enabled() and self._preview_mask is not None and self._preview_bbox is not None:
@@ -851,14 +1209,6 @@ class ImageSegmentationDialog(QDialog):
             contours=[],
             polygon_preview=[],
         )
-        preview_polygons = self._build_preview_from_mask(
-            self._preview_mask,
-            self._preview_bbox,
-            label_id=self.project.active_label_id,
-            source_tool="magic_wand_preview",
-        )
-        if preview_polygons:
-            self.preview_selection.polygon_preview = preview_polygons.polygon_preview
         self._last_magic_seed = (x, y)
         if self.preview_selection:
             self._update_preview_display()
@@ -883,22 +1233,15 @@ class ImageSegmentationDialog(QDialog):
     def _confirm_magic_preview(self) -> None:
         if not self.preview_selection or self.project.active_label_id is None or self._preview_mask is None or self._preview_bbox is None:
             return
-        preview = self._build_preview_from_mask(
-            self._preview_mask,
-            self._preview_bbox,
-            label_id=self.project.active_label_id,
-            source_tool="magic_wand",
-        )
-        if not preview or not preview.polygon_preview:
+        polygon_preview = self.preview_selection.polygon_preview or self._ensure_preview_polygons("magic_wand", force=True)
+        if not polygon_preview:
             self._clear_magic_preview()
             return
-        commands = self._build_magic_commit_commands(preview.polygon_preview)
+        commands, affected_bbox = self._build_magic_commit_commands(polygon_preview)
         if commands:
-            self._raster_overlay_override = None
-            self.command_stack.push(BatchCommand(commands))
-        self.tool_controller.set_annotations(self.project.annotations)
-        if preview.polygon_preview:
-            self.tool_controller.selected_annotation_id = preview.polygon_preview[-1].id
+            self._push_commands_with_mask_patch(commands, affected_bbox)
+        if polygon_preview:
+            self.tool_controller.selected_annotation_id = polygon_preview[-1].id
         self._clear_magic_preview()
         self._refresh_canvas()
         self._set_dirty(True)
@@ -917,6 +1260,10 @@ class ImageSegmentationDialog(QDialog):
             self.canvas.image_item.setVisible(visible)
         elif layer_name == "preview":
             self.canvas.preview_item.setVisible(visible)
+        elif layer_name == "preview_vector":
+            self._preview_vector_user_enabled = visible
+            if visible and self.preview_selection is not None and not self.preview_selection.polygon_preview:
+                self._ensure_preview_polygons("magic_wand_preview")
         self._refresh_canvas()
 
     def _selected_annotation(self) -> AnnotationObject | None:
@@ -949,10 +1296,8 @@ class ImageSegmentationDialog(QDialog):
         self._node_edit_session_annotation_id = None
         self._node_edit_original_annotation = None
         self._node_edit_session_dirty = False
-        self._node_edit_mask_snapshot_annotations = []
-        self._vertex_update_pending.clear()
-        if clear_override:
-            self._raster_overlay_override_annotations = None
+        self._node_edit_session_undo_depth = self.command_stack.undo_depth()
+        self._node_edit_mask_snapshot = None
 
     def _ensure_node_edit_session(self, annotation_id: str | None) -> None:
         if annotation_id is None:
@@ -962,18 +1307,11 @@ class ImageSegmentationDialog(QDialog):
         annotation = self._find_annotation_by_id(annotation_id)
         if annotation is None:
             return
-        label_lookup = {label.id: label for label in self.project.labels}
         self._node_edit_session_annotation_id = annotation_id
         self._node_edit_original_annotation = annotation.clone()
         self._node_edit_session_dirty = False
-        self._node_edit_mask_snapshot_annotations = [item.clone() for item in self.project.annotations]
-
-    def _restore_annotation(self, annotation: AnnotationObject) -> None:
-        self.project.annotations = [
-            annotation.clone() if item.id == annotation.id else item
-            for item in self.project.annotations
-        ]
-        self.tool_controller.set_annotations(self.project.annotations)
+        self._node_edit_session_undo_depth = self.command_stack.undo_depth()
+        self._node_edit_mask_snapshot = None if self.project.mask_data is None else self.project.mask_data.copy()
 
     def _finish_node_edit_session(self) -> bool:
         annotation_id = self._node_edit_session_annotation_id
@@ -998,12 +1336,15 @@ class ImageSegmentationDialog(QDialog):
         if save_reply == QMessageBox.Cancel:
             return False
         if save_reply == QMessageBox.No:
-            self._restore_annotation(original)
-            self._raster_overlay_override_annotations = [item.clone() for item in self._node_edit_mask_snapshot_annotations]
+            while self.command_stack.undo_depth() > self._node_edit_session_undo_depth:
+                if not self.command_stack.undo():
+                    break
+            self.command_stack.clear_redo()
+            self.tool_controller.set_annotations(self.project.annotations)
+            self.project.mask_data = None if self._node_edit_mask_snapshot is None else self._node_edit_mask_snapshot.copy()
             self._clear_node_edit_session_state()
             self._refresh_canvas()
             return True
-        self.command_stack.push(UpdateGeometryCommand(annotation_id, original, current))
         self._set_dirty(True)
         mask_reply = QMessageBox.question(
             self,
@@ -1012,7 +1353,8 @@ class ImageSegmentationDialog(QDialog):
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes,
         )
-        self._raster_overlay_override_annotations = None if mask_reply == QMessageBox.Yes else [item.clone() for item in self._node_edit_mask_snapshot_annotations]
+        if mask_reply != QMessageBox.Yes:
+            self.project.mask_data = None if self._node_edit_mask_snapshot is None else self._node_edit_mask_snapshot.copy()
         self.tool_controller.set_annotations(self.project.annotations)
         self._clear_node_edit_session_state()
         self._refresh_canvas()
@@ -1035,35 +1377,39 @@ class ImageSegmentationDialog(QDialog):
     def _autosave_if_needed(self) -> None:
         if not self._dirty:
             return
-        if self.current_project_path:
-            self.project_manager.save_autosave(self.project, self.current_project_path)
+        if not self.current_project_path or (self._autosave_thread is not None and self._autosave_thread.isRunning()):
+            return
+        project_snapshot = copy.deepcopy(self.project)
+        self._autosave_thread = QThread(self)
+        self._autosave_worker = AutosaveWorker(self.project_manager, project_snapshot, self.current_project_path)
+        self._autosave_worker.moveToThread(self._autosave_thread)
+        self._autosave_thread.started.connect(self._autosave_worker.run)
+        self._autosave_worker.finished.connect(lambda *_: self._autosave_thread.quit())
+        self._autosave_worker.finished.connect(self._on_autosave_finished)
+        self._autosave_worker.finished.connect(self._autosave_worker.deleteLater)
+        self._autosave_thread.finished.connect(self._autosave_thread.deleteLater)
+        self._autosave_thread.start()
+
+    def _on_autosave_finished(self, _success: bool, _message: str) -> None:
+        self._autosave_worker = None
+        self._autosave_thread = None
 
     def _current_raster_overlay(self, label_lookup):
-        if self._raster_overlay_override_annotations is not None:
-            return self._build_raster_overlay_for_annotations(self._raster_overlay_override_annotations, label_lookup)
-        return self._build_raster_overlay_for_annotations(self.project.annotations, label_lookup)
-
-    def _build_raster_overlay_for_annotations(self, annotations_source, label_lookup):
         if not self.project.image_asset or not self.canvas.last_render or not self.project.layer_visibility.get("raster", True):
             return None, None
         x0, y0, width, height = self.canvas.last_render.source_window
         if width <= 0 or height <= 0:
             return None, None
-        clipped = []
-        for annotation in annotations_source:
-            if annotation.bbox is None:
-                continue
-            min_x, min_y, max_x, max_y = annotation.bbox
-            if max_x < x0 or max_y < y0 or min_x > x0 + width or min_y > y0 + height:
-                continue
-            shifted = annotation.clone()
-            shifted.exterior = [[pt[0] - x0, pt[1] - y0] for pt in shifted.exterior]
-            shifted.holes = [[[pt[0] - x0, pt[1] - y0] for pt in hole] for hole in shifted.holes]
-            clipped.append(shifted)
-        if not clipped:
+        source_mask = self.project.mask_data
+        if source_mask is None:
+            self._ensure_project_mask_shape()
+            source_mask = self.project.mask_data
+        x1 = min(x0 + width, source_mask.shape[1])
+        y1 = min(y0 + height, source_mask.shape[0])
+        clipped_mask = source_mask[y0:y1, x0:x1]
+        if clipped_mask.size == 0 or not np.any(clipped_mask):
             return None, None
-        raster_mask = GeometryService.rasterize_annotations(clipped, width, height)
-        return GeometryService.colorize_mask(raster_mask, label_lookup), (x0, y0, width, height)
+        return GeometryService.colorize_mask(clipped_mask.astype(np.uint16), label_lookup), (x0, y0, clipped_mask.shape[1], clipped_mask.shape[0])
 
     def _on_view_state_changed(self, _state) -> None:
         if self.project.image_asset is None:
@@ -1074,8 +1420,10 @@ class ImageSegmentationDialog(QDialog):
         self.canvas.update_raster_mask(raster_rgba, raster_bbox)
         self._update_preview_display()
 
-    def _build_preview_from_mask(self, mask, bbox, label_id: int | None = None, source_tool: str = "magic_wand_preview"):
+    def _build_preview_from_mask(self, mask, bbox, label_id: int | None = None, source_tool: str = "magic_wand_preview", force: bool = False):
         if mask is None or bbox is None:
+            return None
+        if not force and not self.project.layer_visibility.get("preview_vector", True):
             return None
         target_label = label_id or (self.project.active_label_id or 1)
         polygons = GeometryService.mask_to_annotations(
@@ -1137,15 +1485,17 @@ class ImageSegmentationDialog(QDialog):
         commands = []
         new_union = GeometryService.annotations_union(new_annotations)
         if new_union is None or new_union.is_empty:
-            return commands
+            return commands, None
         minx, miny, maxx, maxy = new_union.bounds
         bounds_bbox = (minx, miny, maxx - minx, maxy - miny)
+        affected_annotations = list(new_annotations)
         for annotation in self.project.annotations:
             if not GeometryService.bbox_intersects(annotation.bbox, bounds_bbox):
                 continue
             polygon = GeometryService.annotation_to_polygon(annotation)
             if polygon is None or polygon.is_empty or not polygon.intersects(new_union):
                 continue
+            affected_annotations.append(annotation)
             diff = polygon.difference(new_union)
             if diff.is_empty:
                 commands.append(DeleteAnnotationCommand(annotation))
@@ -1162,7 +1512,7 @@ class ImageSegmentationDialog(QDialog):
                 commands.append(AddAnnotationCommand(extra))
         for annotation in new_annotations:
             commands.append(AddAnnotationCommand(annotation))
-        return commands
+        return commands, GeometryService.affected_bbox_from_annotations(affected_annotations)
 
     def _update_mouse_position(self, payload) -> None:
         if not self.project.image_asset:
@@ -1181,8 +1531,13 @@ class ImageSegmentationDialog(QDialog):
                 original_text = str(tuple(original_value))
             else:
                 original_text = "-" if original_value is None else str(original_value)
+            geo_text = ""
+            if self.project.image_asset.geotransform:
+                lon, lat = pixel_to_lonlat(col, row, self.project.image_asset.geotransform, self.project.image_asset.crs_wkt, use_pixel_center=True)
+                if lon is not None and lat is not None:
+                    geo_text = f" | 地理坐标: ({lon:.6f}, {lat:.6f})"
             self.mouse_pos_label.setText(
-                f"行: {row}, 列: {col} | 渲染RGB: {rgb_text} | 原值: {original_text}"
+                f"行: {row}, 列: {col} | 渲染RGB: {rgb_text} | 原值: {original_text}{geo_text}"
             )
         else:
             self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: -")
@@ -1215,7 +1570,6 @@ class ImageSegmentationDialog(QDialog):
             return
         commands = [DeleteAnnotationCommand(annotation) for annotation in self.project.annotations]
         if commands:
-            self._raster_overlay_override_annotations = None
             self.command_stack.push(BatchCommand(commands))
             self.tool_controller.set_annotations(self.project.annotations)
             self.tool_controller.selected_annotation_id = None

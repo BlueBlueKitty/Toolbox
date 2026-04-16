@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import numpy as np
 
 from PySide6.QtCore import QSettings
 
-from .models import SegmentationProject
+from .models import AnnotationObject, SegmentationProject
 
 
 def get_settings() -> QSettings:
@@ -31,6 +32,27 @@ class SegmentationProjectManager:
             image_asset["path_mode"], image_asset["path"] = self._project_path_value(
                 image_asset["path"], project_path
             )
+        if project_path:
+            vector_path = self.vector_sidecar_path(project_path)
+            Path(vector_path).write_text(
+                json.dumps([annotation.to_dict() for annotation in project.annotations], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            payload["annotations_asset"] = {
+                "path_mode": "relative",
+                "path": Path(vector_path).name,
+                "format": "json",
+            }
+            if project.mask_data is not None:
+                mask_path = self.mask_sidecar_path(project_path)
+                np.savez_compressed(mask_path, mask=project.mask_data)
+                payload["mask_asset"] = {
+                    "path_mode": "relative",
+                    "path": Path(mask_path).name,
+                    "dtype": str(project.mask_data.dtype),
+                }
+            else:
+                payload["mask_asset"] = {}
         return payload
 
     def save_project(self, project: SegmentationProject, project_path: str) -> None:
@@ -50,11 +72,43 @@ class SegmentationProjectManager:
                 project.image_asset.path_mode,
                 project_path,
             )
+        annotations_asset = project.annotations_asset or {}
+        annotations_path = annotations_asset.get("path")
+        if annotations_path:
+            resolved_annotations_path = self.resolve_image_path(
+                annotations_path,
+                annotations_asset.get("path_mode", "absolute"),
+                project_path,
+            )
+            try:
+                annotations_payload = json.loads(Path(resolved_annotations_path).read_text(encoding="utf-8"))
+                project.annotations = [AnnotationObject.from_dict(item) for item in annotations_payload]
+                project.annotations_asset["path"] = resolved_annotations_path
+                project.annotations_asset["path_mode"] = "absolute"
+            except Exception:
+                project.annotations = []
+        mask_asset = project.mask_asset or {}
+        mask_path = mask_asset.get("path")
+        if mask_path:
+            resolved_mask_path = self.resolve_image_path(mask_path, mask_asset.get("path_mode", "absolute"), project_path)
+            try:
+                with np.load(resolved_mask_path) as loaded:
+                    project.mask_data = loaded["mask"]
+                project.mask_asset["path"] = resolved_mask_path
+                project.mask_asset["path_mode"] = "absolute"
+            except Exception:
+                project.mask_data = None
         self.add_recent_project(project_path)
         return project
 
     def autosave_path(self, project_path: str) -> str:
         return f"{project_path}.autosave"
+
+    def mask_sidecar_path(self, project_path: str) -> str:
+        return f"{project_path}.mask.npz"
+
+    def vector_sidecar_path(self, project_path: str) -> str:
+        return f"{project_path}.annotations.json"
 
     def save_autosave(self, project: SegmentationProject, project_path: str) -> str:
         autosave_path = self.autosave_path(project_path)

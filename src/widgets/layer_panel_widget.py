@@ -22,6 +22,7 @@ class LayerPanelWidget(QGroupBox):
         self.raster_check.setChecked(True)
         self.preview_vector_check = QCheckBox("显示矢量预览")
         self.preview_vector_check.setChecked(True)
+        self.preview_vector_check.setToolTip("默认在每次新的魔法棒识别后会自动关闭。手动打开后，才会根据当前预览Mask生成矢量预览。")
         self.preview_mask_check = QCheckBox("显示Mask预览")
         self.preview_mask_check.setChecked(True)
         layout.addRow(self.image_check)

@@ -24,3 +24,6 @@ class BaseImageSource:
 
     def build_overviews(self) -> tuple[bool, list[int]]:
         return False, []
+
+    def band_minmax(self, band_index: int) -> tuple[float, float] | None:
+        raise NotImplementedError

@@ -29,21 +29,23 @@ class SegmentationRenderConfig:
     std_dev_n: float = 2.0
     auto_range: bool = True
     value_range: tuple[float, float] = (0.0, 1.0)
+    global_value_range: tuple[float, float] | None = None
     colormap_name: str = "gray"
     colormap_reversed: bool = False
     smooth_display: bool = False
     segmentation_source: str = "display_rgb"
 
     def to_settings(self) -> dict:
+        value_range = self.global_value_range if self.auto_range and self.global_value_range else self.value_range
         return {
             "stretch_mode": self.stretch_mode,
             "percent_clip": self.percent_clip,
             "std_dev_n": self.std_dev_n,
             "gamma": self.gamma,
-            "auto_range": self.auto_range,
-            "value_range": self.value_range,
-            "value_min": self.value_range[0],
-            "value_max": self.value_range[1],
+            "auto_range": False if self.auto_range and self.global_value_range else self.auto_range,
+            "value_range": value_range,
+            "value_min": value_range[0],
+            "value_max": value_range[1],
             "colormap_reversed": self.colormap_reversed,
             "display_mode": self.display_mode,
             "gray_band": self.gray_band,
@@ -62,6 +64,18 @@ def render_base_rgb(
     config: SegmentationRenderConfig,
     nodata_value=None,
 ) -> np.ndarray:
+    if (
+        config.display_mode == "RGB"
+        and raw_array.ndim == 3
+        and raw_array.dtype == np.uint8
+    ):
+        channels = raw_array.shape[2]
+        indices = [min(max(index, 1), channels) - 1 for index in config.rgb_bands]
+        rgb = raw_array[:, :, indices]
+        if config.gamma != 1.0:
+            normalized = np.clip(rgb.astype(np.float32) / 255.0, 0.0, 1.0)
+            rgb = np.clip(np.power(normalized, 1.0 / config.gamma) * 255.0, 0, 255).astype(np.uint8)
+        return rgb
     processed = apply_render_settings(raw_array, config.to_settings(), nodata_value=nodata_value)
     if processed is None:
         raise ValueError("渲染失败：输入数组为空")

@@ -12,7 +12,8 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 import pyqtgraph as pg
 
-from src.segmentation.image_sources import BaseImageSource, RenderRequest
+from src.segmentation.image_sources.base import BaseImageSource
+from src.segmentation.image_sources.render_request import RenderRequest
 from src.segmentation.image_sources.geotiff_source import GeoTiffImageSource
 from src.segmentation.rendering import default_render_config
 from src.segmentation.models import AnnotationObject, RenderTileResult, ViewportState
@@ -100,7 +101,7 @@ class SegmentationPgView(QWidget):
     def _should_consume_left_mouse(self, event) -> bool:
         return (
             hasattr(event, "button")
-            and event.button() == Qt.LeftButton
+            and event.button() in (Qt.LeftButton, Qt.RightButton)
         )
 
     def _should_consume_left_drag(self, event) -> bool:

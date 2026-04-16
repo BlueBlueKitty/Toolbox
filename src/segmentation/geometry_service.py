@@ -196,6 +196,27 @@ class GeometryService:
         return annotations
 
     @staticmethod
+    def fill_small_holes(mask: np.ndarray, max_hole_area: int) -> np.ndarray:
+        binary = (mask > 0).astype(np.uint8)
+        if max_hole_area <= 0 or cv2 is None or binary.size == 0:
+            return binary
+        inverted = 1 - binary
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(inverted, connectivity=8)
+        result = binary.copy()
+        height, width = binary.shape[:2]
+        for label_index in range(1, num_labels):
+            area = int(stats[label_index, cv2.CC_STAT_AREA])
+            if area > max_hole_area:
+                continue
+            ys, xs = np.where(labels == label_index)
+            if len(xs) == 0 or len(ys) == 0:
+                continue
+            if xs.min() == 0 or ys.min() == 0 or xs.max() == width - 1 or ys.max() == height - 1:
+                continue
+            result[labels == label_index] = 1
+        return result.astype(np.uint8)
+
+    @staticmethod
     def _mask_to_annotations_gdal(
         mask: np.ndarray,
         bbox: tuple[int, int, int, int],
@@ -305,6 +326,27 @@ class GeometryService:
 
         gdal.RasterizeLayer(raster, [1], layer, options=["ATTRIBUTE=value"])
         return band.ReadAsArray().astype(np.uint16)
+
+    @staticmethod
+    def affected_bbox_from_annotations(*annotations_or_lists) -> tuple[int, int, int, int] | None:
+        boxes = []
+        for item in annotations_or_lists:
+            if item is None:
+                continue
+            if isinstance(item, AnnotationObject):
+                if item.bbox is not None:
+                    boxes.append(item.bbox)
+                continue
+            for annotation in item:
+                if annotation is not None and annotation.bbox is not None:
+                    boxes.append(annotation.bbox)
+        if not boxes:
+            return None
+        min_x = int(np.floor(min(box[0] for box in boxes)))
+        min_y = int(np.floor(min(box[1] for box in boxes)))
+        max_x = int(np.ceil(max(box[2] for box in boxes)))
+        max_y = int(np.ceil(max(box[3] for box in boxes)))
+        return min_x, min_y, max(0, max_x - min_x + 1), max(0, max_y - min_y + 1)
 
     @staticmethod
     def bbox_intersects(bbox_a: list[float] | tuple[float, float, float, float] | None, bbox_b: tuple[float, float, float, float] | None) -> bool:

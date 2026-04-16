@@ -24,6 +24,7 @@ from src.utils import tiff_boundary_to_vector
 from src.utils import AppImageInstaller
 from src.utils import UpdateChecker, UpdateError, NetworkError
 from src.version import __version__, APP_DISPLAY_NAME
+from src.segmentation.project_manager import get_settings as get_segmentation_settings
 
 
 class UpdateCheckWorker(QThread):
@@ -55,9 +56,11 @@ class MainWindow(QMainWindow):
         
         # 初始化设置
         self.settings = QSettings("Toolbox", "RemoteSensingToolbox")
+        self.segmentation_settings = get_segmentation_settings()
         
         # 从设置中读取降采样尺寸，0 表示无限制
         self.max_display_size = self.settings.value("display/max_display_size", 2048, type=int)
+        self.geotiff_full_render_cache_limit_mb = self.segmentation_settings.value("segmentation/geotiff_full_render_cache_limit_mb", 512, type=int)
         self._open_tool_windows = set()
         
         # 设置窗口属性
@@ -713,6 +716,28 @@ class MainWindow(QMainWindow):
             "禁用后，显示栅格边界，适合查看像素细节。"
         )
         layout.addWidget(smooth_check)
+
+        layout.addSpacing(10)
+
+        segmentation_cache_layout = QHBoxLayout()
+        segmentation_cache_label = QLabel("分割GeoTIFF整图渲染缓存阈值:")
+        segmentation_cache_layout.addWidget(segmentation_cache_label)
+        segmentation_cache_spinbox = QSpinBox()
+        segmentation_cache_spinbox.setRange(64, 4096)
+        segmentation_cache_spinbox.setSingleStep(64)
+        segmentation_cache_spinbox.setValue(self.geotiff_full_render_cache_limit_mb)
+        segmentation_cache_spinbox.setSuffix(" MB")
+        segmentation_cache_spinbox.setMinimumWidth(120)
+        segmentation_cache_layout.addWidget(segmentation_cache_spinbox)
+        segmentation_cache_layout.addStretch()
+        layout.addLayout(segmentation_cache_layout)
+
+        segmentation_cache_tip = QLabel(
+            "当GeoTIFF文件体积小于该阈值时，图像分割工具会尝试把整图渲染后的RGB缓存到内存中，以提升魔法棒识别速度。"
+        )
+        segmentation_cache_tip.setWordWrap(True)
+        segmentation_cache_tip.setStyleSheet("color: #7f8c8d;")
+        layout.addWidget(segmentation_cache_tip)
         
         layout.addSpacing(10)
         
@@ -736,15 +761,18 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             self.max_display_size = 0 if unlimited_check.isChecked() else size_spinbox.value()
             smooth_display = smooth_check.isChecked()
+            self.geotiff_full_render_cache_limit_mb = segmentation_cache_spinbox.value()
             # 保存设置到 QSettings
             self.settings.setValue("display/max_display_size", self.max_display_size)
             self.settings.setValue("display/smooth_display", smooth_display)
+            self.segmentation_settings.setValue("segmentation/geotiff_full_render_cache_limit_mb", self.geotiff_full_render_cache_limit_mb)
             max_size_text = "无限制（显示全部像素）" if self.max_display_size <= 0 else f"{self.max_display_size} 像素"
             QMessageBox.information(
                 self, 
                 "设置已保存",
                 f"最大显示尺寸已设置为 {max_size_text}\n"
-                f"平滑显示: {'已启用' if smooth_display else '已禁用'}\n\n"
+                f"平滑显示: {'已启用' if smooth_display else '已禁用'}\n"
+                f"分割GeoTIFF整图渲染缓存阈值: {self.geotiff_full_render_cache_limit_mb} MB\n\n"
                 "新设置将在下次打开图像时生效。"
             )
 

@@ -68,7 +68,15 @@ class GeoTiffImageSource(BaseImageSource):
             1.0,
         )
         overview = choose_overview_for_scale(self._metadata.overview_levels, target_downsample)
-        bands = request.bands or tuple(range(1, min(self._metadata.band_count, 3) + 1))
+        if request.bands:
+            bands = request.bands
+        elif render_config.display_mode == "RGB":
+            bands = tuple(
+                min(max(int(index), 1), self._metadata.band_count)
+                for index in render_config.rgb_bands
+            )
+        else:
+            bands = (min(max(int(render_config.gray_band), 1), self._metadata.band_count),)
         buf_x = max(1, request.screen_width)
         buf_y = max(1, request.screen_height)
 
@@ -125,3 +133,12 @@ class GeoTiffImageSource(BaseImageSource):
         if len(arrays) == 1:
             return arrays[0]
         return np.stack(arrays, axis=-1)
+
+    def band_minmax(self, band_index: int) -> tuple[float, float] | None:
+        band = self.dataset.GetRasterBand(min(max(int(band_index), 1), self._metadata.band_count))
+        if band is None:
+            return None
+        min_max = band.ComputeRasterMinMax(True)
+        if not min_max:
+            return None
+        return float(min_max[0]), float(min_max[1])

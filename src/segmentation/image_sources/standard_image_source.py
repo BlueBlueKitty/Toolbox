@@ -66,3 +66,15 @@ class StandardImageSource(BaseImageSource):
         x1 = min(self._array.shape[1], x0 + max(1, int(width)))
         y1 = min(self._array.shape[0], y0 + max(1, int(height)))
         return self._array[y0:y1, x0:x1].copy()
+
+    def band_minmax(self, band_index: int) -> tuple[float, float] | None:
+        if self._array.ndim == 2:
+            data = self._array
+        else:
+            index = min(max(int(band_index) - 1, 0), self._array.shape[2] - 1)
+            data = self._array[:, :, index]
+        valid = np.isfinite(data)
+        if not np.any(valid):
+            return None
+        valid_data = data[valid]
+        return float(np.min(valid_data)), float(np.max(valid_data))

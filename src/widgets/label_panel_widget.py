@@ -16,9 +16,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QColorDialog,
-    QInputDialog,
     QLabel,
-    QMessageBox,
     QVBoxLayout,
 )
 
@@ -77,31 +75,17 @@ class LabelPanelWidget(QGroupBox):
             self.active_label_changed.emit(self._labels[row].id)
 
     def _add_label(self) -> None:
-        name, ok = QInputDialog.getText(self, "新增标签", "标签名称")
-        if not ok or not name.strip():
-            return
-        color = QColorDialog.getColor(parent=self)
-        if not color.isValid():
-            return
         next_id = max([label.id for label in self._labels], default=0) + 1
-        shortcut, ok = QInputDialog.getText(
-            self,
-            "快捷键",
-            "快捷键",
-            QLineEdit.Normal,
-            str(next_id),
+        dialog = LabelEditDialog(
+            LabelClass(next_id, f"类别 {next_id}", "#1d4ed8", str(next_id)),
+            existing_labels=self._labels,
+            parent=self,
         )
-        if not ok or not shortcut.strip():
+        dialog.setWindowTitle("新增标签")
+        if dialog.exec() != QDialog.Accepted:
             return
-        name_value = name.strip()
-        color_value = color.name()
-        if any(label.name == name_value for label in self._labels):
-            QMessageBox.warning(self, "提示", "标签名称已存在，请更改。")
-            return
-        if any(label.color.lower() == color_value.lower() for label in self._labels):
-            QMessageBox.warning(self, "提示", "标签颜色已存在，请更改。")
-            return
-        self._labels.append(LabelClass(next_id, name_value, color_value, shortcut.strip()))
+        created = dialog.label()
+        self._labels.append(LabelClass(next_id, created.name, created.color, created.shortcut))
         self.labels_changed.emit(self._labels[:])
         self.set_labels(self._labels, next_id)
 
@@ -110,16 +94,10 @@ class LabelPanelWidget(QGroupBox):
         if not (0 <= row < len(self._labels)):
             return
         label = self._labels[row]
-        dialog = LabelEditDialog(label, self)
+        dialog = LabelEditDialog(label, existing_labels=self._labels, parent=self)
         if dialog.exec() != QDialog.Accepted:
             return
         edited = dialog.label()
-        if any(item.name == edited.name and item.id != label.id for item in self._labels):
-            QMessageBox.warning(self, "提示", "标签名称已存在，请更改。")
-            return
-        if any(item.color.lower() == edited.color.lower() and item.id != label.id for item in self._labels):
-            QMessageBox.warning(self, "提示", "标签颜色已存在，请更改。")
-            return
         self._labels[row] = LabelClass(label.id, edited.name, edited.color, edited.shortcut, label.visible, label.locked)
         self.labels_changed.emit(self._labels[:])
         self.set_labels(self._labels, label.id)
@@ -131,10 +109,12 @@ class LabelPanelWidget(QGroupBox):
 
 
 class LabelEditDialog(QDialog):
-    def __init__(self, label: LabelClass, parent=None):
+    def __init__(self, label: LabelClass, existing_labels: list[LabelClass] | None = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("编辑标签")
         self._color = QColor(label.color)
+        self._label_id = label.id
+        self._existing_labels = existing_labels[:] if existing_labels else []
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("标签名称"))
@@ -148,23 +128,48 @@ class LabelEditDialog(QDialog):
         layout.addWidget(QLabel("标签颜色"))
         layout.addWidget(self.color_button)
         self._update_color_button()
+        self.validation_label = QLabel("")
+        self.validation_label.setStyleSheet("color: #dc2626;")
+        layout.addWidget(self.validation_label)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self.ok_button = buttons.button(QDialogButtonBox.Ok)
+        self.name_edit.textChanged.connect(self._validate)
+        self.shortcut_edit.textChanged.connect(self._validate)
+        self._validate()
 
     def _choose_color(self):
         color = QColorDialog.getColor(self._color, self, "选择标签颜色")
         if color.isValid():
             self._color = color
             self._update_color_button()
+            self._validate()
 
     def _update_color_button(self):
         self.color_button.setText(f"选择颜色: {self._color.name()}")
         self.color_button.setStyleSheet(
             f"background-color: {self._color.name()}; color: {'#000000' if self._color.lightness() > 128 else '#ffffff'};"
         )
+
+    def _validate(self):
+        name = self.name_edit.text().strip()
+        shortcut = self.shortcut_edit.text().strip()
+        color_name = self._color.name().lower()
+        error = ""
+        if not name:
+            error = "标签名称不能为空。"
+        elif any(item.name == name and item.id != self._label_id for item in self._existing_labels):
+            error = "标签名称已存在，请立即修改。"
+        elif any(item.color.lower() == color_name and item.id != self._label_id for item in self._existing_labels):
+            error = "标签颜色已存在，请立即修改。"
+        elif not shortcut:
+            error = "快捷键不能为空。"
+        self.validation_label.setText(error)
+        if hasattr(self, "ok_button"):
+            self.ok_button.setEnabled(not error)
 
     def label(self) -> LabelClass:
         return LabelClass(
