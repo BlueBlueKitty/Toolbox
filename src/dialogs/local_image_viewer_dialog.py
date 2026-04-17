@@ -30,7 +30,6 @@ import traceback
 from src.widgets import InteractiveImageViewer, ColormapComboBox, RenderSettingsWidget, ColorbarWidget
 from src.utils.gamma_file_process import (
     GAMMA_FORMATS,
-    read_gamma_downsampled,
     read_gamma_region,
     read_gamma_pixel,
     find_valid_par_for_binary,
@@ -39,43 +38,49 @@ from src.utils.gamma_file_process import (
     is_gamma_binary_file,
 )
 from src.utils.image_io import (
-    read_tiff_downsampled,
     read_tiff_region,
     read_tiff_pixel,
-    read_image_downsampled,
     read_image_region,
     list_h5_datasets,
     read_h5_dataset,
-    read_h5_dataset_downsampled,
     get_geotransform,
     pixel_to_lonlat,
 )
+from src.utils.display_pyramid import (
+    DEFAULT_PYRAMID_THRESHOLD_MB,
+    read_gamma_pyramid_display,
+    read_gdal_pyramid_display,
+    read_h5_dataset_pyramid_display,
+    read_standard_pyramid_display,
+)
 from src.dialogs.gamma_dialogs import GammaSingleFileDialog
+from src.rendering.sources import GdalRasterSource, GammaVrtRasterSource, H5DatasetRasterSource
+from src.rendering.sources import StandardImageSource
 
 
 class LocalImageViewerDialog(QDialog):
     """图像局部查看器对话框"""
     
-    def __init__(self, parent=None, max_display_size=2048):
+    def __init__(self, parent=None, pyramid_threshold_mb=DEFAULT_PYRAMID_THRESHOLD_MB):
         super().__init__(parent)
         
-        # 降采样配置
-        self._configured_max_display_size = max_display_size
-        self.MAX_DISPLAY_SIZE = max_display_size  # 显示时的最大尺寸
+        # 显示金字塔配置
+        self.pyramid_threshold_mb = pyramid_threshold_mb
         
         self.setWindowTitle("图像局部查看器")
         self.resize(1400, 800)
         
         # 图像数据
-        self.image_data = None  # 降采样后的显示数据
+        self.image_data = None  # 显示用数据，可能来自 overview
+        self.image_source = None
         self.image_file = None
         self.nodata_value = None
         self.polyline_path_points = None  # 存储折线路径上的所有点
         
-        # 大图像降采样相关
+        # 大图像显示相关
         self.original_width = None   # 原始图像宽度
         self.original_height = None  # 原始图像高度
-        self.downsample_factor = 1   # 降采样因子
+        self.downsample_factor = 1   # 显示数据到原始图像的坐标比例
         self.is_tiff = False         # 是否为TIFF格式
         self.is_h5 = False           # 是否为H5/NC格式
         
@@ -117,28 +122,11 @@ class LocalImageViewerDialog(QDialog):
             # 同时更新图像统计信息（最大最小值）
             self._update_image_stats_to_render_settings()
 
-    def _is_unlimited_display_enabled(self):
-        return not self.MAX_DISPLAY_SIZE or self.MAX_DISPLAY_SIZE <= 0
-
-    def _display_limit_status_text(self):
-        if self._is_unlimited_display_enabled():
-            return "显示全部像素"
-        return f"上限: {self.MAX_DISPLAY_SIZE}px"
-
-    def _update_display_limit_button(self):
-        if self._is_unlimited_display_enabled():
-            self.toggle_display_limit_btn.setText("恢复显示上限")
-            base_limit = self._configured_max_display_size if self._configured_max_display_size > 0 else 2048
-            self.toggle_display_limit_btn.setToolTip(f"恢复为当前设置的显示上限（{base_limit}px）")
-        else:
-            self.toggle_display_limit_btn.setText("取消显示上限")
-            self.toggle_display_limit_btn.setToolTip("重新加载当前图像并显示全部像素")
-
     def _compose_image_info(self, parts):
         info_parts = [str(part) for part in parts if part]
         if self.nodata_value is not None and not any(part.startswith("Nodata:") for part in info_parts):
             info_parts.append(f"Nodata: {self.nodata_value}")
-        info_parts.append(self._display_limit_status_text())
+        info_parts.append(f"金字塔阈值: {self.pyramid_threshold_mb} MB")
         if self._converted_to_db and "dB" not in info_parts:
             info_parts.append("dB")
         return " | ".join(info_parts)
@@ -152,6 +140,27 @@ class LocalImageViewerDialog(QDialog):
     def _hide_loading_indicator(self):
         self.setWindowTitle(self._loading_title_text)
         self._refresh_image_info_label()
+
+    def _set_viewer_source_or_array(self, original_size=None):
+        if self.image_source is not None:
+            self.image_viewer.set_raster_source(self.image_source)
+        else:
+            self.image_viewer.set_raster_array(self.image_data, original_size=original_size)
+
+    def _reset_render_controls_for_new_image(self):
+        """新图像使用默认渲染参数，避免继承上一幅图的显示状态。"""
+        if self.image_data is None:
+            return
+        num_bands = self.image_data.shape[2] if self.image_data.ndim == 3 else 1
+        self.render_settings.reset_to_defaults(num_bands)
+        self.colormap_combo.setCurrentText("gray")
+        self.image_viewer.set_colormap("gray")
+
+    def _create_standard_source(self, file_path):
+        try:
+            return GdalRasterSource(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
+        except Exception:
+            return StandardImageSource(file_path)
 
     def _refresh_image_info_label(self):
         if self.image_data is None or not self.image_file:
@@ -211,75 +220,6 @@ class LocalImageViewerDialog(QDialog):
 
         return db_data.astype(np.float32)
 
-    def _reload_current_image_with_display_limit(self):
-        """按当前显示上限重新加载已打开的图像。"""
-        if not self.image_file:
-            return
-
-        previous_view_state = self.image_viewer.capture_view_state() if self.image_data is not None else None
-
-        try:
-            if self.is_gamma:
-                data, downsample_factor = read_gamma_downsampled(
-                    self.image_file,
-                    self.original_width,
-                    self.original_height,
-                    self.gamma_format,
-                    self.MAX_DISPLAY_SIZE,
-                )
-                self.downsample_factor = downsample_factor
-                if self.gamma_format.startswith('cpx'):
-                    self.image_data = complex_to_phase(data).astype(np.float32)
-                else:
-                    self.image_data = data.astype(np.float32) if data.dtype != np.float32 else data
-                self.nodata_value = 0
-            elif self.is_h5 and hasattr(self, 'h5_dataset_name'):
-                self.image_data, original_size, self.downsample_factor = read_h5_dataset_downsampled(
-                    self.image_file,
-                    self.h5_dataset_name,
-                    self.MAX_DISPLAY_SIZE,
-                    self.h5_frame_index,
-                )
-                if self.image_data is None:
-                    raise ValueError("无法重新读取当前 H5 数据集")
-                self.original_width = original_size[0] if original_size else self.image_data.shape[1]
-                self.original_height = original_size[1] if original_size else self.image_data.shape[0]
-            elif self.is_tiff:
-                self.image_data, (self.original_width, self.original_height), self.downsample_factor = (
-                    self._read_tiff_downsampled_local(self.image_file)
-                )
-            else:
-                self.image_data, (self.original_width, self.original_height), self.downsample_factor = (
-                    self._read_image_downsampled_local(self.image_file)
-                )
-
-            if self._converted_to_db:
-                self.image_data = self._convert_array_to_db(self.image_data)
-
-            original_size = (self.original_width, self.original_height) if self.downsample_factor > 1 else None
-            self.image_viewer.set_image_from_array(self.image_data, original_size=original_size)
-            self.image_viewer.set_nodata_value(self.nodata_value)
-            if previous_view_state:
-                self.image_viewer.restore_view_state(previous_view_state)
-            else:
-                self.image_viewer.fit_in_view(delayed=True)
-
-            self._refresh_image_info_label()
-            self._update_render_settings_bands()
-            self.show_image_histogram()
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"重新加载图像失败: {str(e)}")
-            traceback.print_exc()
-
-    def toggle_display_limit_override(self):
-        """切换是否取消显示上限。"""
-        if self._is_unlimited_display_enabled():
-            self.MAX_DISPLAY_SIZE = self._configured_max_display_size if self._configured_max_display_size > 0 else 2048
-        else:
-            self.MAX_DISPLAY_SIZE = 0
-        self._update_display_limit_button()
-        self._reload_current_image_with_display_limit()
-        
     def _create_ui(self):
         """创建用户界面"""
         main_layout = QVBoxLayout(self)
@@ -308,11 +248,6 @@ class LocalImageViewerDialog(QDialog):
         self.to_db_btn.setEnabled(False)
         control_layout1.addWidget(self.to_db_btn)
 
-        self.toggle_display_limit_btn = QPushButton()
-        self.toggle_display_limit_btn.clicked.connect(self.toggle_display_limit_override)
-        control_layout1.addWidget(self.toggle_display_limit_btn)
-        self._update_display_limit_button()
-        
         # 绘制模式选择
         control_layout1.addWidget(QLabel("绘制模式:"))
         self.mode_group = QButtonGroup(self)
@@ -502,6 +437,8 @@ class LocalImageViewerDialog(QDialog):
         try:
             self._show_loading_indicator(f"正在加载图像...\n{os.path.basename(file_path)}")
             self.image_file = file_path
+            self.nodata_value = None
+            self._converted_to_db = False
             ext = os.path.splitext(file_path)[1].lower()
             self.is_tiff = ext in ['.tif', '.tiff', '.grd']
             self.is_h5 = ext in ['.h5', '.hdf5', '.nc']
@@ -559,11 +496,13 @@ class LocalImageViewerDialog(QDialog):
                     self.h5_dataset_name = selected_dataset
                     self.h5_frame_index = None
                     
-                    self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
-                        read_h5_dataset_downsampled(file_path, selected_dataset, self.MAX_DISPLAY_SIZE)
+                    self.image_data, original_size, self.downsample_factor, _mode = \
+                        read_h5_dataset_pyramid_display(file_path, selected_dataset, threshold_mb=self.pyramid_threshold_mb)
                     
                     if self.image_data is None:
                         raise ValueError(f"无法读取数据集: {selected_dataset}")
+                    self.original_width, self.original_height = original_size
+                    self.image_source = H5DatasetRasterSource(file_path, selected_dataset, None, self.pyramid_threshold_mb)
                         
                 elif selected_ndim == 3:
                     # 3D数据，让用户选择第几景
@@ -575,11 +514,13 @@ class LocalImageViewerDialog(QDialog):
                         self.h5_dataset_name = selected_dataset
                         self.h5_frame_index = None
                         
-                        self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
-                            read_h5_dataset_downsampled(file_path, selected_dataset, self.MAX_DISPLAY_SIZE)
+                        self.image_data, original_size, self.downsample_factor, _mode = \
+                            read_h5_dataset_pyramid_display(file_path, selected_dataset, threshold_mb=self.pyramid_threshold_mb)
                         
                         if self.image_data is None:
                             raise ValueError(f"无法读取数据集: {selected_dataset}")
+                        self.original_width, self.original_height = original_size
+                        self.image_source = H5DatasetRasterSource(file_path, selected_dataset, None, self.pyramid_threshold_mb)
                     else:
                         # 时序数据，让用户选择景
                         frame_idx, ok = QInputDialog.getInt(
@@ -593,26 +534,32 @@ class LocalImageViewerDialog(QDialog):
                         self.h5_dataset_name = selected_dataset
                         self.h5_frame_index = frame_idx
                         
-                        self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
-                            read_h5_dataset_downsampled(file_path, selected_dataset, self.MAX_DISPLAY_SIZE, frame_idx)
+                        self.image_data, original_size, self.downsample_factor, _mode = \
+                            read_h5_dataset_pyramid_display(file_path, selected_dataset, frame_idx, self.pyramid_threshold_mb)
                         
                         if self.image_data is None:
                             raise ValueError(f"无法读取数据集: {selected_dataset} 的第 {frame_idx} 景")
+                        self.original_width, self.original_height = original_size
+                        self.image_source = H5DatasetRasterSource(file_path, selected_dataset, frame_idx, self.pyramid_threshold_mb)
                 else:
                     # 其他维度不支持
                     raise ValueError(f"不支持的数据维度: {selected_ndim}D\n只支持2D图像或3D时序数据")
             elif self.is_tiff:
-                # 使用image_io模块读取TIFF（支持降采样和金字塔）
+                # 使用金字塔读取TIFF/GRD显示预览
                 self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
-                    self._read_tiff_downsampled_local(file_path)
+                    self._read_tiff_pyramid_display(file_path)
+                self.image_source = GdalRasterSource(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
             else:
-                # 使用image_io模块读取普通图像（支持降采样）
+                # 使用金字塔读取普通图像显示预览
                 self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
-                    self._read_image_downsampled_local(file_path)
+                    self._read_image_pyramid_display(file_path)
+                self.image_source = self._create_standard_source(file_path)
+
+            self._reset_render_controls_for_new_image()
             
             # 显示图像
             original_size = (self.original_width, self.original_height) if self.downsample_factor > 1 else None
-            self.image_viewer.set_image_from_array(self.image_data, original_size=original_size)
+            self._set_viewer_source_or_array(original_size)
             
             # H5文件默认使用jet colormap
             if self.is_h5:
@@ -656,6 +603,7 @@ class LocalImageViewerDialog(QDialog):
             
             # 更新渲染设置的波段数
             self._update_render_settings_bands()
+            self._apply_render_settings_update()
             
             # 自动显示整个图像的直方图
             self.show_image_histogram()
@@ -669,23 +617,21 @@ class LocalImageViewerDialog(QDialog):
         finally:
             self._hide_loading_indicator()
     
-    def _read_tiff_downsampled_local(self, file_path):
+    def _read_tiff_pyramid_display(self, file_path):
         """
-        使用image_io模块读取TIFF图像，支持降采样和金字塔
-        返回: (image_data, (original_width, original_height), downsample_factor)
+        使用金字塔读取TIFF/GRD图像显示预览。
         """
-        data, nodata, original_size, factor = read_tiff_downsampled(file_path, self.MAX_DISPLAY_SIZE)
+        data, nodata, original_size, factor, _mode = read_gdal_pyramid_display(file_path, self.pyramid_threshold_mb)
         if data is None:
             raise IOError(f"无法打开TIFF文件: {file_path}")
         self.nodata_value = nodata
         return data, original_size, factor
     
-    def _read_image_downsampled_local(self, file_path):
+    def _read_image_pyramid_display(self, file_path):
         """
-        使用image_io模块读取普通图像，支持降采样
-        返回: (image_data, (original_width, original_height), downsample_factor)
+        使用金字塔读取普通图像显示预览。
         """
-        data, original_size, factor = read_image_downsampled(file_path, self.MAX_DISPLAY_SIZE)
+        data, _nodata, original_size, factor, _mode = read_standard_pyramid_display(file_path, self.pyramid_threshold_mb)
         if data is None:
             raise IOError(f"无法打开图像文件: {file_path}")
         self.nodata_value = None
@@ -823,6 +769,29 @@ class LocalImageViewerDialog(QDialog):
     
     def _update_image_stats_to_render_settings(self):
         """从当前图像计算统计信息并更新到渲染设置"""
+        if self.image_source is not None:
+            settings = self.render_settings.get_all_settings()
+            if settings["display_mode"] == "RGB":
+                ranges = [
+                    self.image_source.band_minmax(band_index)
+                    for band_index in settings["rgb_bands"]
+                ]
+                ranges = [item for item in ranges if item is not None]
+                if ranges:
+                    min_val = float(min(item[0] for item in ranges))
+                    max_val = float(max(item[1] for item in ranges))
+                    self.render_settings.set_image_stats(min_val, max_val)
+                    if hasattr(self, 'colorbar'):
+                        self.colorbar.set_range(min_val, max_val)
+                    return
+            else:
+                min_max = self.image_source.band_minmax(settings["gray_band"])
+                if min_max is not None:
+                    self.render_settings.set_image_stats(*min_max)
+                    if hasattr(self, 'colorbar'):
+                        self.colorbar.set_range(*min_max)
+                    return
+
         if self.image_data is not None:
             arr = self.image_data
             # 创建有效掩码
@@ -928,7 +897,7 @@ class LocalImageViewerDialog(QDialog):
         """鼠标移动事件"""
         if value is not None:
             # 计算原始坐标
-            if self.downsample_factor > 1:
+            if self.image_source is None and self.downsample_factor > 1:
                 orig_x = int(x * self.downsample_factor)
                 orig_y = int(y * self.downsample_factor)
                 # 确保在有效范围内
@@ -979,7 +948,7 @@ class LocalImageViewerDialog(QDialog):
                 return
             
             # 计算原始图像坐标
-            if self.downsample_factor > 1:
+            if self.image_source is None and self.downsample_factor > 1:
                 # 将显示坐标转换为原始坐标
                 x1 = int(current_rect.x() * self.downsample_factor)
                 y1 = int(current_rect.y() * self.downsample_factor)
@@ -992,7 +961,7 @@ class LocalImageViewerDialog(QDialog):
                     # 如果无法读取原始数据，使用显示数据
                     region_data = self.image_viewer.get_rect_region()
             else:
-                # 无降采样，直接使用显示数据
+                # 显示尺寸与原始尺寸一致，直接使用显示数据
                 region_data = self.image_viewer.get_rect_region()
             
             if region_data is None:
@@ -1030,7 +999,7 @@ class LocalImageViewerDialog(QDialog):
             if display_path_points is None or len(display_path_points) == 0:
                 return
             
-            # 根据降采样因子计算原始坐标和获取原始像素值
+            # 根据显示比例计算原始坐标和获取原始像素值
             if self.downsample_factor > 1:
                 # 将显示坐标转换为原始坐标
                 original_path_points = []
@@ -1055,7 +1024,7 @@ class LocalImageViewerDialog(QDialog):
                 self.polyline_path_points = display_path_points  # 保持显示坐标用于图像标记
                 self.polyline_original_points = original_path_points  # 原始坐标用于显示
             else:
-                # 无降采样，直接使用
+                # 显示尺寸与原始尺寸一致，直接使用
                 _, path_values = self.image_viewer.get_polyline_path_values()
                 self.polyline_path_points = display_path_points
                 self.polyline_original_points = display_path_points
@@ -1553,7 +1522,7 @@ class LocalImageViewerDialog(QDialog):
             self,
             "打开h5文件",
             last_path,
-            "HDF5 Files (*.h5 *.hdf5);;所有文件 (*.*)",
+            "HDF5/NetCDF Files (*.h5 *.hdf5 *.nc);;所有文件 (*.*)",
             options=QFileDialog.Option.DontUseNativeDialog
         )
         
@@ -1618,10 +1587,10 @@ class LocalImageViewerDialog(QDialog):
                     f"数据集维度过高（{len(dataset_shape)}D），无法显示")
                 return
             
-            # 使用降采样读取数据集
+            # 使用金字塔读取显示预览
             self._show_loading_indicator(f"正在加载 h5 图像...\n{os.path.basename(file_path)}")
-            data, original_size, downsample_factor = read_h5_dataset_downsampled(
-                file_path, selected_dataset, self.MAX_DISPLAY_SIZE, frame_index
+            data, original_size, downsample_factor, _mode = read_h5_dataset_pyramid_display(
+                file_path, selected_dataset, frame_index, self.pyramid_threshold_mb
             )
             
             if data is None:
@@ -1636,6 +1605,7 @@ class LocalImageViewerDialog(QDialog):
             # 设置图像数据和相关属性
             self.image_data = data
             self.image_file = file_path
+            self.image_source = H5DatasetRasterSource(file_path, selected_dataset, frame_index, self.pyramid_threshold_mb)
             self.nodata_value = None
             self.is_gamma = False
             self.is_tiff = False
@@ -1645,16 +1615,19 @@ class LocalImageViewerDialog(QDialog):
             self.original_width = original_size[0] if original_size else data.shape[1]
             self.original_height = original_size[1] if original_size else data.shape[0]
             self.downsample_factor = downsample_factor
+            self._converted_to_db = False
+            self._reset_render_controls_for_new_image()
             
             # 显示图像
             display_original_size = original_size if downsample_factor > 1 else None
-            self.image_viewer.set_image_from_array(self.image_data, original_size=display_original_size)
+            self._set_viewer_source_or_array(display_original_size)
             
             # 设置Nodata值到图像查看器
             self.image_viewer.set_nodata_value(self.nodata_value)
             
             # 设置默认colormap为jet（h5数据）
             self.colormap_combo.setCurrentText('jet')
+            self.image_viewer.set_colormap('jet')
             
             # 确保图像居中显示（使用延迟模式）
             self.image_viewer.fit_in_view(delayed=True)
@@ -1680,6 +1653,7 @@ class LocalImageViewerDialog(QDialog):
             
             # 更新渲染设置的波段数
             self._update_render_settings_bands()
+            self._apply_render_settings_update()
             
             # 自动显示整个图像的直方图
             self.show_image_histogram()
@@ -1888,20 +1862,19 @@ class LocalImageViewerDialog(QDialog):
             self.original_width = width
             self.original_height = height
             self.image_file = file_path
+            self.image_source = GammaVrtRasterSource(file_path, width, height, gamma_format, self.pyramid_threshold_mb)
             
-            # 读取图像数据（使用降采样）
+            # 读取显示预览（使用 GAMMA VRT + overview）
             self._show_loading_indicator(f"正在加载 GAMMA 图像...\n{os.path.basename(file_path)}")
-            data, downsample_factor = read_gamma_downsampled(
-                file_path, width, height, gamma_format, self.MAX_DISPLAY_SIZE
+            data, _nodata, original_size, downsample_factor, _mode = read_gamma_pyramid_display(
+                file_path, width, height, gamma_format, self.pyramid_threshold_mb
             )
             
             self.downsample_factor = downsample_factor
             
-            # 处理复数数据
             is_complex = gamma_format.startswith('cpx')
             if is_complex:
-                # 默认显示相位
-                self.image_data = complex_to_phase(data).astype(np.float32)
+                self.image_data = data.astype(np.float32)
                 data_type_str = "相位"
             else:
                 self.image_data = data.astype(np.float32) if data.dtype != np.float32 else data
@@ -1909,10 +1882,11 @@ class LocalImageViewerDialog(QDialog):
             
             # GAMMA文件默认nodata为0
             self.nodata_value = 0
+            self._converted_to_db = False
+            self._reset_render_controls_for_new_image()
             
             # 显示图像
-            original_size = (width, height) if downsample_factor > 1 else None
-            self.image_viewer.set_image_from_array(self.image_data, original_size=original_size)
+            self._set_viewer_source_or_array(original_size)
             
             # 设置Nodata值到图像查看器
             self.image_viewer.set_nodata_value(self.nodata_value)
@@ -1920,8 +1894,10 @@ class LocalImageViewerDialog(QDialog):
             # 设置默认colormap
             if is_complex:
                 self.colormap_combo.setCurrentText('hsv')  # 相位使用hsv
+                self.image_viewer.set_colormap('hsv')
             else:
                 self.colormap_combo.setCurrentText('gray')
+                self.image_viewer.set_colormap('gray')
             
             # 确保图像居中显示（使用延迟模式）
             self.image_viewer.fit_in_view(delayed=True)
@@ -1942,6 +1918,7 @@ class LocalImageViewerDialog(QDialog):
             
             # 更新渲染设置的波段数
             self._update_render_settings_bands()
+            self._apply_render_settings_update()
             
             # 显示直方图
             self.show_image_histogram()
@@ -2037,10 +2014,13 @@ class LocalImageViewerDialog(QDialog):
             
             # 重新显示图像
             original_size = (self.original_width, self.original_height) if self.downsample_factor > 1 else None
-            self.image_viewer.set_image_from_array(self.image_data, original_size=original_size)
+            self.image_source = None
+            self._set_viewer_source_or_array(original_size)
             
             # 设置Nodata值到图像查看器
             self.image_viewer.set_nodata_value(self.nodata_value)
+            self._update_image_stats_to_render_settings()
+            self._apply_render_settings_update()
             
             # 更新信息标签（添加dB标记）
             current_info = self.image_info_label.text()

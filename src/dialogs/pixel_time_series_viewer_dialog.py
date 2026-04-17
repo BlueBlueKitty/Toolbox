@@ -90,23 +90,19 @@ from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import traceback
 
-from src.widgets import ImageViewer, ColormapComboBox, RenderSettingsWidget, ColorbarWidget
+from src.rendering.canvas import LayeredRasterCanvas
+from src.widgets import ColormapComboBox, RenderSettingsWidget, ColorbarWidget
 from src.utils.gamma_file_process import (
     GAMMA_FORMATS,
-    read_gamma_downsampled,
     read_gamma_pixel,
     find_valid_par_for_binary,
     validate_dimensions,
-    complex_to_phase,
     is_gamma_binary_file,
 )
 from src.utils.image_io import (
     read_tiff,
-    read_tiff_downsampled,
     get_tiff_info,
     read_image,
-    read_image_downsampled,
-    read_any_image_downsampled,
     read_any_image_pixel,
     get_image_info,
     get_geotransform,
@@ -123,17 +119,25 @@ from src.utils.image_io import (
     bounds_overlap,
     lonlat_to_pixel,
 )
+from src.utils.display_pyramid import (
+    DEFAULT_PYRAMID_THRESHOLD_MB,
+    read_gamma_pyramid_display,
+    read_gdal_pyramid_display,
+    read_h5_timeseries_frame_pyramid_display,
+    read_standard_pyramid_display,
+)
+from src.rendering.sources import GdalRasterSource, GammaVrtRasterSource, H5DatasetRasterSource
+from src.rendering.sources import StandardImageSource
 
 
 class PixelTimeSeriesViewerDialog(QDialog):
     """像素时序查看器对话框"""
     
-    def __init__(self, parent=None, max_display_size=2048):
+    def __init__(self, parent=None, pyramid_threshold_mb=DEFAULT_PYRAMID_THRESHOLD_MB):
         super().__init__(parent)
         
-        # 降采样配置
-        self._configured_max_display_size = max_display_size
-        self.max_display_size = max_display_size  # 显示时的最大尺寸
+        # 显示金字塔配置
+        self.pyramid_threshold_mb = pyramid_threshold_mb
         
         self.setWindowTitle("像素时序查看器")
         self.resize(1600, 900)
@@ -160,9 +164,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._cached_image_1 = None  # 窗口1缓存的图像数据
         self._cached_index_1 = -1  # 窗口1缓存的图像索引
         self._cached_original_size_1 = None  # 窗口1缓存的原始尺寸
+        self._cached_source_1 = None
         self._cached_image_2 = None  # 窗口2缓存的图像数据
         self._cached_index_2 = -1  # 窗口2缓存的图像索引
         self._cached_original_size_2 = None  # 窗口2缓存的原始尺寸
+        self._cached_source_2 = None
         
         # GAMMA时序文件相关
         self.is_gamma_timeseries = False  # 是否为GAMMA时序数据
@@ -246,11 +252,6 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.to_db_btn.setEnabled(False)
         control_layout1.addWidget(self.to_db_btn)
 
-        self.toggle_display_limit_btn = QPushButton()
-        self.toggle_display_limit_btn.clicked.connect(self.toggle_display_limit_override)
-        control_layout1.addWidget(self.toggle_display_limit_btn)
-        self._update_display_limit_button()
-        
         main_layout.addLayout(control_layout1)
         
         # 第二行：渲染设置（波段选择、Colormap、拉伸、Gamma等）
@@ -387,7 +388,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         image_layout = QHBoxLayout()
         
         # 图像查看器
-        viewer = ImageViewer()
+        viewer = LayeredRasterCanvas()
         setattr(self, f'image_viewer_{viewer_id}', viewer)
         
         # 连接像素点击信号
@@ -602,6 +603,15 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 else:
                     image_select_combo.setEnabled(False)
                 image_select_combo.blockSignals(False)
+
+    def _reset_render_controls_for_new_series(self, band_count=1, colormap='gray'):
+        """新时序数据使用默认渲染参数，避免继承上一批影像的显示状态。"""
+        self.render_settings.reset_to_defaults(max(1, int(band_count or 1)))
+        self.colormap_combo.setCurrentText(colormap)
+        if hasattr(self, 'image_viewer_1'):
+            self.image_viewer_1.set_colormap(colormap)
+        if hasattr(self, 'image_viewer_2'):
+            self.image_viewer_2.set_colormap(colormap)
     
     def on_suggest_colormap(self, colormap_name):
         """接收建议的colormap并切换"""
@@ -609,6 +619,24 @@ class PixelTimeSeriesViewerDialog(QDialog):
     
     def _update_image_stats_to_render_settings(self):
         """从当前图像计算统计信息并更新到渲染设置"""
+        source = getattr(self, '_cached_source_1', None)
+        if source is not None:
+            settings = self.render_settings.get_all_settings()
+            if settings.get("display_mode") == "RGB":
+                ranges = [source.band_minmax(band_index) for band_index in settings.get("rgb_bands", (1, 2, 3))]
+                ranges = [item for item in ranges if item is not None]
+                if ranges:
+                    self.render_settings.set_image_stats(
+                        float(min(item[0] for item in ranges)),
+                        float(max(item[1] for item in ranges)),
+                    )
+                    return
+            else:
+                min_max = source.band_minmax(settings.get("gray_band", 1))
+                if min_max is not None:
+                    self.render_settings.set_image_stats(*min_max)
+                    return
+
         # 使用第一个窗口的缓存图像
         if self._cached_image_1 is not None:
             arr = self._cached_image_1
@@ -710,39 +738,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._cached_image_1 = None
         self._cached_index_1 = -1
         self._cached_original_size_1 = None
+        self._cached_source_1 = None
         self._cached_image_2 = None
         self._cached_index_2 = -1
         self._cached_original_size_2 = None
-
-    def _is_unlimited_display_enabled(self) -> bool:
-        return not self.max_display_size or self.max_display_size <= 0
-
-    def _display_limit_status_text(self) -> str:
-        if self._is_unlimited_display_enabled():
-            return "显示全部像素"
-        return f"上限: {self.max_display_size}px"
-
-    def _update_display_limit_button(self):
-        if self._is_unlimited_display_enabled():
-            self.toggle_display_limit_btn.setText("恢复显示上限")
-            base_limit = self._configured_max_display_size if self._configured_max_display_size > 0 else 2048
-            self.toggle_display_limit_btn.setToolTip(f"恢复为当前设置的显示上限（{base_limit}px）")
-        else:
-            self.toggle_display_limit_btn.setText("取消显示上限")
-            self.toggle_display_limit_btn.setToolTip("重新加载当前影像并显示全部像素")
-
-    def toggle_display_limit_override(self):
-        """切换是否取消显示上限。"""
-        if self._is_unlimited_display_enabled():
-            self.max_display_size = self._configured_max_display_size if self._configured_max_display_size > 0 else 2048
-        else:
-            self.max_display_size = 0
-        self._update_display_limit_button()
-
-        if self.image_count > 0:
-            self._clear_cached_images()
-            self.show_image(1, reset_view=True)
-            self.show_image(2, reset_view=True)
+        self._cached_source_2 = None
 
     def _show_loading_indicator(self, message: str):
         self.setWindowTitle(f"{self._loading_title_text} - 加载中")
@@ -791,7 +791,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         """构建单张文件夹影像的元数据，不读取整幅数据。"""
         ext = os.path.splitext(file_path)[1].lower()
 
-        if ext in ['.tif', '.tiff', '.grd']:
+        if ext in ['.tif', '.tiff', '.grd', '.nc']:
             size_info, band_count, nodata_value = get_tiff_info(file_path)
             geotransform, projection = get_geotransform(file_path)
         else:
@@ -1085,7 +1085,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.show_image(viewer_id, reset_view=False)
     
     def _get_image_data(self, index):
-        """按需获取指定索引的图像数据（支持降采样）
+        """按需获取指定索引的显示图像数据（可能来自金字塔）
         
         Args:
             index: 图像索引
@@ -1097,28 +1097,23 @@ class PixelTimeSeriesViewerDialog(QDialog):
             return None, None
         
         if self.data_source_type == 'h5':
-            # 使用image_io模块从h5文件按需读取
             actual_index = index + self.h5_start_index
-            image_data, original_size = read_h5_timeseries_frame(
+            image_data, original_size, _factor, _mode = read_h5_timeseries_frame_pyramid_display(
                 self.h5_file_path, 
                 actual_index, 
-                max_size=self.max_display_size
+                self.pyramid_threshold_mb,
             )
         elif self.data_source_type == 'gamma':
-            # 从GAMMA二进制文件读取
             if index < len(self.image_files):
-                image_data, _, original_size = self._read_gamma_image_downsampled(
-                    self.image_files[index],
-                    max_size=self.max_display_size
+                image_data, _, original_size = self._read_gamma_pyramid_display(
+                    self.image_files[index]
                 )
             else:
                 return None, None
         else:
-            # 从文件夹按需读取（使用降采样读取）
             if index < len(self.image_files):
-                image_data, _, original_size = self._read_image_downsampled(
-                    self.image_files[index], 
-                    max_size=self.max_display_size
+                image_data, _, original_size = self._read_image_pyramid_display(
+                    self.image_files[index]
                 )
             else:
                 return None, None
@@ -1167,13 +1162,44 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         # 加载新数据
         image_data, original_size = self._get_image_data(index)
+        image_source = self._get_image_source(index)
         
         # 更新缓存
         setattr(self, f'_cached_image_{viewer_id}', image_data)
         setattr(self, f'_cached_index_{viewer_id}', index)
         setattr(self, f'_cached_original_size_{viewer_id}', original_size)
+        setattr(self, f'_cached_source_{viewer_id}', image_source)
         
         return image_data, original_size
+
+    def _get_image_source(self, index):
+        try:
+            if self._converted_to_db:
+                return None
+            if self.data_source_type == 'h5':
+                return H5DatasetRasterSource(
+                    self.h5_file_path,
+                    "timeseries",
+                    index + self.h5_start_index,
+                    self.pyramid_threshold_mb,
+                )
+            if self.data_source_type == 'gamma' and index < len(self.image_files):
+                return GammaVrtRasterSource(
+                    self.image_files[index],
+                    self.gamma_width,
+                    self.gamma_height,
+                    self.gamma_format,
+                    self.pyramid_threshold_mb,
+                )
+            if index < len(self.image_files):
+                file_path = self.image_files[index]
+                try:
+                    return GdalRasterSource(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
+                except Exception:
+                    return StandardImageSource(file_path)
+        except Exception:
+            return None
+        return None
     
     def show_image(self, viewer_id, reset_view=False):
         """显示指定查看器的当前图像
@@ -1206,8 +1232,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
             
             self._configure_viewer_scene_mapping(viewer, current_index)
 
-            # 更新图像查看器（传递原始尺寸用于坐标映射）
-            viewer.set_image_from_array(current_data, original_size=original_size)
+            image_source = getattr(self, f'_cached_source_{viewer_id}', None)
+            if image_source is not None and not self._uses_geo_sync():
+                viewer.set_raster_source(image_source, reset_view=reset_view)
+            else:
+                # 更新图像查看器（传递原始尺寸用于坐标映射）
+                viewer.set_raster_array(current_data, original_size=original_size)
 
             current_metadata = self._get_image_metadata(current_index) if self.data_source_type == 'folder' else None
             current_nodata = self._get_effective_nodata_for_index(current_index)
@@ -1247,7 +1277,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             if original_size:
                 orig_w, orig_h = original_size
                 if display_shape[0] != orig_h or display_shape[1] != orig_w:
-                    # 显示降采样信息
+                    # 显示来自金字塔/overview的预览尺寸
                     if current_data.ndim == 2:
                         info = f"{file_name} | 原始: {orig_w}x{orig_h} | 显示: {display_shape[1]}x{display_shape[0]} | 单波段"
                     elif current_data.ndim == 3:
@@ -1255,7 +1285,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     else:
                         info = f"{file_name} | 尺寸: {display_shape}"
                 else:
-                    # 没有降采样
+                    # 显示尺寸与原始尺寸一致
                     if current_data.ndim == 2:
                         info = f"{file_name} | 尺寸: {orig_w}x{orig_h} | 单波段"
                     elif current_data.ndim == 3:
@@ -1270,7 +1300,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 else:
                     info = f"{file_name} | 尺寸: {display_shape}"
             
-            info += f" | {self._display_limit_status_text()}"
+            info += f" | 金字塔阈值: {self.pyramid_threshold_mb} MB"
             if self._converted_to_db:
                 info += " | dB"
             info_label.setText(info)
@@ -1297,7 +1327,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         try:
             self._show_loading_indicator(f"正在扫描图像文件夹...\n{os.path.basename(folder)}")
             # 查找支持的图像文件
-            supported_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.grd']
+            supported_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.grd', '.nc']
             files = []
             
             for filename in os.listdir(folder):
@@ -1329,7 +1359,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         last_folder = settings.value("last_h5_path", "")
         
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择h5时序数据文件", last_folder, "HDF5 Files (*.h5 *.hdf5);;All Files (*)",
+            self, "选择h5时序数据文件", last_folder, "HDF5/NetCDF Files (*.h5 *.hdf5 *.nc);;All Files (*)",
             options=QFileDialog.Option.DontUseNativeDialog)
         
         if not file_path:
@@ -1399,7 +1429,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._refresh_navigation_controls()
             
             # 设置默认的彩色colormap
-            self.colormap_combo.setCurrentText('jet')
+            self._reset_render_controls_for_new_series(1, 'jet')
             
             # 设置默认Nodata值为0（h5数据）
             self.nodata_value = 0
@@ -1412,6 +1442,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.current_image_index_2 = min(1, self.image_count - 1)
             self.show_image(1, reset_view=True)
             self.show_image(2, reset_view=True)
+            self._update_image_stats_to_render_settings()
+            self._apply_render_settings_update()
             
             # 启用转dB按钮
             self.to_db_btn.setEnabled(True)
@@ -1560,8 +1592,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             # 更新两个窗口的控件
             self._refresh_navigation_controls()
 
-            # 更新渲染设置组件的波段数
-            self.render_settings.set_num_bands(band_count)
+            self._reset_render_controls_for_new_series(band_count, 'gray')
             
             # 显示第一张和第二张图像
             self.current_image_index_1 = 0
@@ -1569,11 +1600,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.show_image(1, reset_view=True)
             self.show_image(2, reset_view=True)
             
-            # 设置默认colormap为gray（非h5文件）
-            self.colormap_combo.setCurrentText('gray')
-            
             # 更新渲染设置的最大最小值（从第一张图像计算）
             self._update_image_stats_to_render_settings()
+            self._apply_render_settings_update()
             
             # 启用转dB按钮
             self.to_db_btn.setEnabled(True)
@@ -1750,9 +1779,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             # 设置默认colormap
             is_complex = gamma_format.startswith('cpx')
             if is_complex:
-                self.colormap_combo.setCurrentText('hsv')
+                self._reset_render_controls_for_new_series(1, 'hsv')
             else:
-                self.colormap_combo.setCurrentText('gray')
+                self._reset_render_controls_for_new_series(1, 'gray')
             
             # 显示第一张和第二张图像
             self._show_loading_indicator(f"正在加载 GAMMA 时序图像...\n{os.path.basename(folder)}")
@@ -1763,6 +1792,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             
             # 更新渲染设置的最大最小值
             self._update_image_stats_to_render_settings()
+            self._apply_render_settings_update()
             
             # 启用转dB按钮
             self.to_db_btn.setEnabled(True)
@@ -1779,9 +1809,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
         finally:
             self._hide_loading_indicator()
     
-    def _read_gamma_image_downsampled(self, file_path, max_size=2048):
+    def _read_gamma_pyramid_display(self, file_path):
         """
-        读取GAMMA二进制文件并降采样
+        读取GAMMA二进制文件的显示预览。
         
         Returns:
             tuple: (图像数据, nodata值, 原始尺寸) 或 (None, None, None)
@@ -1790,19 +1820,13 @@ class PixelTimeSeriesViewerDialog(QDialog):
             return None, None, None
         
         try:
-            data, downsample_factor = read_gamma_downsampled(
+            data, _nodata, original_size, _factor, _mode = read_gamma_pyramid_display(
                 file_path, 
                 self.gamma_width, 
                 self.gamma_height, 
                 self.gamma_format,
-                max_size
+                self.pyramid_threshold_mb,
             )
-            
-            # 处理复数数据
-            if self.gamma_format.startswith('cpx'):
-                data = complex_to_phase(data)
-            
-            original_size = (self.gamma_width, self.gamma_height) if downsample_factor > 1 else None
             
             return data.astype(np.float32), 0, original_size
             
@@ -1840,8 +1864,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         try:
             ext = os.path.splitext(file_path)[1].lower()
             
-            if ext in ['.tif', '.tiff']:
-                # 使用image_io读取TIFF
+            if ext in ['.tif', '.tiff', '.grd', '.nc']:
+                # 使用image_io读取GDAL栅格
                 data, nodata, _ = read_tiff(file_path)
                 return data, nodata
             else:
@@ -1865,27 +1889,22 @@ class PixelTimeSeriesViewerDialog(QDialog):
             print(f"读取图像失败 {file_path}: {e}")
             return None, None
     
-    def _read_image_downsampled(self, file_path, max_size=2048):
+    def _read_image_pyramid_display(self, file_path):
         """
-        降采样读取图像，用于大图像预览
-        
-        Args:
-            file_path: 图像文件路径
-            max_size: 最大边长（像素），默认2048
-            
-        Returns:
-            tuple: (降采样后的图像数据, nodata值, 原始尺寸(width, height)) 或 (None, None, None)
+        使用金字塔读取图像显示预览。
         """
         try:
             ext = os.path.splitext(file_path)[1].lower()
             
-            if ext in ['.tif', '.tiff', '.grd']:
-                # 使用image_io读取TIFF/GRD
-                data, nodata, original_size, factor = read_tiff_downsampled(file_path, max_size)
+            if ext in ['.tif', '.tiff', '.grd', '.nc']:
+                data, nodata, original_size, _factor, _mode = read_gdal_pyramid_display(
+                    file_path, self.pyramid_threshold_mb
+                )
                 return data, nodata, original_size
             else:
-                # 使用image_io读取普通图像
-                data, original_size, factor = read_image_downsampled(file_path, max_size)
+                data, nodata, original_size, _factor, _mode = read_standard_pyramid_display(
+                    file_path, self.pyramid_threshold_mb
+                )
                 if data is None:
                     return None, None, None
                 
@@ -1901,7 +1920,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     return None, None, None
                 
         except Exception as e:
-            print(f"降采样读取图像失败 {file_path}: {e}")
+            print(f"金字塔读取图像失败 {file_path}: {e}")
             return None, None, None
     
     def sort_images(self):
@@ -2131,7 +2150,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 ha='center', va='center', fontsize=11
             )
             ax.set_axis_off()
-            self.figure.tight_layout()
+            self.figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.92))
             self.canvas.draw()
             return
         
@@ -2184,7 +2203,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 ax.set_xlabel('图像索引')
             
             ax.set_ylabel('像素值')
-            ax.set_title(title_text)
+            ax.set_title(title_text, pad=12)
             ax.legend()
             ax.grid(True, alpha=0.3)
             
@@ -2239,7 +2258,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 ax.set_xlabel('图像索引')
             
             ax.set_ylabel('像素值')
-            ax.set_title(title_text)
+            ax.set_title(title_text, pad=12)
             ax.legend()
             ax.grid(True, alpha=0.3)
         
@@ -2253,7 +2272,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         )
         self._plot_annotation.set_visible(False)
         
-        self.figure.tight_layout()
+        self.figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.92))
         self.canvas.draw()
     
     def _on_plot_mouse_move(self, event):

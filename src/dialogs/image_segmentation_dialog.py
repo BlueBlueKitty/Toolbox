@@ -52,8 +52,9 @@ from src.segmentation.exporters import (
     export_yolo,
 )
 from src.segmentation.geometry_service import GeometryService
-from src.segmentation.image_sources import GeoTiffImageSource, StandardImageSource
-from src.segmentation.rendering import default_render_config, render_base_rgb
+from src.rendering.sources import GdalRasterSource, StandardImageSource
+from src.rendering.config import default_raster_render_config, render_raster_rgb
+from src.utils.display_pyramid import DEFAULT_PYRAMID_THRESHOLD_MB
 from src.utils.image_io import pixel_to_lonlat
 from src.dialogs.segmentation_export_dialog import SegmentationExportDialog
 from src.widgets.colormap_combobox import ColormapComboBox
@@ -62,7 +63,7 @@ from src.widgets.label_panel_widget import LabelPanelWidget
 from src.widgets.magic_wand_panel import MagicWandPanel
 from src.widgets.render_settings_widget import RenderSettingsWidget
 from src.widgets.operation_progress_widget import OperationProgressWidget
-from src.widgets.segmentation_pg_view import SegmentationPgView
+from src.widgets.segmentation_canvas import SegmentationCanvas
 from src.widgets.segmentation_tool_controller import SegmentationToolController
 
 
@@ -84,7 +85,7 @@ class AutosaveWorker(QObject):
 
 
 class ImageSegmentationDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, pyramid_threshold_mb=DEFAULT_PYRAMID_THRESHOLD_MB):
         super().__init__(parent)
         self.setWindowTitle("图像分割工具")
         self.resize(1600, 900)
@@ -95,7 +96,8 @@ class ImageSegmentationDialog(QDialog):
         self.command_stack = CommandStack(self.project)
         self.tool_controller = SegmentationToolController(self)
         self.segmenter = MagicWandSegmenter()
-        self.render_config = default_render_config()
+        self.pyramid_threshold_mb = pyramid_threshold_mb
+        self.render_config = default_raster_render_config()
         self.current_source = None
         self.current_project_path: str | None = None
         self.preview_selection = None
@@ -134,11 +136,7 @@ class ImageSegmentationDialog(QDialog):
         self._material_icon_family = self._load_material_icon_font()
         self._last_image_dir = self.project_manager.settings.value("last_image_dir", "", type=str)
         self._last_project_dir = self.project_manager.settings.value("last_project_dir", "", type=str)
-        self._geotiff_full_render_cache_limit_mb = self.project_manager.settings.value(
-            "segmentation/geotiff_full_render_cache_limit_mb",
-            512,
-            type=int,
-        )
+        self._geotiff_full_render_cache_limit_mb = self.pyramid_threshold_mb
 
         self._create_ui()
         self._bind_signals()
@@ -231,7 +229,7 @@ class ImageSegmentationDialog(QDialog):
         splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(splitter)
 
-        self.canvas = SegmentationPgView()
+        self.canvas = SegmentationCanvas()
         splitter.addWidget(self.canvas)
 
         right_panel = QWidget()
@@ -239,6 +237,7 @@ class ImageSegmentationDialog(QDialog):
         self.label_panel = LabelPanelWidget()
         self.layer_panel = LayerPanelWidget()
         self.magic_panel = MagicWandPanel()
+        self.layer_panel.set_layers([state.spec for state in self.canvas.layer_manager.layers() if state.spec.id not in {"draft", "snap"}])
         right_layout.addWidget(self.label_panel)
         right_layout.addWidget(self.layer_panel)
         right_layout.addWidget(self.magic_panel)
@@ -287,6 +286,7 @@ class ImageSegmentationDialog(QDialog):
         self.label_panel.active_label_changed.connect(self._set_active_label)
         self.label_panel.labels_changed.connect(self._replace_labels)
         self.layer_panel.visibility_changed.connect(self._on_layer_visibility_changed)
+        self.layer_panel.order_changed.connect(self._on_layer_order_changed)
         self.magic_panel.params_changed.connect(self._schedule_magic_preview)
         self.magic_panel.merge_preview_changed.connect(self._on_merge_preview_changed)
         self.magic_panel.confirm_requested.connect(self._confirm_magic_preview)
@@ -519,13 +519,13 @@ class ImageSegmentationDialog(QDialog):
     def _geo_should_cache_full_render(self) -> bool:
         if self.project.image_asset is None or self.current_source is None:
             return False
-        if not isinstance(self.current_source, GeoTiffImageSource):
+        if not isinstance(self.current_source, GdalRasterSource):
             return False
         try:
             file_size_mb = Path(self.project.image_asset.path).stat().st_size / (1024 * 1024)
         except Exception:
             return False
-        return file_size_mb <= max(64, self._geotiff_full_render_cache_limit_mb)
+        return file_size_mb < max(1, self._geotiff_full_render_cache_limit_mb)
 
     def _ensure_full_analysis_rgb(self) -> np.ndarray | None:
         if self.current_source is None or self.project.image_asset is None:
@@ -540,7 +540,7 @@ class ImageSegmentationDialog(QDialog):
                 self.project.image_asset.width,
                 self.project.image_asset.height,
             )
-            self._analysis_full_rgb_cache = render_base_rgb(
+            self._analysis_full_rgb_cache = render_raster_rgb(
                 raw,
                 self.render_config,
                 nodata_value=self.project.image_asset.nodata,
@@ -572,7 +572,7 @@ class ImageSegmentationDialog(QDialog):
         width = min(tile_size, self.project.image_asset.width - x0)
         height = min(tile_size, self.project.image_asset.height - y0)
         raw = self.current_source.read_window_native(x0, y0, width, height)
-        rendered = render_base_rgb(raw, self.render_config, nodata_value=self.project.image_asset.nodata)
+        rendered = render_raster_rgb(raw, self.render_config, nodata_value=self.project.image_asset.nodata)
         self._analysis_tile_cache[key] = rendered
         return rendered
 
@@ -609,6 +609,8 @@ class ImageSegmentationDialog(QDialog):
 
     def _configure_default_render_for_source(self, source) -> None:
         metadata = source.metadata()
+        self.render_settings.reset_to_defaults(metadata.band_count)
+        self.colormap_combo.setCurrentText("gray")
         if metadata.band_count >= 3:
             self._set_display_mode("RGB")
             self.render_settings.set_stretch_mode(self.render_settings.STRETCH_NONE)
@@ -992,6 +994,8 @@ class ImageSegmentationDialog(QDialog):
 
     def _update_image_stats_to_render_settings(self) -> None:
         settings = self.render_settings.get_all_settings()
+        if not settings.get("auto_range", True):
+            return
         value_range = self._current_global_range(settings)
         if value_range is None:
             return
@@ -1019,29 +1023,7 @@ class ImageSegmentationDialog(QDialog):
     def _load_image(self, file_path: str) -> None:
         lower = file_path.lower()
         if lower.endswith((".tif", ".tiff")):
-            source = GeoTiffImageSource(file_path)
-            metadata = source.metadata()
-            if max(metadata.width, metadata.height) > 4096 and not metadata.overview_levels:
-                reply = QMessageBox.question(
-                    self,
-                    "构建 overviews",
-                    "当前 GeoTIFF 没有可用金字塔，是否现在构建 overviews 以改善浏览性能？",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.Yes,
-                )
-                if reply == QMessageBox.Yes:
-                    self._start_progress("正在创建 GeoTIFF 金字塔...")
-                    try:
-                        success, _levels = source.build_overviews(
-                            progress_callback=lambda value, message: self._update_progress(value, message, maximum=100)
-                        )
-                        if success:
-                            self._finish_progress("GeoTIFF 金字塔创建完成")
-                        else:
-                            self._fail_progress("GeoTIFF 金字塔创建失败")
-                    except Exception:
-                        self._fail_progress("GeoTIFF 金字塔创建失败")
-                        raise
+            source = GdalRasterSource(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
         else:
             source = StandardImageSource(file_path)
         self._configure_default_render_for_source(source)
@@ -1084,7 +1066,7 @@ class ImageSegmentationDialog(QDialog):
         self._clear_node_edit_session_state(clear_override=True)
         self._clear_analysis_cache()
         self.canvas.set_render_config(self.render_config)
-        self.canvas.set_image_source(source)
+        self.canvas.set_raster_source(source)
         self.canvas.set_interaction_mode(self.tool_controller.active_tool)
         self.tool_controller.set_annotations(self.project.annotations)
         self.status_label.setText(f"{os.path.basename(meta.path)} | {meta.width} x {meta.height}")
@@ -1127,7 +1109,7 @@ class ImageSegmentationDialog(QDialog):
         if not image_path:
             QMessageBox.warning(self, "错误", "项目文件中缺少图像路径。")
             return
-        source = GeoTiffImageSource(image_path) if image_path.lower().endswith((".tif", ".tiff")) else StandardImageSource(image_path)
+        source = GdalRasterSource(image_path, pyramid_threshold_mb=self.pyramid_threshold_mb) if image_path.lower().endswith((".tif", ".tiff")) else StandardImageSource(image_path)
         self._configure_default_render_for_source(source)
         self._apply_source(
             source,
@@ -1140,9 +1122,10 @@ class ImageSegmentationDialog(QDialog):
         self.project.layer_visibility = project.layer_visibility
         self.project.export_prefs = project.export_prefs
         self.canvas.restore_view_state(self.project.display_state)
-        self.layer_panel.image_check.setChecked(self.project.layer_visibility.get("image", True))
-        self.layer_panel.raster_check.setChecked(self.project.layer_visibility.get("raster", True))
-        self.layer_panel.preview_mask_check.setChecked(self.project.layer_visibility.get("preview_mask", True))
+        for layer_id, visible in self.project.layer_visibility.items():
+            self.layer_panel.set_layer_checked(layer_id, visible)
+            if self.canvas.layer_manager.layer(layer_id):
+                self.canvas.set_layer_visible(layer_id, visible)
         self._refresh_label_ui()
         self._refresh_canvas()
         self._set_dirty(False)
@@ -1621,7 +1604,7 @@ class ImageSegmentationDialog(QDialog):
             or self._preview_bbox is None
         ):
             return []
-        should_show = force or self.project.layer_visibility.get("preview_vector", True)
+        should_show = force or self.project.layer_visibility.get("preview_vector", False)
         if not should_show:
             self.preview_selection.polygon_preview = []
             self.preview_selection.contours = []
@@ -1735,11 +1718,17 @@ class ImageSegmentationDialog(QDialog):
 
     def _on_layer_visibility_changed(self, layer_name: str, visible: bool) -> None:
         self.project.layer_visibility[layer_name] = visible
-        if layer_name == "image":
-            self.canvas.image_item.setVisible(visible)
-        elif layer_name == "preview":
-            self.canvas.preview_item.setVisible(visible)
+        if self.canvas.layer_manager.layer(layer_name):
+            self.canvas.set_layer_visible(layer_name, visible)
+        if layer_name == "preview_vector" and visible:
+            self._refresh_preview_vector(force=True)
+            return
         self._refresh_canvas()
+
+    def _on_layer_order_changed(self, layer_name: str, index: int) -> None:
+        if self.canvas.layer_manager.layer(layer_name):
+            self.canvas.move_layer(layer_name, index)
+            self._refresh_canvas()
 
     def _selected_annotation(self) -> AnnotationObject | None:
         selected_id = self.tool_controller.selected_annotation_id
@@ -1839,16 +1828,14 @@ class ImageSegmentationDialog(QDialog):
 
     def _refresh_canvas(self) -> None:
         label_lookup = {label.id: label for label in self.project.labels}
-        # 运行时矢量显示入口暂时关闭，仅保留代码以便后续恢复。
-        # annotations = self.project.annotations if self.project.layer_visibility.get("annotations", True) else []
-        # self.canvas.update_annotations(
-        #     annotations,
-        #     label_lookup,
-        #     self.tool_controller.selected_annotation_ids,
-        #     editable_annotation_id=self.tool_controller.editable_annotation_id(),
-        #     active_vertex=self.tool_controller.selected_vertex_index,
-        # )
-        self.canvas.update_annotations([], label_lookup, set(), editable_annotation_id=None, active_vertex=None)
+        annotations = self.project.annotations if self.project.layer_visibility.get("annotations", True) else []
+        self.canvas.update_annotations(
+            annotations,
+            label_lookup,
+            self.tool_controller.selected_annotation_ids,
+            editable_annotation_id=self.tool_controller.editable_annotation_id(),
+            active_vertex=self.tool_controller.selected_vertex_index,
+        )
         raster_rgba, raster_bbox = self._current_raster_overlay(label_lookup)
         self.canvas.update_raster_mask(raster_rgba, raster_bbox)
         self._update_preview_display()
@@ -1877,7 +1864,7 @@ class ImageSegmentationDialog(QDialog):
         self._autosave_thread = None
 
     def _current_raster_overlay(self, label_lookup):
-        if not self.project.image_asset or not self.canvas.last_render or not self.project.layer_visibility.get("raster", True):
+        if not self.project.image_asset or not self.canvas.last_render or not self.project.layer_visibility.get("mask", True):
             return None, None
         x0, y0, width, height = self.canvas.last_render.source_window
         if width <= 0 or height <= 0:
@@ -2067,7 +2054,7 @@ class ImageSegmentationDialog(QDialog):
             raw = np.asarray(original_value).reshape(1, 1, -1)
         else:
             raw = np.asarray([[original_value]])
-        rgb = render_base_rgb(raw, self.render_config, nodata_value=self.project.image_asset.nodata if self.project.image_asset else None)
+        rgb = render_raster_rgb(raw, self.render_config, nodata_value=self.project.image_asset.nodata if self.project.image_asset else None)
         if rgb.ndim != 3 or rgb.shape[2] < 3:
             return None
         return [int(rgb[0, 0, 0]), int(rgb[0, 0, 1]), int(rgb[0, 0, 2])]
@@ -2110,8 +2097,10 @@ class ImageSegmentationDialog(QDialog):
             self.canvas.update_preview_mask(self._preview_mask, self._preview_bbox, color)
         else:
             self.canvas.update_preview_mask(None, None, color)
-        # 运行时矢量预览显示入口暂时关闭，仅保留代码以便后续恢复。
-        self.canvas.update_preview_polygons([], color)
+        preview_polygons = []
+        if self.project.layer_visibility.get("preview_vector", False) and self.preview_selection is not None:
+            preview_polygons = self.preview_selection.polygon_preview
+        self.canvas.update_preview_polygons(preview_polygons, color)
 
     def closeEvent(self, event) -> None:
         if not self._finish_node_edit_session():

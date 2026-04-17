@@ -49,8 +49,6 @@ class UpdateCheckWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    MAX_DISPLAY_SIZE_LIMIT = 65536
-
     def __init__(self):
         super(MainWindow, self).__init__()
         
@@ -58,9 +56,9 @@ class MainWindow(QMainWindow):
         self.settings = QSettings("Toolbox", "RemoteSensingToolbox")
         self.segmentation_settings = get_segmentation_settings()
         
-        # 从设置中读取降采样尺寸，0 表示无限制
-        self.max_display_size = self.settings.value("display/max_display_size", 2048, type=int)
-        self.geotiff_full_render_cache_limit_mb = self.segmentation_settings.value("segmentation/geotiff_full_render_cache_limit_mb", 512, type=int)
+        # 显示金字塔阈值：超过该体积的图像会为渲染预览建立 overview。
+        self.pyramid_threshold_mb = self.settings.value("display/pyramid_threshold_mb", 128, type=int)
+        self.geotiff_full_render_cache_limit_mb = self.pyramid_threshold_mb
         self._open_tool_windows = set()
         
         # 设置窗口属性
@@ -334,7 +332,7 @@ class MainWindow(QMainWindow):
         图像局部查看器按钮点击事件
         """
         try:
-            dialog = LocalImageViewerDialog(self, max_display_size=self.max_display_size)
+            dialog = LocalImageViewerDialog(self, pyramid_threshold_mb=self.pyramid_threshold_mb)
             self._show_tool_window(dialog)
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开图像局部查看器失败: {str(e)}")
@@ -345,7 +343,7 @@ class MainWindow(QMainWindow):
         像素时序查看器按钮点击事件
         """
         try:
-            dialog = PixelTimeSeriesViewerDialog(self, max_display_size=self.max_display_size)
+            dialog = PixelTimeSeriesViewerDialog(self, pyramid_threshold_mb=self.pyramid_threshold_mb)
             self._show_tool_window(dialog)
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开像素时序查看器失败: {str(e)}")
@@ -367,7 +365,7 @@ class MainWindow(QMainWindow):
         图像分割工具按钮点击事件
         """
         try:
-            dialog = ImageSegmentationDialog(self)
+            dialog = ImageSegmentationDialog(self, pyramid_threshold_mb=self.pyramid_threshold_mb)
             self._show_tool_window(dialog)
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开图像分割工具失败: {str(e)}")
@@ -672,38 +670,29 @@ class MainWindow(QMainWindow):
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
         
-        # 降采样尺寸设置
         desc_label = QLabel(
-            "设置图像显示时的最大尺寸。\n"
-            "当图像超过此尺寸时，会自动降采样以提高性能。\n"
-            "较小的值可提高浏览速度，但会降低显示精度。"
+            "设置栅格显示阈值。\n"
+            "GeoTIFF、GAMMA、HDF5/NetCDF 等栅格数据小于该阈值时优先直接在内存中渲染；"
+            "达到或超过该阈值时会自动建立或使用金字塔/overview，以保证缩放和平移流畅。"
         )
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
         
         layout.addSpacing(10)
         
-        # 尺寸输入
-        size_layout = QHBoxLayout()
-        size_label = QLabel("最大显示尺寸（像素）:")
-        size_layout.addWidget(size_label)
+        threshold_layout = QHBoxLayout()
+        threshold_label = QLabel("栅格显示阈值:")
+        threshold_layout.addWidget(threshold_label)
         
-        size_spinbox = QSpinBox()
-        size_spinbox.setRange(512, self.MAX_DISPLAY_SIZE_LIMIT)
-        size_spinbox.setSingleStep(256)
-        size_spinbox.setValue(self.max_display_size if self.max_display_size > 0 else 8192)
-        size_spinbox.setSuffix(" px")
-        size_spinbox.setMinimumWidth(120)
-        size_layout.addWidget(size_spinbox)
-        size_layout.addStretch()
-
-        layout.addLayout(size_layout)
-
-        unlimited_check = QCheckBox("无限制（显示全部像素）")
-        unlimited_check.setChecked(self.max_display_size <= 0)
-        unlimited_check.toggled.connect(lambda checked: size_spinbox.setEnabled(not checked))
-        size_spinbox.setEnabled(not unlimited_check.isChecked())
-        layout.addWidget(unlimited_check)
+        threshold_spinbox = QSpinBox()
+        threshold_spinbox.setRange(1, 102400)
+        threshold_spinbox.setSingleStep(64)
+        threshold_spinbox.setValue(max(1, int(self.pyramid_threshold_mb)))
+        threshold_spinbox.setSuffix(" MB")
+        threshold_spinbox.setMinimumWidth(120)
+        threshold_layout.addWidget(threshold_spinbox)
+        threshold_layout.addStretch()
+        layout.addLayout(threshold_layout)
         
         layout.addSpacing(10)
         
@@ -718,33 +707,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(smooth_check)
 
         layout.addSpacing(10)
-
-        segmentation_cache_layout = QHBoxLayout()
-        segmentation_cache_label = QLabel("分割GeoTIFF整图渲染缓存阈值:")
-        segmentation_cache_layout.addWidget(segmentation_cache_label)
-        segmentation_cache_spinbox = QSpinBox()
-        segmentation_cache_spinbox.setRange(64, 4096)
-        segmentation_cache_spinbox.setSingleStep(64)
-        segmentation_cache_spinbox.setValue(self.geotiff_full_render_cache_limit_mb)
-        segmentation_cache_spinbox.setSuffix(" MB")
-        segmentation_cache_spinbox.setMinimumWidth(120)
-        segmentation_cache_layout.addWidget(segmentation_cache_spinbox)
-        segmentation_cache_layout.addStretch()
-        layout.addLayout(segmentation_cache_layout)
-
-        segmentation_cache_tip = QLabel(
-            "当GeoTIFF文件体积小于该阈值时，图像分割工具会尝试把整图渲染后的RGB缓存到内存中，以提升魔法棒识别速度。"
-        )
-        segmentation_cache_tip.setWordWrap(True)
-        segmentation_cache_tip.setStyleSheet("color: #7f8c8d;")
-        layout.addWidget(segmentation_cache_tip)
-        
-        layout.addSpacing(10)
         
         # 提示信息
         tip_label = QLabel(
-            f"<i>提示：推荐值为 4096-8192，可手动提高到 {self.MAX_DISPLAY_SIZE_LIMIT}。<br>"
-            "启用“无限制”后将直接显示全部像素，但会显著增加内存和计算压力。</i>"
+            "<i>提示：推荐值为 128-512 MB。阈值越小，越早建立金字塔；"
+            "首次打开大数据可能需要一些时间，但后续浏览会更平稳。</i>"
         )
         tip_label.setStyleSheet("color: #7f8c8d;")
         tip_label.setWordWrap(True)
@@ -759,20 +726,18 @@ class MainWindow(QMainWindow):
         layout.addWidget(button_box)
         
         if dialog.exec() == QDialog.Accepted:
-            self.max_display_size = 0 if unlimited_check.isChecked() else size_spinbox.value()
+            self.pyramid_threshold_mb = threshold_spinbox.value()
             smooth_display = smooth_check.isChecked()
-            self.geotiff_full_render_cache_limit_mb = segmentation_cache_spinbox.value()
-            # 保存设置到 QSettings
-            self.settings.setValue("display/max_display_size", self.max_display_size)
+            self.geotiff_full_render_cache_limit_mb = self.pyramid_threshold_mb
+            self.settings.setValue("display/pyramid_threshold_mb", self.pyramid_threshold_mb)
             self.settings.setValue("display/smooth_display", smooth_display)
             self.segmentation_settings.setValue("segmentation/geotiff_full_render_cache_limit_mb", self.geotiff_full_render_cache_limit_mb)
-            max_size_text = "无限制（显示全部像素）" if self.max_display_size <= 0 else f"{self.max_display_size} 像素"
             QMessageBox.information(
                 self, 
                 "设置已保存",
-                f"最大显示尺寸已设置为 {max_size_text}\n"
+                f"栅格显示阈值: {self.pyramid_threshold_mb} MB\n"
                 f"平滑显示: {'已启用' if smooth_display else '已禁用'}\n"
-                f"分割GeoTIFF整图渲染缓存阈值: {self.geotiff_full_render_cache_limit_mb} MB\n\n"
+                "图像分割工具的整图渲染缓存阈值已同步使用该值。\n\n"
                 "新设置将在下次打开图像时生效。"
             )
 

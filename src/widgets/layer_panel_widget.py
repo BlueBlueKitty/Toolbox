@@ -1,35 +1,69 @@
 """
-图层控制面板。
+通用图层控制面板。
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QCheckBox, QFormLayout, QGroupBox, QWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QGroupBox, QListWidget, QListWidgetItem, QVBoxLayout
+
+from src.rendering.models import LayerSpec
 
 
 class LayerPanelWidget(QGroupBox):
     visibility_changed = Signal(str, bool)
+    order_changed = Signal(str, int)
 
     def __init__(self, parent=None):
         super().__init__("图层", parent)
-        layout = QFormLayout(self)
-        self.image_check = QCheckBox("显示图像")
-        self.image_check.setChecked(True)
-        # 矢量显示入口暂时关闭，仅保留代码以便后续恢复。
-        # self.annotation_check = QCheckBox("显示矢量")
-        # self.annotation_check.setChecked(True)
-        self.raster_check = QCheckBox("显示Mask")
-        self.raster_check.setChecked(True)
-        # 矢量预览入口暂时关闭，仅保留代码以便后续恢复。
-        # self.preview_vector_check = QCheckBox("显示矢量预览")
-        # self.preview_vector_check.setChecked(False)
-        # self.preview_vector_check.setToolTip("默认在每次新的魔法棒识别后会自动关闭。手动打开后，才会根据当前预览Mask生成矢量预览。")
-        self.preview_mask_check = QCheckBox("显示预览")
-        self.preview_mask_check.setChecked(True)
-        layout.addRow(self.image_check)
-        layout.addRow(self.raster_check)
-        layout.addRow(self.preview_mask_check)
-        self.image_check.toggled.connect(lambda checked: self.visibility_changed.emit("image", checked))
-        self.raster_check.toggled.connect(lambda checked: self.visibility_changed.emit("raster", checked))
-        self.preview_mask_check.toggled.connect(lambda checked: self.visibility_changed.emit("preview_mask", checked))
+        layout = QVBoxLayout(self)
+        self.layer_list = QListWidget()
+        self.layer_list.setDragDropMode(QListWidget.InternalMove)
+        self.layer_list.setDefaultDropAction(Qt.MoveAction)
+        self.layer_list.itemChanged.connect(self._on_item_changed)
+        self.layer_list.model().rowsMoved.connect(self._on_rows_moved)
+        layout.addWidget(self.layer_list)
+        self._updating = False
+
+    def set_layers(self, layers: list[LayerSpec]) -> None:
+        self._updating = True
+        self.layer_list.clear()
+        for layer in layers:
+            item = QListWidgetItem(layer.name)
+            item.setData(Qt.UserRole, layer.id)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled)
+            item.setCheckState(Qt.Checked if layer.visible else Qt.Unchecked)
+            self.layer_list.addItem(item)
+        self._updating = False
+
+    def set_layer_checked(self, layer_id: str, visible: bool) -> None:
+        item = self._item_for_layer(layer_id)
+        if item is None:
+            return
+        self._updating = True
+        item.setCheckState(Qt.Checked if visible else Qt.Unchecked)
+        self._updating = False
+
+    def layer_order(self) -> list[str]:
+        return [
+            self.layer_list.item(index).data(Qt.UserRole)
+            for index in range(self.layer_list.count())
+        ]
+
+    def _item_for_layer(self, layer_id: str):
+        for index in range(self.layer_list.count()):
+            item = self.layer_list.item(index)
+            if item.data(Qt.UserRole) == layer_id:
+                return item
+        return None
+
+    def _on_item_changed(self, item: QListWidgetItem) -> None:
+        if self._updating:
+            return
+        self.visibility_changed.emit(item.data(Qt.UserRole), item.checkState() == Qt.Checked)
+
+    def _on_rows_moved(self, *_args) -> None:
+        if self._updating:
+            return
+        for index, layer_id in enumerate(self.layer_order()):
+            self.order_changed.emit(layer_id, index)

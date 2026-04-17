@@ -13,7 +13,7 @@ from PySide6.QtCore import Signal, Qt
 
 
 class DeferredApplyDoubleSpinBox(QDoubleSpinBox):
-    """仅在回车或步进时提交，失焦时恢复到上次已提交值。"""
+    """在回车、步进或失焦时提交输入值，避免键入过程中频繁重绘。"""
 
     committed = Signal()
 
@@ -36,8 +36,7 @@ class DeferredApplyDoubleSpinBox(QDoubleSpinBox):
 
     def focusOutEvent(self, event):
         if self.lineEdit().isModified():
-            self.lineEdit().setText(self.textFromValue(self._committed_value))
-            self.lineEdit().setModified(False)
+            self._commit_if_changed()
         super().focusOutEvent(event)
 
     def _commit_if_changed(self):
@@ -643,6 +642,40 @@ class RenderSettingsWidget(QWidget):
             self.display_mode_combo.setEnabled(True)
             
         self._block_signals = False
+        self._update_band_controls_visibility()
+
+    def reset_to_defaults(self, num_bands=None):
+        """重置为新图像的默认渲染控制，保留全局平滑显示偏好。"""
+        smooth_display = self._smooth_display
+        self._block_signals = True
+        if num_bands is not None:
+            self._num_bands = int(max(1, num_bands))
+            self.gray_band_spin.setRange(1, self._num_bands)
+            self.band_r_spin.setRange(1, self._num_bands)
+            self.band_g_spin.setRange(1, self._num_bands)
+            self.band_b_spin.setRange(1, self._num_bands)
+        else:
+            self._num_bands = max(1, self._num_bands)
+
+        self.display_mode_combo.setCurrentText("灰度")
+        self.gray_band_spin.setValue(1)
+        self.band_r_spin.setValue(1)
+        self.band_g_spin.setValue(2 if self._num_bands >= 2 else 1)
+        self.band_b_spin.setValue(3 if self._num_bands >= 3 else 1)
+        self.stretch_combo.setCurrentText(self.STRETCH_MIN_MAX)
+        self.percent_low_spin.setValue(2.0)
+        self.percent_high_spin.setValue(98.0)
+        self.std_dev_spin.setValue(2.0)
+        self.gamma_spin.setValue(1.0)
+        self.auto_range_check.setChecked(True)
+        self.min_spin.setEnabled(False)
+        self.max_spin.setEnabled(False)
+        self.min_spin.setValue(0.0)
+        self.max_spin.setValue(1.0)
+        self.reverse_check.setChecked(False)
+        self._smooth_display = smooth_display
+        self._block_signals = False
+        self._update_stretch_params_visibility()
         self._update_band_controls_visibility()
     
     def set_value_range(self, min_val, max_val):

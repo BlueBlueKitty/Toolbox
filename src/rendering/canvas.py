@@ -1,24 +1,30 @@
 """
-基于 pyqtgraph 的通用图像查看器。
+支持金字塔动态渲染和图层叠加的通用栅格画布。
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QBrush, QPen
-from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsLineItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsItem, QGraphicsLineItem, QVBoxLayout, QWidget
 import pyqtgraph as pg
 
-from src.segmentation.rendering import default_render_config, render_base_rgb
+from .config import default_raster_render_config, render_raster_rgb
+from .layers import LayerManager
+from .models import LayerSpec, RenderRequest, RenderTileResult, ViewportState
 
 
-class ImageViewer(QWidget):
+class LayeredRasterCanvas(QWidget):
     pixel_clicked = Signal(int, int)
     mouse_moved = Signal(int, int, object)
     view_transformed = Signal(object)
     cursor_changed = Signal(object)
     scroll_changed = Signal(int, int)
+
+    BASE_LAYER_ID = "base_raster"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -27,15 +33,22 @@ class ImageViewer(QWidget):
 
         self.graphics = pg.GraphicsLayoutWidget()
         layout.addWidget(self.graphics)
-        self.view_box = self.graphics.addViewBox(lockAspect=False, enableMouse=False)
+        self.view_box = self.graphics.addViewBox(lockAspect=True, enableMouse=False)
         self.view_box.setMenuEnabled(False)
         self.view_box.invertY(True)
+        self.view_box.setAspectLocked(True)
+        self.view_box.enableAutoRange(x=False, y=False)
         self.image_item = pg.ImageItem(axisOrder="row-major")
         self.view_box.addItem(self.image_item)
 
+        self.layer_manager = LayerManager()
+        self.layer_manager.add_layer(LayerSpec(self.BASE_LAYER_ID, "图像", "raster"), self.image_item)
+
         self.image_array = None
+        self.source = None
+        self.last_render: RenderTileResult | None = None
+        self.render_config = default_raster_render_config()
         self.display_array = None
-        self.is_normalized = False
         self.original_width = 0
         self.original_height = 0
         self.downsample_factor = 1.0
@@ -58,15 +71,29 @@ class ImageViewer(QWidget):
         self._selected_pixel_items = []
         self._image_rect = QRectF(0, 0, 0, 0)
         self._suspend_range_signal = False
+        self._dynamic_source = False
+        self._last_request_signature = None
+        self._is_refresh_panning = False
+        self._dynamic_render_margin_ratio = 0.35
+        self._coordinates_are_image_space = False
+        self._overlay_items_by_layer: dict[str, list[object]] = {}
+
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(120)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.timeout.connect(self.refresh_view)
 
         self.graphics.viewport().installEventFilter(self)
         self.graphics.viewport().setMouseTracking(True)
         self.graphics.viewport().setCursor(Qt.ArrowCursor)
         self.view_box.sigRangeChanged.connect(self._on_range_changed)
 
-    def set_image_from_array(self, image_array, original_size=None):
+    def set_raster_array(self, image_array, original_size=None):
+        self.source = None
+        self.last_render = None
+        self._dynamic_source = False
+        self._coordinates_are_image_space = False
         self.image_array = image_array
-        self.is_normalized = False
         if original_size is not None:
             self.original_width, self.original_height = original_size
             self.downsample_factor = self.original_width / max(image_array.shape[1], 1)
@@ -74,6 +101,38 @@ class ImageViewer(QWidget):
             self.original_height, self.original_width = image_array.shape[:2]
             self.downsample_factor = 1.0
         self._update_display()
+
+    def set_raster_source(self, source, reset_view: bool = True):
+        self.source = source
+        self.last_render = None
+        self.image_array = None
+        self.display_array = None
+        self.downsample_factor = 1.0
+        self._dynamic_source = True
+        self._coordinates_are_image_space = True
+        self._last_request_signature = None
+        metadata = source.metadata()
+        self.original_width = int(metadata.width)
+        self.original_height = int(metadata.height)
+        self.nodata_value = metadata.nodata
+        self.geotransform = metadata.geotransform
+        self.projection = metadata.crs_wkt
+        self._image_rect = QRectF(0, 0, self.original_width, self.original_height)
+        margin_x = max(self.original_width * 4, 1)
+        margin_y = max(self.original_height * 4, 1)
+        self.view_box.setLimits(
+            xMin=-margin_x,
+            yMin=-margin_y,
+            xMax=self.original_width + margin_x,
+            yMax=self.original_height + margin_y,
+            minXRange=1,
+            minYRange=1,
+            maxXRange=self.original_width + margin_x * 2,
+            maxYRange=self.original_height + margin_y * 2,
+        )
+        if reset_view:
+            self.view_box.setRange(xRange=(0, self.original_width), yRange=(0, self.original_height), padding=0.02)
+        self.refresh_view()
 
     def set_scene_mapping(self, scene_world_rect=None, image_world_rect=None):
         self.scene_world_rect = scene_world_rect
@@ -92,22 +151,27 @@ class ImageViewer(QWidget):
 
     def restore_view_state(self, state):
         if not state:
-            return
+            return False
         self.is_syncing = True
         self._suspend_range_signal = True
-        if "x_range" in state and "y_range" in state:
+        if isinstance(state, dict) and "x_range" in state and "y_range" in state:
             self.view_box.setRange(xRange=state["x_range"], yRange=state["y_range"], padding=0)
-        elif "scene_center_x" in state and "scene_center_y" in state:
+        else:
             current = self.capture_view_state()
             x0, x1 = current["x_range"]
             y0, y1 = current["y_range"]
-            cx = float(state["scene_center_x"])
-            cy = float(state["scene_center_y"])
-            half_w = max((x1 - x0) / 2.0, 0.5)
-            half_h = max((y1 - y0) / 2.0, 0.5)
+            cx = float(getattr(state, "center_x", current["scene_center_x"]))
+            cy = float(getattr(state, "center_y", current["scene_center_y"]))
+            scale_x = float(getattr(state, "scale_x", 0.0) or 0.0)
+            scale_y = float(getattr(state, "scale_y", 0.0) or 0.0)
+            viewport_width = max(float(getattr(state, "viewport_width", 0.0) or 0.0), 1.0)
+            viewport_height = max(float(getattr(state, "viewport_height", 0.0) or 0.0), 1.0)
+            half_w = max((scale_x * viewport_width) / 2.0, (x1 - x0) / 2.0, 0.5)
+            half_h = max((scale_y * viewport_height) / 2.0, (y1 - y0) / 2.0, 0.5)
             self.view_box.setRange(xRange=(cx - half_w, cx + half_w), yRange=(cy - half_h, cy + half_h), padding=0)
         self._suspend_range_signal = False
         self.is_syncing = False
+        return True
 
     def fit_in_view(self, delayed=False):
         if delayed:
@@ -121,6 +185,17 @@ class ImageViewer(QWidget):
         self._suspend_range_signal = False
         self.current_zoom = 1.0
 
+    def set_one_to_one(self) -> None:
+        state = self.current_view_state()
+        cx, cy = state.center_x, state.center_y
+        rect = self.graphics.viewport().rect()
+        self.view_box.setRange(
+            xRange=(cx - rect.width() / 2.0, cx + rect.width() / 2.0),
+            yRange=(cy - rect.height() / 2.0, cy + rect.height() / 2.0),
+            padding=0,
+        )
+        self.refresh_view()
+
     def zoom_in(self):
         if self.current_zoom * self.zoom_factor <= self.max_zoom:
             self.view_box.scaleBy((1.0 / self.zoom_factor, 1.0 / self.zoom_factor))
@@ -133,24 +208,32 @@ class ImageViewer(QWidget):
 
     def set_colormap(self, colormap_name):
         self.current_colormap = colormap_name
-        self._update_display()
+        self.render_config.colormap_name = colormap_name
+        self._update_display() if self.source is None else self.refresh_view()
 
     def set_colormap_reversed(self, reversed):
         self.colormap_reversed = reversed
-        if self.image_array is not None:
-            self._update_display()
+        self.render_config.colormap_reversed = reversed
+        self._update_display() if self.source is None else self.refresh_view()
+
+    def set_render_config(self, render_config) -> None:
+        self.render_config = render_config
+        self.current_colormap = render_config.colormap_name
+        self.colormap_reversed = render_config.colormap_reversed
+        self._last_request_signature = None
+        self.refresh_view() if self.source is not None else self._update_display()
 
     def set_render_settings(self, settings):
         self.render_settings = settings
         if settings:
             self.colormap_reversed = settings.get("colormap_reversed", False)
-        if self.image_array is not None:
-            self._update_display()
+        self.render_config = self._render_config_from_state()
+        self._last_request_signature = None
+        self.refresh_view() if self.source is not None else self._update_display()
 
     def set_nodata_value(self, nodata_value):
         self.nodata_value = nodata_value
-        if self.image_array is not None:
-            self._update_display()
+        self.refresh_view() if self.source is not None else self._update_display()
 
     def set_geotransform(self, geotransform, projection=None):
         self.geotransform = geotransform
@@ -184,6 +267,8 @@ class ImageViewer(QWidget):
         return None
 
     def get_pixel_value(self, x, y):
+        if self.source is not None:
+            return self.source.read_pixel(int(x), int(y))
         if self.image_array is None:
             return None
         display_x = int(x / max(self.downsample_factor, 1e-9))
@@ -192,15 +277,82 @@ class ImageViewer(QWidget):
             return self.image_array[display_y, display_x]
         return None
 
+    def read_window_native(self, x: int, y: int, width: int, height: int):
+        if self.source is not None:
+            return self.source.read_window_native(x, y, width, height)
+        if self.image_array is None:
+            return None
+        return self.image_array[y:y + height, x:x + width]
+
+    def set_layer_visible(self, layer_id: str, visible: bool) -> None:
+        self.layer_manager.set_visible(layer_id, visible)
+
+    def set_layer_opacity(self, layer_id: str, opacity: float) -> None:
+        self.layer_manager.set_opacity(layer_id, opacity)
+
+    def move_layer(self, layer_id: str, index: int) -> None:
+        self.layer_manager.move_layer(layer_id, index)
+
+    def set_raster_overlay(self, layer_id: str, rgba_array, bbox=None, name: str | None = None, opacity: float = 1.0):
+        item = self._single_image_layer(layer_id, name or layer_id, opacity)
+        if rgba_array is None:
+            item.clear()
+            return
+        item.setImage(rgba_array, autoLevels=False)
+        if bbox is None:
+            item.setRect(QRectF(0, 0, rgba_array.shape[1], rgba_array.shape[0]))
+        else:
+            item.setRect(QRectF(*bbox))
+
+    def set_vector_overlay(
+        self,
+        layer_id: str,
+        features,
+        style,
+        selected_ids: set[str] | None = None,
+        editable_feature_id: str | None = None,
+        active_vertex=None,
+        name: str | None = None,
+    ) -> None:
+        self.clear_overlay_layer(layer_id)
+        state = self.layer_manager.layer(layer_id)
+        if state is None:
+            self.layer_manager.add_layer(LayerSpec(layer_id, name or layer_id, "vector"))
+        selected_ids = selected_ids or set()
+        items = []
+        for feature in features or []:
+            feature_id = getattr(feature, "id", "")
+            color = style(feature) if callable(style) else str(style)
+            overlay = __import__("src.rendering.overlays", fromlist=["PolygonOverlayItem"]).PolygonOverlayItem(
+                feature,
+                color,
+                selected=feature_id in selected_ids,
+                editable=feature_id == editable_feature_id,
+                active_vertex=active_vertex if feature_id == editable_feature_id else None,
+            )
+            overlay.path_item.setParentItem(self.view_box.childGroup)
+            self.view_box.addItem(overlay.scatter)
+            items.extend([overlay.path_item, overlay.scatter])
+        self._overlay_items_by_layer[layer_id] = items
+        self._sync_overlay_items(layer_id)
+
+    def clear_overlay_layer(self, layer_id: str) -> None:
+        for item in self._overlay_items_by_layer.pop(layer_id, []):
+            try:
+                if hasattr(item, "scene") and item.scene() is not None:
+                    item.scene().removeItem(item)
+                else:
+                    self.view_box.removeItem(item)
+            except (RuntimeError, ValueError):
+                pass
+
     def image_pos_from_event(self, event):
         scene_pos = self.graphics.mapToScene(event.position().toPoint())
         view_pos = self.view_box.mapSceneToView(scene_pos)
         return self._view_to_image_pos(view_pos)
 
     def image_contains_pos(self, point: QPointF) -> bool:
-        if self.image_array is None:
-            return False
-        return 0 <= point.x() < self.image_array.shape[1] and 0 <= point.y() < self.image_array.shape[0]
+        return 0 <= point.x() < self.original_width and 0 <= point.y() < self.original_height
 
     def eventFilter(self, obj, event):
         if obj is self.graphics.viewport():
@@ -225,17 +377,113 @@ class ImageViewer(QWidget):
             self.view_box.scaleBy((self.zoom_factor, self.zoom_factor), center=center)
             self.current_zoom /= self.zoom_factor
 
+    def refresh_view(self):
+        if self.source is None:
+            return
+        request = self.current_render_request()
+        signature = (
+            int(request.x),
+            int(request.y),
+            int(request.width),
+            int(request.height),
+            int(request.screen_width),
+            int(request.screen_height),
+            tuple(request.bands or ()),
+            self._render_config_signature(),
+        )
+        if signature == self._last_request_signature and self.last_render is not None:
+            return
+        self._last_request_signature = signature
+        render_config = self._render_config_from_state()
+        result = self.source.render(request, render_config)
+        if self.nodata_value != getattr(self.source.metadata(), "nodata", None):
+            display_rgb = render_raster_rgb(result.raw_array, render_config, nodata_value=self.nodata_value)
+            result = RenderTileResult(
+                result.raw_array,
+                display_rgb,
+                result.image_rect,
+                result.overview_level,
+                result.source_window,
+            )
+        self.last_render = result
+        self.image_array = result.raw_array
+        display = result.display_rgb
+        alpha = self._create_alpha_channel(result.raw_array)
+        if alpha is not None and display.ndim == 3 and display.shape[2] == 3:
+            display = np.dstack([display, alpha])
+        self.display_array = np.ascontiguousarray(display)
+        self.image_item.setImage(self.display_array, autoLevels=False)
+        self.image_item.setRect(QRectF(*result.image_rect))
+        self._image_rect = QRectF(0, 0, self.original_width, self.original_height)
+        self._rebuild_selected_pixel_marker()
+
+    def current_render_request(self) -> RenderRequest:
+        ((x0, x1), (y0, y1)) = self.view_box.viewRange()
+        view_rect = self.graphics.viewport().rect()
+        width = max(x1 - x0, 1)
+        height = max(y1 - y0, 1)
+        margin_x = width * self._dynamic_render_margin_ratio
+        margin_y = height * self._dynamic_render_margin_ratio
+        return RenderRequest(
+            x=x0 - margin_x,
+            y=y0 - margin_y,
+            width=width + margin_x * 2.0,
+            height=height + margin_y * 2.0,
+            screen_width=max(view_rect.width(), 1),
+            screen_height=max(view_rect.height(), 1),
+        )
+
+    def current_view_state(self) -> ViewportState:
+        ((x0, x1), (y0, y1)) = self.view_box.viewRange()
+        view_rect = self.graphics.viewport().rect()
+        return ViewportState(
+            center_x=(x0 + x1) / 2.0,
+            center_y=(y0 + y1) / 2.0,
+            scale_x=max(x1 - x0, 1.0) / max(view_rect.width(), 1),
+            scale_y=max(y1 - y0, 1.0) / max(view_rect.height(), 1),
+            viewport_width=float(view_rect.width()),
+            viewport_height=float(view_rect.height()),
+        )
+
+    def _single_image_layer(self, layer_id: str, name: str, opacity: float):
+        state = self.layer_manager.layer(layer_id)
+        if state is not None and state.item is not None:
+            return state.item
+        item = pg.ImageItem(axisOrder="row-major")
+        self.view_box.addItem(item)
+        if state is None:
+            self.layer_manager.add_layer(LayerSpec(layer_id, name, "raster_overlay", opacity=opacity), item)
+        else:
+            self.layer_manager.set_item(layer_id, item)
+        return item
+
+    def _sync_overlay_items(self, layer_id: str) -> None:
+        state = self.layer_manager.layer(layer_id)
+        if state is None:
+            return
+        for item in self._overlay_items_by_layer.get(layer_id, []):
+            if hasattr(item, "setVisible"):
+                item.setVisible(state.spec.visible)
+            if hasattr(item, "setOpacity"):
+                item.setOpacity(state.spec.opacity)
+            if hasattr(item, "setZValue"):
+                item.setZValue(state.z_order)
+
     def _handle_mouse_press(self, event) -> bool:
-        if event.button() == Qt.LeftButton and self.image_array is not None:
+        if event.button() == Qt.LeftButton and (self.image_array is not None or self.source is not None):
             pos = self.image_pos_from_event(event)
             if pos is not None and self.image_contains_pos(pos):
-                x = int(pos.x() * self.downsample_factor)
-                y = int(pos.y() * self.downsample_factor)
-                if 0 <= x < self.original_width and 0 <= y < self.original_height:
+                if self.source is not None:
+                    self.pixel_clicked.emit(int(pos.x()), int(pos.y()))
+                else:
+                    x = int(pos.x() * self.downsample_factor)
+                    y = int(pos.y() * self.downsample_factor)
                     self.pixel_clicked.emit(x, y)
                 return True
         if event.button() == Qt.MiddleButton:
             self.is_panning = True
+            self._is_refresh_panning = True
+            self._refresh_timer.stop()
             self.pan_start_pos = event.position().toPoint()
             self.graphics.viewport().setCursor(Qt.ClosedHandCursor)
             if not self.is_syncing:
@@ -256,23 +504,27 @@ class ImageViewer(QWidget):
             if not self.is_syncing:
                 self.scroll_changed.emit(0, 0)
             return True
-
-        if self.image_array is not None:
-            pos = self.image_pos_from_event(event)
-            if pos is not None and self.image_contains_pos(pos):
+        pos = self.image_pos_from_event(event)
+        if pos is not None and self.image_contains_pos(pos):
+            if self.source is not None:
+                x, y = int(pos.x()), int(pos.y())
+            else:
                 x = int(pos.x() * self.downsample_factor)
                 y = int(pos.y() * self.downsample_factor)
-                value = self.get_pixel_value(x, y)
-                self.mouse_moved.emit(x, y, value)
+            self.mouse_moved.emit(x, y, self.get_pixel_value(x, y))
         return False
 
     def _handle_mouse_release(self, event) -> bool:
         if event.button() == Qt.MiddleButton:
             self.is_panning = False
+            was_refresh_panning = self._is_refresh_panning
+            self._is_refresh_panning = False
             self.pan_start_pos = None
             self.graphics.viewport().setCursor(Qt.ArrowCursor)
             if not self.is_syncing:
                 self.cursor_changed.emit(Qt.ArrowCursor)
+            if self.source is not None and was_refresh_panning:
+                self._refresh_timer.start()
             return True
         return False
 
@@ -301,8 +553,10 @@ class ImageViewer(QWidget):
                 return np.zeros(image_array.shape, dtype=np.uint8)
             normalized = np.clip((image_array.astype(np.float32) - vmin) / (vmax - vmin), 0.0, 1.0)
             return np.clip(normalized * 255.0, 0, 255).astype(np.uint8)
+        return render_raster_rgb(image_array, self._render_config_from_state(), nodata_value=self.nodata_value)
 
-        config = default_render_config()
+    def _render_config_from_state(self):
+        config = replace(self.render_config) if self.render_config is not None else default_raster_render_config()
         if self.render_settings:
             settings = dict(self.render_settings)
             config.display_mode = settings.get("display_mode", config.display_mode)
@@ -315,36 +569,51 @@ class ImageViewer(QWidget):
             config.auto_range = settings.get("auto_range", config.auto_range)
             value_range = settings.get("value_range", config.value_range)
             config.value_range = tuple(value_range)
-            config.global_value_range = tuple(value_range) if not config.auto_range else None
+            config.global_value_range = tuple(value_range) if config.auto_range else None
             config.colormap_reversed = settings.get("colormap_reversed", self.colormap_reversed)
             config.smooth_display = settings.get("smooth_display", config.smooth_display)
         else:
             config.colormap_name = self.current_colormap
             config.colormap_reversed = self.colormap_reversed
         config.colormap_name = self.current_colormap
-        return render_base_rgb(image_array, config, nodata_value=self.nodata_value)
+        return config
+
+    def _render_config_signature(self):
+        config = self._render_config_from_state()
+        return (
+            config.display_mode,
+            config.gray_band,
+            config.rgb_bands,
+            config.gamma,
+            config.stretch_mode,
+            config.percent_clip,
+            config.std_dev_n,
+            config.auto_range,
+            config.value_range,
+            config.colormap_name,
+            config.colormap_reversed,
+        )
 
     def _create_alpha_channel(self, image_array):
         arr = image_array
-        if arr.ndim == 3:
-            if self.render_settings and self.render_settings.get("display_mode") == "RGB":
-                bands = [min(max(int(b), 1), arr.shape[2]) - 1 for b in self.render_settings.get("rgb_bands", (1, 2, 3))]
-                invalid = np.zeros(arr.shape[:2], dtype=bool)
-                for band in bands:
-                    band_data = arr[:, :, band]
-                    invalid |= ~np.isfinite(band_data)
-                    if self.nodata_value is not None:
-                        invalid |= band_data == self.nodata_value
-            else:
-                band = min(max(int((self.render_settings or {}).get("gray_band", 1)), 1), arr.shape[2]) - 1
-                band_data = arr[:, :, band]
-                invalid = ~np.isfinite(band_data)
-                if self.nodata_value is not None:
-                    invalid |= band_data == self.nodata_value
-        else:
-            invalid = ~np.isfinite(arr)
+        def _invalid(data):
+            mask = ~np.isfinite(data)
             if self.nodata_value is not None:
-                invalid |= arr == self.nodata_value
+                try:
+                    if np.isnan(self.nodata_value):
+                        mask |= np.isnan(data)
+                    else:
+                        mask |= data == self.nodata_value
+                except TypeError:
+                    mask |= data == self.nodata_value
+            return mask
+
+        if arr.ndim == 3:
+            band = min(max(int((self.render_settings or {}).get("gray_band", 1)), 1), arr.shape[2]) - 1
+            band_data = arr[:, :, band]
+            invalid = _invalid(band_data)
+        else:
+            invalid = _invalid(arr)
         if not np.any(invalid):
             return None
         alpha = np.full(arr.shape[:2], 255, dtype=np.uint8)
@@ -376,6 +645,8 @@ class ImageViewer(QWidget):
         return QRectF(self._image_rect)
 
     def _view_to_image_pos(self, view_pos: QPointF):
+        if self._coordinates_are_image_space:
+            return QPointF(view_pos.x(), view_pos.y())
         if self.image_array is None or self._image_rect.isNull():
             return None
         x = (view_pos.x() - self._image_rect.left()) * self.image_array.shape[1] / max(self._image_rect.width(), 1e-9)
@@ -383,6 +654,8 @@ class ImageViewer(QWidget):
         return QPointF(x, y)
 
     def image_to_view_point(self, x: float, y: float) -> QPointF:
+        if self._coordinates_are_image_space:
+            return QPointF(x, y)
         if self.image_array is None or self._image_rect.isNull():
             return QPointF(x, y)
         vx = self._image_rect.left() + x * self._image_rect.width() / max(self.image_array.shape[1], 1)
@@ -396,30 +669,34 @@ class ImageViewer(QWidget):
 
     def _rebuild_selected_pixel_marker(self):
         self._clear_selected_pixel_marker()
-        if self.selected_pixel is None or self.image_array is None:
+        if self.selected_pixel is None or (self.image_array is None and self.source is None):
             return
         x, y = self.selected_pixel
         if not (0 <= x < self.original_width and 0 <= y < self.original_height):
             return
-        display_x = (x + 0.5) / max(self.downsample_factor, 1e-9)
-        display_y = (y + 0.5) / max(self.downsample_factor, 1e-9)
-        center = self.image_to_view_point(display_x, display_y)
+        center = self.image_to_view_point(x + 0.5, y + 0.5)
         half = 6.0
         outer_pen = QPen(QColor(255, 255, 255), 2)
         outer_pen.setCosmetic(True)
         inner_pen = QPen(QColor(220, 20, 60), 1)
         inner_pen.setCosmetic(True)
         for pen in (outer_pen, inner_pen):
-            h_line = QGraphicsLineItem(center.x() - half, center.y(), center.x() + half, center.y())
-            v_line = QGraphicsLineItem(center.x(), center.y() - half, center.x(), center.y() + half)
+            h_line = QGraphicsLineItem(-half, 0, half, 0)
+            v_line = QGraphicsLineItem(0, -half, 0, half)
             h_line.setPen(pen)
             v_line.setPen(pen)
+            h_line.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+            v_line.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+            h_line.setPos(center)
+            v_line.setPos(center)
             self.view_box.addItem(h_line)
             self.view_box.addItem(v_line)
             self._selected_pixel_items.extend([h_line, v_line])
-        circle = QGraphicsEllipseItem(center.x() - 3.5, center.y() - 3.5, 7, 7)
+        circle = QGraphicsEllipseItem(-3.5, -3.5, 7, 7)
         circle.setPen(inner_pen)
         circle.setBrush(QBrush(Qt.NoBrush))
+        circle.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        circle.setPos(center)
         self.view_box.addItem(circle)
         self._selected_pixel_items.append(circle)
 
@@ -429,10 +706,15 @@ class ImageViewer(QWidget):
         self.view_transformed.emit(self.capture_view_state())
 
     def _on_range_changed(self, *_args):
+        if self.source is not None:
+            if self._is_refresh_panning:
+                self._emit_view_changed()
+                return
+            self._refresh_timer.start()
         self._emit_view_changed()
 
 
-class ImageViewerSynchronizer:
+class RasterCanvasSynchronizer:
     def __init__(self, viewers):
         self.viewers = viewers
         self._connect_signals()

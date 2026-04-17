@@ -10,7 +10,8 @@ from PySide6.QtCore import QObject, Qt, Signal
 from shapely.geometry import Point, box as shapely_box
 
 from src.segmentation.geometry_service import GeometryService
-from src.segmentation.models import AnnotationObject, ViewportState
+from src.rendering.models import ViewportState
+from src.segmentation.models import AnnotationObject
 
 
 class SegmentationToolController(QObject):

@@ -9,6 +9,8 @@ from datetime import datetime
 from typing import Any, Optional
 import uuid
 
+from src.rendering.models import ImageSourceMetadata, OverviewInfo, ViewportState
+
 
 def utc_now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
@@ -24,51 +26,6 @@ def round_image_coord(value: float) -> float:
 
 def round_image_ring(points: list[list[float]]) -> list[list[float]]:
     return [[round_image_coord(x), round_image_coord(y)] for x, y in points]
-
-
-@dataclass
-class OverviewInfo:
-    level_index: int
-    downsample_factor: float
-    width: int
-    height: int
-    source_type: str
-
-
-@dataclass
-class ImageAsset:
-    id: str
-    path: str
-    path_mode: str
-    width: int
-    height: int
-    band_count: int
-    dtype: str
-    nodata: Optional[float]
-    crs_wkt: Optional[str]
-    geotransform: Optional[tuple]
-    resolution: Optional[tuple]
-    has_georef: bool
-    overview_levels: list[OverviewInfo] = field(default_factory=list)
-
-
-@dataclass
-class ViewportState:
-    center_x: float = 0.0
-    center_y: float = 0.0
-    scale_x: float = 1.0
-    scale_y: float = 1.0
-    viewport_width: float = 0.0
-    viewport_height: float = 0.0
-
-
-@dataclass
-class RenderTileResult:
-    raw_array: Any
-    display_rgb: Any
-    image_rect: tuple[float, float, float, float]
-    overview_level: Optional[OverviewInfo]
-    source_window: tuple[int, int, int, int]
 
 
 @dataclass
@@ -189,7 +146,7 @@ class DisplayState:
 @dataclass
 class SegmentationProject:
     project_version: str
-    image_asset: Optional[ImageAsset]
+    image_asset: Optional[ImageSourceMetadata]
     labels: list[LabelClass] = field(default_factory=list)
     annotations: list[AnnotationObject] = field(default_factory=list)
     annotations_asset: dict[str, Any] = field(default_factory=dict)
@@ -200,10 +157,9 @@ class SegmentationProject:
     active_label_id: Optional[int] = None
     layer_visibility: dict[str, bool] = field(
         default_factory=lambda: {
-            "image": True,
+            "base_raster": True,
             "annotations": True,
-            "raster": True,
-            "preview": True,
+            "mask": True,
             "preview_vector": False,
             "preview_mask": True,
         }
@@ -233,7 +189,7 @@ class SegmentationProject:
             overview_levels = [
                 OverviewInfo(**item) for item in image_asset.get("overview_levels", [])
             ]
-            image_asset = ImageAsset(
+            image_asset = ImageSourceMetadata(
                 **{
                     **image_asset,
                     "overview_levels": overview_levels,
@@ -249,6 +205,23 @@ class SegmentationProject:
             display_state=DisplayState.from_dict(payload.get("display_state", {})),
             active_tool=payload.get("active_tool", "browse"),
             active_label_id=payload.get("active_label_id"),
-            layer_visibility=payload.get("layer_visibility", {}),
+            layer_visibility=_normalize_layer_visibility(payload.get("layer_visibility", {})),
             export_prefs=payload.get("export_prefs", {}),
         )
+
+
+def _normalize_layer_visibility(payload: dict[str, Any]) -> dict[str, bool]:
+    values = dict(payload or {})
+    if "image" in values and "base_raster" not in values:
+        values["base_raster"] = values.pop("image")
+    if "raster" in values and "mask" not in values:
+        values["mask"] = values.pop("raster")
+    values.pop("preview", None)
+    defaults = {
+        "base_raster": True,
+        "annotations": True,
+        "mask": True,
+        "preview_vector": False,
+        "preview_mask": True,
+    }
+    return {**defaults, **values}

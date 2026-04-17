@@ -1,5 +1,5 @@
 """
-分割工具的底图渲染管线。
+通用栅格渲染配置与 RGB 渲染函数。
 """
 
 from __future__ import annotations
@@ -15,16 +15,14 @@ except Exception:  # pragma: no cover
     cm = None
     mpl_colormaps = None
 
-from src.widgets.render_settings_widget import RenderSettingsWidget, apply_render_settings
-
 
 @dataclass
-class SegmentationRenderConfig:
+class RasterRenderConfig:
     display_mode: str = "灰度"
     gray_band: int = 1
     rgb_bands: tuple[int, int, int] = (1, 2, 3)
     gamma: float = 1.0
-    stretch_mode: str = RenderSettingsWidget.STRETCH_MIN_MAX
+    stretch_mode: str = "最大最小"
     percent_clip: tuple[float, float] = (2.0, 98.0)
     std_dev_n: float = 2.0
     auto_range: bool = True
@@ -55,15 +53,17 @@ class SegmentationRenderConfig:
         }
 
 
-def default_render_config() -> SegmentationRenderConfig:
-    return SegmentationRenderConfig()
+def default_raster_render_config() -> RasterRenderConfig:
+    return RasterRenderConfig()
 
 
-def render_base_rgb(
+def render_raster_rgb(
     raw_array: np.ndarray,
-    config: SegmentationRenderConfig,
+    config: RasterRenderConfig,
     nodata_value=None,
 ) -> np.ndarray:
+    from src.widgets.render_settings_widget import apply_render_settings
+
     if (
         config.display_mode == "RGB"
         and raw_array.ndim == 3
