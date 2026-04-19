@@ -64,7 +64,10 @@ class MainWindow(QMainWindow):
         self.segmentation_settings = get_segmentation_settings()
         
         # 显示金字塔阈值：超过该体积的图像会为渲染预览建立 overview。
-        self.pyramid_threshold_mb = self.settings.value("display/pyramid_threshold_mb", 128, type=int)
+        self.pyramid_threshold_mb = self.settings.value("display/pyramid_threshold_mb", 1024, type=int)
+        if int(self.pyramid_threshold_mb) == 64:
+            self.pyramid_threshold_mb = 512
+            self.settings.setValue("display/pyramid_threshold_mb", self.pyramid_threshold_mb)
         self.geotiff_full_render_cache_limit_mb = self.pyramid_threshold_mb
         self._open_tool_windows = set()
         cleanup_pyramid_cache_async(7)
@@ -658,7 +661,7 @@ class MainWindow(QMainWindow):
         """关于菜单项点击事件"""
         about_text = f"""<h2>{APP_DISPLAY_NAME}</h2>
 <p>版本: v{__version__}</p>
-<p>一个地理信息处理工具箱，提供栅格数据处理、矢量数据处理等功能。</p>
+<p>一个遥感数据处理工具箱，提供遥感数据显示、处理、获取等功能。</p>
 <p><b>作者:</b> Yibo Yuan</p>
 <p><b>邮箱:</b> 2633669459@qq.com</p>
 <p><b>开源地址:</b> <a href="https://github.com/BlueBlueKitty/Toolbox">GitHub</a></p>
@@ -687,24 +690,25 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(dialog)
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
-        
-        desc_label = QLabel(
-            "设置栅格显示阈值。\n"
-            "GeoTIFF、GAMMA、HDF5/NetCDF 等栅格数据小于该阈值时优先直接在内存中渲染；"
-            "达到或超过该阈值时会自动建立或使用金字塔/overview，以保证缩放和平移流畅。"
-        )
-        desc_label.setWordWrap(True)
-        layout.addWidget(desc_label)
-        
-        layout.addSpacing(10)
+
+        def parameter_label(text: str, tooltip: str) -> QLabel:
+            label = QLabel(f'{text}<sup><span style="color:#3498db;"> ⓘ</span></sup>')
+            label.setTextFormat(Qt.RichText)
+            label.setToolTip(tooltip)
+            label.setCursor(Qt.WhatsThisCursor)
+            return label
         
         threshold_layout = QHBoxLayout()
-        threshold_label = QLabel("栅格显示阈值:")
+        threshold_label = parameter_label(
+            "金字塔渲染的栅格文件体积阈值:",
+            "GeoTIFF、GAMMA、HDF5/NetCDF 等栅格数据大于该阈值时会自动建立或使用金字塔进行渲染，以保证缩放和平移流畅。\n"
+            "阈值越小，越早建立金字塔；首次打开大数据可能需要一些时间，但后续浏览会更丝滑。"
+        )
         threshold_layout.addWidget(threshold_label)
         
         threshold_spinbox = QSpinBox()
         threshold_spinbox.setRange(1, 102400)
-        threshold_spinbox.setSingleStep(64)
+        threshold_spinbox.setSingleStep(128)
         threshold_spinbox.setValue(max(1, int(self.pyramid_threshold_mb)))
         threshold_spinbox.setSuffix(" MB")
         threshold_spinbox.setMinimumWidth(120)
@@ -715,15 +719,15 @@ class MainWindow(QMainWindow):
         layout.addSpacing(10)
 
         cache_layout = QVBoxLayout()
-        cache_label = QLabel("显示缓存目录:")
+        cache_label = parameter_label(
+            "显示缓存目录:",
+            "晕渲地貌的山体阴影、转dB后的结果等显示缓存都会写入该目录。"
+        )
         cache_layout.addWidget(cache_label)
 
         cache_path_layout = QHBoxLayout()
         cache_dir_edit = QLineEdit(str(get_cache_dir()))
         cache_dir_edit.setMinimumWidth(260)
-        cache_dir_edit.setToolTip(
-            "金字塔、HDF5/NetCDF 显示 GeoTIFF、晕渲山体阴影、GAMMA VRT 等显示缓存都会写入该目录。"
-        )
         cache_path_layout.addWidget(cache_dir_edit, 1)
 
         browse_button = QPushButton("浏览...")
@@ -746,24 +750,18 @@ class MainWindow(QMainWindow):
         
         # 平滑显示设置
         smooth_display = self.settings.value("display/smooth_display", False, type=bool)
-        smooth_check = QCheckBox("启用平滑显示（双线性插值）")
-        smooth_check.setChecked(smooth_display)
-        smooth_check.setToolTip(
+        smooth_layout = QHBoxLayout()
+        smooth_label = parameter_label(
+            "平滑显示:",
             "启用后，图像缩放时使用双线性插值，显示更平滑。\n"
             "禁用后，显示栅格边界，适合查看像素细节。"
         )
-        layout.addWidget(smooth_check)
-
-        layout.addSpacing(10)
-        
-        # 提示信息
-        tip_label = QLabel(
-            "<i>提示：推荐值为 128-512 MB。阈值越小，越早建立金字塔；"
-            "首次打开大数据可能需要一些时间，但后续浏览会更平稳。</i>"
-        )
-        tip_label.setStyleSheet("color: #7f8c8d;")
-        tip_label.setWordWrap(True)
-        layout.addWidget(tip_label)
+        smooth_layout.addWidget(smooth_label)
+        smooth_check = QCheckBox("启用双线性插值")
+        smooth_check.setChecked(smooth_display)
+        smooth_layout.addWidget(smooth_check)
+        smooth_layout.addStretch()
+        layout.addLayout(smooth_layout)
         
         layout.addStretch()
         

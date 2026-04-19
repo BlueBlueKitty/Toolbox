@@ -20,6 +20,7 @@ from src.utils.display_pyramid import (
     cached_gdal_dataset_path,
     ensure_gamma_vrt,
     ensure_gdal_overviews,
+    has_gdal_overviews,
 )
 from src.utils.gamma_file_process import read_gamma_pixel, read_gamma_region, validate_dimensions
 
@@ -70,7 +71,9 @@ class GdalRasterSource(RasterImageSource):
     ):
         self.file_path = str(file_path)
         self.source_path = str(source_path or file_path)
-        if auto_build_overviews and _file_meets_threshold(self.file_path, pyramid_threshold_mb):
+        if auto_build_overviews and has_gdal_overviews(self.file_path):
+            pass
+        elif auto_build_overviews and _file_meets_threshold(self.file_path, pyramid_threshold_mb):
             self.file_path = cached_gdal_dataset_path(self.file_path)
             ensure_gdal_overviews(self.file_path)
         self.dataset = gdal.Open(self.file_path)

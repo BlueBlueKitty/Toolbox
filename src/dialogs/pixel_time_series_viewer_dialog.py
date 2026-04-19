@@ -1226,8 +1226,13 @@ class PixelTimeSeriesViewerDialog(QDialog):
             else:
                 return None
             if self._converted_to_db:
-                cache_path = write_derived_raster_cache(source, f"db10_{index}", self._convert_block_to_db)
-                return GdalRasterSource(str(cache_path), source_path=source.metadata().path, pyramid_threshold_mb=0)
+                cache_path = write_derived_raster_cache(
+                    source,
+                    f"db10_{index}",
+                    self._convert_block_to_db,
+                    pyramid_threshold_mb=self.pyramid_threshold_mb,
+                )
+                return GdalRasterSource(str(cache_path), source_path=source.metadata().path, pyramid_threshold_mb=self.pyramid_threshold_mb)
             return source
         except Exception:
             return None

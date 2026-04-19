@@ -93,6 +93,26 @@ def needs_display_pyramid(file_path: str, threshold_mb: int | float | None) -> b
     return os.path.getsize(file_path) >= threshold * 1024 * 1024
 
 
+def has_gdal_overviews(file_path: str) -> bool:
+    if not file_path or not os.path.exists(file_path):
+        return False
+    ds = gdal.Open(os.path.normpath(file_path), gdal.GA_ReadOnly)
+    if ds is None or ds.RasterCount == 0:
+        return False
+    try:
+        band = ds.GetRasterBand(1)
+        return bool(band is not None and band.GetOverviewCount() > 0)
+    finally:
+        ds = None
+
+
+def _remove_external_overview(file_path: str) -> None:
+    try:
+        Path(f"{os.path.normpath(file_path)}.ovr").unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def read_gdal_pyramid_display(
     file_path: str,
     threshold_mb: int | float | None = DEFAULT_PYRAMID_THRESHOLD_MB,
@@ -102,7 +122,9 @@ def read_gdal_pyramid_display(
     从 GDAL 数据集读取显示预览；大于阈值时优先建立并使用 overview。
     """
     display_path = file_path
-    if needs_display_pyramid(file_path, threshold_mb):
+    if has_gdal_overviews(file_path):
+        display_path = file_path
+    elif needs_display_pyramid(file_path, threshold_mb):
         display_path = cached_gdal_dataset_path(file_path)
         ensure_gdal_overviews(display_path)
     data, nodata, original_size, factor = read_tiff_downsampled(display_path, max_size)
@@ -467,8 +489,9 @@ def write_derived_raster_cache(
     transform: Callable[[np.ndarray], np.ndarray],
     block_rows: int = 512,
     output_band_count: int | None = None,
+    pyramid_threshold_mb: int | float | None = DEFAULT_PYRAMID_THRESHOLD_MB,
 ) -> Path:
-    """按块生成派生 GeoTIFF 缓存，并建立 overview。"""
+    """按块生成派生 GeoTIFF 缓存，并按缓存文件体积决定是否建立 overview。"""
     meta = source.metadata()
     cache_path = derived_cache_path(meta.path, operation_key)
     if cache_path.exists() and not _cache_is_stale(cache_path, meta.path):
@@ -477,7 +500,10 @@ def write_derived_raster_cache(
         except OSError:
             pass
         cleanup_pyramid_cache_async(CACHE_MAX_AGE_DAYS)
-        ensure_gdal_overviews(str(cache_path))
+        if needs_display_pyramid(str(cache_path), pyramid_threshold_mb):
+            ensure_gdal_overviews(str(cache_path))
+        else:
+            _remove_external_overview(str(cache_path))
         return cache_path
 
     cleanup_pyramid_cache_async(CACHE_MAX_AGE_DAYS)
@@ -516,7 +542,10 @@ def write_derived_raster_cache(
 
     dataset.FlushCache()
     dataset = None
-    ensure_gdal_overviews(str(cache_path))
+    if needs_display_pyramid(str(cache_path), pyramid_threshold_mb):
+        ensure_gdal_overviews(str(cache_path))
+    else:
+        _remove_external_overview(str(cache_path))
     return cache_path
 
 
@@ -528,8 +557,9 @@ def write_full_derived_raster_cache(
     nodata_value: float | None = None,
     invalidate_on_source_mtime: bool = True,
     stable_cache_key: bool = False,
+    pyramid_threshold_mb: int | float | None = DEFAULT_PYRAMID_THRESHOLD_MB,
 ) -> Path:
-    """一次性读取整幅图生成派生 GeoTIFF 缓存，并建立 overview。"""
+    """一次性读取整幅图生成派生 GeoTIFF 缓存，并按缓存文件体积决定是否建立 overview。"""
     meta = source.metadata()
     cache_path = (
         stable_derived_cache_path(meta.path, operation_key)
@@ -545,7 +575,10 @@ def write_full_derived_raster_cache(
         except OSError:
             pass
         cleanup_pyramid_cache_async(CACHE_MAX_AGE_DAYS)
-        ensure_gdal_overviews(str(cache_path))
+        if needs_display_pyramid(str(cache_path), pyramid_threshold_mb):
+            ensure_gdal_overviews(str(cache_path))
+        else:
+            _remove_external_overview(str(cache_path))
         return cache_path
 
     cleanup_pyramid_cache_async(CACHE_MAX_AGE_DAYS)
@@ -583,7 +616,10 @@ def write_full_derived_raster_cache(
             dataset.GetRasterBand(band_index + 1).WriteArray(derived[:, :, band_index])
     dataset.FlushCache()
     dataset = None
-    ensure_gdal_overviews(str(cache_path))
+    if needs_display_pyramid(str(cache_path), pyramid_threshold_mb):
+        ensure_gdal_overviews(str(cache_path))
+    else:
+        _remove_external_overview(str(cache_path))
     return cache_path
 
 

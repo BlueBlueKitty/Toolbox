@@ -853,8 +853,9 @@ class LocalImageViewerDialog(QDialog):
             output_band_count=1,
             invalidate_on_source_mtime=False,
             stable_cache_key=True,
+            pyramid_threshold_mb=self.pyramid_threshold_mb,
         )
-        hillshade_source = GdalRasterSource(str(cache_path), source_path=meta.path, pyramid_threshold_mb=0)
+        hillshade_source = GdalRasterSource(str(cache_path), source_path=meta.path, pyramid_threshold_mb=self.pyramid_threshold_mb)
         self.image_source = HillshadeCompositeRasterSource(base_source, hillshade_source)
         self.image_data = self.image_source.read_window_native(0, 0, 1, 1)
         self._hillshade_cache_key = key
@@ -2140,8 +2141,13 @@ class LocalImageViewerDialog(QDialog):
         try:
             self._show_loading_indicator("正在生成 dB 派生图像缓存...")
             if self.image_source is not None:
-                cache_path = write_derived_raster_cache(self.image_source, "db10", self._convert_block_to_db)
-                self.image_source = GdalRasterSource(str(cache_path), source_path=self.image_file, pyramid_threshold_mb=0)
+                cache_path = write_derived_raster_cache(
+                    self.image_source,
+                    "db10",
+                    self._convert_block_to_db,
+                    pyramid_threshold_mb=self.pyramid_threshold_mb,
+                )
+                self.image_source = GdalRasterSource(str(cache_path), source_path=self.image_file, pyramid_threshold_mb=self.pyramid_threshold_mb)
                 self.image_data = self.image_source.read_window_native(0, 0, 1, 1)
                 self.downsample_factor = 1
                 self._set_viewer_source_or_array(None)
