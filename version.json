@@ -2,10 +2,10 @@
   "version": "1.7.0",
   "name": "v1.7.0版本, 新增图像分割工具！",
   "changelog": "新增图像分割工具，支持类似PS的魔法棒功能，方便快速分割图像",
-  "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.6.0",
+  "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.7.0",
   "downloads": {
-    "windows": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.6.0/Toolbox-1.6.0-x86_64-Setup.exe",
-    "linux": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.6.0/Toolbox-1.6.0-x86_64.AppImage"
+    "windows": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.7.0/Toolbox-1.7.0-x86_64-Setup.exe",
+    "linux": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.7.0/Toolbox-1.7.0-x86_64.AppImage"
   },
-  "published_at": "2026-03-30T13:53:30+08:00"
+  "published_at": "2026-04-19T16:30:21+08:00"
 }
