@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from PySide6.QtCore import QObject, QPointF, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QFontDatabase, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QFontDatabase, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut, QTransform
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -123,6 +123,10 @@ class ImageSegmentationDialog(QDialog):
         self._raster_overlay_cache_key = None
         self._raster_overlay_cache_value = (None, None)
         self._last_edit_timestamp = 0.0
+        self._mask_painting = False
+        self._mask_paint_bbox: tuple[int, int, int, int] | None = None
+        self._mask_paint_before_patch: np.ndarray | None = None
+        self._last_mask_paint_point: tuple[float, float] | None = None
         self._autosave_thread: QThread | None = None
         self._autosave_worker: AutosaveWorker | None = None
         self._magic_preview_timer = QTimer(self)
@@ -188,17 +192,20 @@ class ImageSegmentationDialog(QDialog):
         self.browse_tool_action = self._create_tool_action("浏览", SegmentationToolController.TOOL_BROWSE, self._make_tool_icon("pan_tool"))
         self.rectangle_tool_action = self._create_tool_action("矩形框", SegmentationToolController.TOOL_RECTANGLE, self._make_tool_icon("crop_square"))
         self.polygon_tool_action = self._create_tool_action("多边形", SegmentationToolController.TOOL_POLYGON, self._make_tool_icon("gesture"))
-        self.magic_tool_action = self._create_tool_action("魔法棒", SegmentationToolController.TOOL_MAGIC_WAND, self._make_tool_icon("auto_fix_high"))
+        self.magic_tool_action = self._create_tool_action("魔法棒", SegmentationToolController.TOOL_MAGIC_WAND, self._make_tool_icon("auto_fix_high", -90))
+        self.brush_tool_action = self._create_tool_action("笔刷", SegmentationToolController.TOOL_BRUSH, self._make_tool_icon("brush", 90))
+        self.eraser_tool_action = self._create_tool_action("橡皮擦", SegmentationToolController.TOOL_ERASER, self._make_tool_icon("ink_eraser", 0))
         self.browse_tool_action.setChecked(True)
         for action in [
             self.browse_tool_action,
             self.rectangle_tool_action,
             self.polygon_tool_action,
             self.magic_tool_action,
+            self.brush_tool_action,
+            self.eraser_tool_action,
         ]:
             self.tool_action_group.addAction(action)
             self.toolbar.addAction(action)
-
         render_controls = QWidget()
         render_layout = QHBoxLayout(render_controls)
         render_layout.setContentsMargins(0, 0, 0, 0)
@@ -230,18 +237,32 @@ class ImageSegmentationDialog(QDialog):
         main_layout.addWidget(splitter)
 
         self.canvas = SegmentationCanvas()
+        self.canvas.set_tool_icons({
+            SegmentationToolController.TOOL_MAGIC_WAND: self._make_tool_icon("auto_fix_high"),
+            SegmentationToolController.TOOL_BRUSH: self._make_tool_icon("brush"),
+            SegmentationToolController.TOOL_ERASER: self._make_tool_icon("ink_eraser"),
+        })
+        self.canvas.set_tool_color(self._active_label_color())
         splitter.addWidget(self.canvas)
 
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(4, 0, 4, 0)
+        right_layout.setSpacing(0)
         self.label_panel = LabelPanelWidget()
         self.layer_panel = LayerPanelWidget()
         self.magic_panel = MagicWandPanel()
-        self.layer_panel.set_layers([state.spec for state in self.canvas.layer_manager.layers() if state.spec.id not in {"draft", "snap"}])
-        right_layout.addWidget(self.label_panel)
-        right_layout.addWidget(self.layer_panel)
-        right_layout.addWidget(self.magic_panel)
-        right_layout.addStretch(1)
+        self.label_panel.setMinimumHeight(260)
+        self.layer_panel.setMinimumHeight(92)
+        self.layer_panel.setMaximumHeight(120)
+        self.layer_panel.set_layers([
+            state.spec
+            for state in self.canvas.layer_manager.layers()
+            if state.spec.id not in {"draft", "snap", "preview_vector", "annotations"}
+        ])
+        right_layout.addWidget(self.label_panel, 1)
+        right_layout.addWidget(self.layer_panel, 0)
+        right_layout.addWidget(self.magic_panel, 0)
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 4)
         splitter.setStretchFactor(1, 1)
@@ -269,6 +290,7 @@ class ImageSegmentationDialog(QDialog):
 
         self.canvas.mouse_pressed.connect(self._handle_mouse_press)
         self.canvas.mouse_moved.connect(self._update_mouse_position)
+        self.canvas.mouse_moved.connect(self._handle_mouse_move)
         self.canvas.mouse_moved.connect(self.tool_controller.handle_move)
         self.canvas.mouse_released.connect(self._handle_mouse_release)
         self.canvas.view_state_changed.connect(self._on_view_state_changed)
@@ -289,6 +311,8 @@ class ImageSegmentationDialog(QDialog):
         self.layer_panel.order_changed.connect(self._on_layer_order_changed)
         self.magic_panel.params_changed.connect(self._schedule_magic_preview)
         self.magic_panel.merge_preview_changed.connect(self._on_merge_preview_changed)
+        self.magic_panel.brush_size_changed.connect(self._on_brush_size_changed)
+        self.canvas.tool_wheel_adjust_requested.connect(self._adjust_active_tool_slider)
         self.magic_panel.confirm_requested.connect(self._confirm_magic_preview)
         self.magic_panel.cancel_requested.connect(self._clear_magic_preview)
         self.render_settings.settings_changed.connect(self.on_render_settings_changed)
@@ -320,7 +344,25 @@ class ImageSegmentationDialog(QDialog):
         action.setStatusTip(text)
         return action
 
-    def _make_tool_icon(self, icon_name: str) -> QIcon:
+    def _make_tool_icon(self, icon_name: str, rotation_angle: float = 0) -> QIcon:
+        if icon_name == "ink_eraser":
+            pixmap = QPixmap(20, 20)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            color = self.palette().color(self.foregroundRole())
+            painter.setPen(QPen(color, 2))
+            painter.setBrush(Qt.NoBrush)
+            path = QPainterPath()
+            path.moveTo(5, 13)
+            path.lineTo(12, 6)
+            path.lineTo(16, 10)
+            path.lineTo(9, 17)
+            path.lineTo(5, 13)
+            painter.drawPath(path)
+            painter.drawLine(8, 16, 17, 16)
+            painter.end()
+            return QIcon(self._rotated_icon_pixmap(pixmap, rotation_angle))
         if self._material_icon_family:
             pixmap = QPixmap(20, 20)
             pixmap.fill(Qt.transparent)
@@ -332,7 +374,7 @@ class ImageSegmentationDialog(QDialog):
             painter.setPen(self.palette().color(self.foregroundRole()))
             painter.drawText(pixmap.rect(), Qt.AlignCenter, icon_name)
             painter.end()
-            return QIcon(pixmap)
+            return QIcon(self._rotated_icon_pixmap(pixmap, rotation_angle))
         pixmap = QPixmap(18, 18)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
@@ -350,7 +392,12 @@ class ImageSegmentationDialog(QDialog):
             painter.setPen(QPen(QColor("#f59f00"), 2))
             painter.drawEllipse(QPointF(9, 9), 5, 5)
         painter.end()
-        return QIcon(pixmap)
+        return QIcon(self._rotated_icon_pixmap(pixmap, rotation_angle))
+
+    def _rotated_icon_pixmap(self, pixmap: QPixmap, angle: float) -> QPixmap:
+        if not angle:
+            return pixmap
+        return pixmap.transformed(QTransform().rotate(angle), Qt.SmoothTransformation)
 
     def _load_material_icon_font(self) -> str | None:
         font_path = Path(__file__).resolve().parents[2] / "resources" / "fonts" / "MaterialIcons-Regular.ttf"
@@ -614,7 +661,7 @@ class ImageSegmentationDialog(QDialog):
         if metadata.band_count >= 3:
             self._set_display_mode("RGB")
             self.render_settings.set_stretch_mode(self.render_settings.STRETCH_NONE)
-            self.render_settings.auto_range_check.setChecked(True)
+            self.render_settings.auto_range_check.setChecked(False)
             self.colormap_combo.setCurrentText("gray")
         else:
             self._set_display_mode("灰度")
@@ -622,20 +669,7 @@ class ImageSegmentationDialog(QDialog):
     def _current_global_range(self, settings: dict) -> tuple[float, float] | None:
         if self.current_source is None:
             return None
-        if settings["display_mode"] == "RGB":
-            band_indices = settings["rgb_bands"]
-            min_values = []
-            max_values = []
-            for band_index in band_indices:
-                min_max = self.current_source.band_minmax(band_index)
-                if min_max is None:
-                    continue
-                min_values.append(min_max[0])
-                max_values.append(min_max[1])
-            if not min_values:
-                return None
-            return float(min(min_values)), float(max(max_values))
-        return self.current_source.band_minmax(settings["gray_band"])
+        return self.current_source.value_range_for_settings(settings)
 
     def _set_project_mask(self, mask) -> None:
         self.project.mask_data = None if mask is None else np.asarray(mask, dtype=np.uint16).copy()
@@ -927,6 +961,7 @@ class ImageSegmentationDialog(QDialog):
         if self.project.active_label_id not in label_ids:
             self.project.active_label_id = labels[0].id if labels else None
         self._refresh_label_ui()
+        self.canvas.set_tool_color(self._active_label_color())
         self._refresh_canvas()
         self._set_dirty(True)
 
@@ -949,6 +984,10 @@ class ImageSegmentationDialog(QDialog):
             self._refresh_canvas()
         self.project.active_label_id = int(label_id)
         self._refresh_label_ui()
+        self.canvas.set_tool_color(self._active_label_color())
+
+    def _on_brush_size_changed(self, size: int) -> None:
+        self.canvas.set_brush_radius(max(1, int(round(size / 2.0))))
 
     def _refresh_label_ui(self) -> None:
         self.label_panel.blockSignals(True)
@@ -977,7 +1016,11 @@ class ImageSegmentationDialog(QDialog):
         self.render_config.std_dev_n = settings["std_dev_n"]
         self.render_config.auto_range = settings["auto_range"]
         self.render_config.value_range = tuple(settings["value_range"])
-        self.render_config.global_value_range = self._current_global_range(settings)
+        self.render_config.global_value_range = (
+            self._current_global_range(settings)
+            if settings["auto_range"] and settings["stretch_mode"] != "直方图均衡化"
+            else None
+        )
         self.render_config.colormap_reversed = settings["colormap_reversed"]
         self.render_config.colormap_name = self.colormap_combo.currentText()
         self.render_config.smooth_display = settings.get("smooth_display", False)
@@ -1390,12 +1433,44 @@ class ImageSegmentationDialog(QDialog):
             self.canvas.update_draft(None)
 
     def _handle_mouse_press(self, payload) -> None:
+        if self._handle_mask_paint_payload(payload, begin=True):
+            return
         self.tool_controller.handle_press(payload)
 
+    def _handle_mouse_move(self, payload) -> None:
+        tool = self.tool_controller.active_tool
+        if (
+            self._mask_painting
+            and tool in {SegmentationToolController.TOOL_BRUSH, SegmentationToolController.TOOL_ERASER}
+            and bool(payload.buttons & Qt.LeftButton)
+        ):
+            self._paint_mask_line_to(payload.x, payload.y, erase=(tool == SegmentationToolController.TOOL_ERASER))
+
     def _handle_mouse_release(self, payload) -> None:
+        if self._handle_mask_paint_payload(payload, end=True):
+            return
         self.tool_controller.handle_release(payload)
         self.tool_controller.set_annotations(self.project.annotations)
         self._refresh_canvas()
+
+    def _handle_mask_paint_payload(self, payload, begin: bool = False, end: bool = False) -> bool:
+        tool = self.tool_controller.active_tool
+        if tool not in {SegmentationToolController.TOOL_BRUSH, SegmentationToolController.TOOL_ERASER}:
+            return False
+        if end:
+            if self._mask_painting and payload.button == Qt.LeftButton:
+                self._paint_mask_line_to(payload.x, payload.y, erase=(tool == SegmentationToolController.TOOL_ERASER))
+            self._commit_mask_paint_session()
+            self._mask_painting = False
+            self._last_mask_paint_point = None
+            return True
+        if begin and payload.button == Qt.LeftButton:
+            self._begin_mask_paint_session()
+            self._mask_painting = True
+            self._last_mask_paint_point = None
+            self._paint_mask_line_to(payload.x, payload.y, erase=(tool == SegmentationToolController.TOOL_ERASER))
+            return True
+        return False
 
     def _on_tool_action_triggered(self, action: QAction) -> None:
         target = action.data()
@@ -1421,6 +1496,124 @@ class ImageSegmentationDialog(QDialog):
         self.canvas.set_interaction_mode(target)
         if target != SegmentationToolController.TOOL_MAGIC_WAND:
             self._clear_magic_preview()
+
+    def _adjust_active_tool_slider(self, steps: int) -> None:
+        tool = self.tool_controller.active_tool
+        if tool == SegmentationToolController.TOOL_MAGIC_WAND:
+            slider = self.magic_panel.tolerance_slider
+        elif tool in {SegmentationToolController.TOOL_BRUSH, SegmentationToolController.TOOL_ERASER}:
+            slider = self.magic_panel.brush_size_slider
+        else:
+            return
+        slider.setValue(max(slider.minimum(), min(slider.maximum(), slider.value() + int(steps))))
+
+    def _begin_mask_paint_session(self) -> None:
+        self._mask_paint_bbox = None
+        self._mask_paint_before_patch = None
+        self._last_mask_paint_point = None
+
+    def _commit_mask_paint_session(self) -> None:
+        bbox = self._mask_paint_bbox
+        before_patch = self._mask_paint_before_patch
+        self._mask_paint_bbox = None
+        self._mask_paint_before_patch = None
+        if bbox is None:
+            return
+        after_patch = self._extract_mask_patch(bbox)
+        if before_patch is not None and after_patch is not None and np.array_equal(before_patch, after_patch):
+            return
+        self._push_commands_with_mask_patch(
+            [],
+            affected_bbox=None,
+            update_mask=False,
+            explicit_mask_patch=(bbox, before_patch, after_patch),
+        )
+        self._set_dirty(True)
+        self._refresh_canvas()
+
+    def _paint_mask_line_to(self, x: float, y: float, erase: bool = False) -> None:
+        previous = self._last_mask_paint_point
+        radius = max(1, int(round(self.magic_panel.brush_size() / 2.0)))
+        if previous is None:
+            self._paint_mask_at(x, y, erase=erase)
+            self._last_mask_paint_point = (x, y)
+            return
+
+        px, py = previous
+        distance = float(np.hypot(x - px, y - py))
+        spacing = max(1.0, radius * 0.45)
+        segments = max(1, int(np.ceil(distance / spacing)))
+        for index in range(1, segments + 1):
+            t = index / segments
+            self._paint_mask_at(px + (x - px) * t, py + (y - py) * t, erase=erase, refresh=index == segments)
+        self._last_mask_paint_point = (x, y)
+
+    def _paint_mask_at(self, x: float, y: float, erase: bool = False, refresh: bool = True) -> None:
+        if self.project.image_asset is None:
+            return
+        self._ensure_project_mask_shape()
+        if self.project.mask_data is None:
+            return
+        if not erase and self.project.active_label_id is None:
+            self._show_tool_message("请先选择一个活动标签。")
+            return
+        radius = max(1, int(round(self.magic_panel.brush_size() / 2.0)))
+        cx = int(round(x))
+        cy = int(round(y))
+        height, width = self.project.mask_data.shape
+        x0 = max(0, cx - radius)
+        y0 = max(0, cy - radius)
+        x1 = min(width, cx + radius + 1)
+        y1 = min(height, cy + radius + 1)
+        if x0 >= x1 or y0 >= y1:
+            return
+        bbox = (x0, y0, x1 - x0, y1 - y0)
+        if self._mask_painting:
+            self._extend_mask_paint_before_patch(bbox)
+            after_patch = self._extract_mask_patch(bbox)
+        else:
+            before_patch = self._extract_mask_patch(bbox)
+            after_patch = np.zeros((y1 - y0, x1 - x0), dtype=np.uint16) if before_patch is None else before_patch.copy()
+        if after_patch is None:
+            after_patch = np.zeros((y1 - y0, x1 - x0), dtype=np.uint16)
+        yy, xx = np.ogrid[y0:y1, x0:x1]
+        disk = (xx - cx) ** 2 + (yy - cy) ** 2 <= radius ** 2
+        after_patch[disk] = 0 if erase else int(self.project.active_label_id)
+        if self._mask_painting:
+            self.project.mask_data[y0:y1, x0:x1] = after_patch
+            self._mark_mask_overlay_dirty()
+        else:
+            self._push_mask_only_patch(bbox, after_patch)
+            self._set_dirty(True)
+        if refresh:
+            self._refresh_canvas()
+
+    def _extend_mask_paint_before_patch(self, bbox: tuple[int, int, int, int]) -> None:
+        current_before = self._extract_mask_patch(bbox)
+        if current_before is None:
+            current_before = np.zeros((bbox[3], bbox[2]), dtype=np.uint16)
+        if self._mask_paint_bbox is None or self._mask_paint_before_patch is None:
+            self._mask_paint_bbox = bbox
+            self._mask_paint_before_patch = current_before.copy()
+            return
+
+        old_x, old_y, old_w, old_h = self._mask_paint_bbox
+        new_x, new_y, new_w, new_h = bbox
+        union_x0 = min(old_x, new_x)
+        union_y0 = min(old_y, new_y)
+        union_x1 = max(old_x + old_w, new_x + new_w)
+        union_y1 = max(old_y + old_h, new_y + new_h)
+        union_bbox = (union_x0, union_y0, union_x1 - union_x0, union_y1 - union_y0)
+        union_before = self._extract_mask_patch(union_bbox)
+        if union_before is None:
+            union_before = np.zeros((union_bbox[3], union_bbox[2]), dtype=np.uint16)
+
+        old_dx = old_x - union_x0
+        old_dy = old_y - union_y0
+        union_before[old_dy:old_dy + old_h, old_dx:old_dx + old_w] = self._mask_paint_before_patch
+
+        self._mask_paint_bbox = union_bbox
+        self._mask_paint_before_patch = union_before.copy()
 
     def _add_polygon_annotation(self, polygon_points) -> None:
         if self.project.active_label_id is None:
@@ -2097,10 +2290,7 @@ class ImageSegmentationDialog(QDialog):
             self.canvas.update_preview_mask(self._preview_mask, self._preview_bbox, color)
         else:
             self.canvas.update_preview_mask(None, None, color)
-        preview_polygons = []
-        if self.project.layer_visibility.get("preview_vector", False) and self.preview_selection is not None:
-            preview_polygons = self.preview_selection.polygon_preview
-        self.canvas.update_preview_polygons(preview_polygons, color)
+        self.canvas.update_preview_polygons([], color)
 
     def closeEvent(self, event) -> None:
         if not self._finish_node_edit_session():

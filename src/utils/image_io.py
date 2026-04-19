@@ -428,7 +428,7 @@ def calculate_hillshade(dem_array: np.ndarray, azimuth: float = 315.0, altitude:
         np.ndarray: 山体阴影数组，值范围0-255
     """
     from osgeo import osr
-    
+
     # 转换角度为弧度
     azimuth_rad = np.radians(azimuth)
     altitude_rad = np.radians(altitude)
@@ -473,6 +473,10 @@ def calculate_hillshade(dem_array: np.ndarray, azimuth: float = 315.0, altitude:
                     scale_y = 111320.0
             except:
                 pass
+        else:
+            print("警告: 无投影信息，无法判断坐标系类型，假设像素大小为1单位，且坐标系为平面坐标系")
+    else:
+        print("警告: 无地理变换信息，假设像素大小为1单位，且坐标系为平面坐标系")
     
     # GDAL hillshade算法：
     # 1. 使用3x3 Sobel算子计算梯度（而不是简单的中心差分）
@@ -552,6 +556,22 @@ def calculate_hillshade(dem_array: np.ndarray, azimuth: float = 315.0, altitude:
     # 处理nodata区域
     hillshade[~valid_mask] = 0.0
     
+    # # 使用已有的仿射变换以及坐标系信息，将hillshade保存为tif格式
+    # out_path = "test/temp_hillshade.tif"
+    # if geotransform is not None and projection is not None:
+    #     try:
+    #         driver = gdal.GetDriverByName('GTiff')
+    #         height, width = hillshade.shape
+    #         hillshade_ds = driver.Create(out_path, width, height, 1, gdal.GDT_Float32)
+    #         hillshade_ds.SetGeoTransform(geotransform)
+    #         hillshade_ds.SetProjection(projection)
+    #         hillshade_band = hillshade_ds.GetRasterBand(1)
+    #         hillshade_band.WriteArray(hillshade)
+    #         hillshade_band.FlushCache()
+    #         hillshade_ds.FlushCache()
+    #     except Exception as e:
+    #         print(f"Error occurred while saving hillshade: {e}")
+
     return hillshade.astype(np.float32)
 
 # def calculate_hillshade(dem_array: np.ndarray, azimuth: float = 315.0, altitude: float = 45.0, 
@@ -1578,9 +1598,9 @@ def read_h5_timeseries_metadata(file_path: str) -> Tuple[Optional[List[str]], Op
                 if np.all(first_frame == 0):
                     # 第一帧是参考帧，从第1帧开始读取
                     start_index = 1
-                    print(f"检测到第0帧为参考帧（全0），将从第1帧开始读取")
-                    print(f"总帧数：{num_frames}，有效数据帧：{num_frames - 1}")
-                    print(f"日期数：{num_dates}")
+                    # print(f"检测到第0帧为参考帧（全0），将从第1帧开始读取")
+                    # print(f"总帧数：{num_frames}，有效数据帧：{num_frames - 1}")
+                    # print(f"日期数：{num_dates}")
             
             return date_list, timeseries_shape, start_index
             

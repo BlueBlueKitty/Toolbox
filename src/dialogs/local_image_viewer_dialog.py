@@ -38,6 +38,7 @@ from src.utils.gamma_file_process import (
     is_gamma_binary_file,
 )
 from src.utils.image_io import (
+    calculate_hillshade,
     read_tiff_region,
     read_tiff_pixel,
     read_image_region,
@@ -52,9 +53,11 @@ from src.utils.display_pyramid import (
     read_gdal_pyramid_display,
     read_h5_dataset_pyramid_display,
     read_standard_pyramid_display,
+    write_derived_raster_cache,
+    write_full_derived_raster_cache,
 )
 from src.dialogs.gamma_dialogs import GammaSingleFileDialog
-from src.rendering.sources import GdalRasterSource, GammaVrtRasterSource, H5DatasetRasterSource
+from src.rendering.sources import GdalRasterSource, GammaVrtRasterSource, H5DatasetRasterSource, HillshadeCompositeRasterSource
 from src.rendering.sources import StandardImageSource
 
 
@@ -73,6 +76,8 @@ class LocalImageViewerDialog(QDialog):
         # 图像数据
         self.image_data = None  # 显示用数据，可能来自 overview
         self.image_source = None
+        self._base_render_source = None
+        self._hillshade_cache_key = None
         self.image_file = None
         self.nodata_value = None
         self.polyline_path_points = None  # 存储折线路径上的所有点
@@ -143,8 +148,12 @@ class LocalImageViewerDialog(QDialog):
 
     def _set_viewer_source_or_array(self, original_size=None):
         if self.image_source is not None:
+            self._base_render_source = self.image_source
+            self._hillshade_cache_key = None
             self.image_viewer.set_raster_source(self.image_source)
         else:
+            self._base_render_source = None
+            self._hillshade_cache_key = None
             self.image_viewer.set_raster_array(self.image_data, original_size=original_size)
 
     def _reset_render_controls_for_new_image(self):
@@ -153,8 +162,11 @@ class LocalImageViewerDialog(QDialog):
             return
         num_bands = self.image_data.shape[2] if self.image_data.ndim == 3 else 1
         self.render_settings.reset_to_defaults(num_bands)
+        self.colormap_combo.blockSignals(True)
         self.colormap_combo.setCurrentText("gray")
-        self.image_viewer.set_colormap("gray")
+        self.colormap_combo.blockSignals(False)
+        self.image_viewer.current_colormap = "gray"
+        self.image_viewer.render_config.colormap_name = "gray"
 
     def _create_standard_source(self, file_path):
         try:
@@ -197,6 +209,11 @@ class LocalImageViewerDialog(QDialog):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
+            if self.image_viewer.cancel_active_drawing():
+                event.accept()
+                if self.image_data is not None:
+                    self.show_image_histogram()
+                return
             event.ignore()
             return
         super().keyPressEvent(event)
@@ -209,7 +226,9 @@ class LocalImageViewerDialog(QDialog):
             nodata_mask = (data_copy == 0)
             min_positive = np.min(data_copy[data_copy > 0]) if np.any(data_copy > 0) else 1e-10
             data_copy[(data_copy <= 0) & ~nodata_mask] = min_positive
-            db_data = np.where(nodata_mask, 0, 10 * np.log10(data_copy))
+            db_data = np.zeros_like(data_copy, dtype=np.float32)
+            valid_mask = ~nodata_mask
+            db_data[valid_mask] = 10 * np.log10(data_copy[valid_mask])
         else:
             min_positive = np.min(data_copy[data_copy > 0]) if np.any(data_copy > 0) else 1e-10
             data_copy[data_copy <= 0] = min_positive
@@ -219,6 +238,20 @@ class LocalImageViewerDialog(QDialog):
             self.nodata_value = 0
 
         return db_data.astype(np.float32)
+
+    def _convert_block_to_db(self, block):
+        data_copy = np.asarray(block).copy()
+        if self.is_gamma or self.nodata_value == 0:
+            nodata_mask = (data_copy == 0)
+            min_positive = np.min(data_copy[data_copy > 0]) if np.any(data_copy > 0) else 1e-10
+            data_copy[(data_copy <= 0) & ~nodata_mask] = min_positive
+            db_data = np.zeros_like(data_copy, dtype=np.float32)
+            valid_mask = ~nodata_mask
+            db_data[valid_mask] = 10 * np.log10(data_copy[valid_mask])
+            return db_data
+        min_positive = np.min(data_copy[data_copy > 0]) if np.any(data_copy > 0) else 1e-10
+        data_copy[data_copy <= 0] = min_positive
+        return (10 * np.log10(data_copy)).astype(np.float32)
 
     def _create_ui(self):
         """创建用户界面"""
@@ -258,12 +291,12 @@ class LocalImageViewerDialog(QDialog):
         self.mode_group.addButton(self.mode_none_radio, 0)
         control_layout1.addWidget(self.mode_none_radio)
         
-        self.mode_rect_radio = QRadioButton("矩形")
+        self.mode_rect_radio = QRadioButton("直方图")
         self.mode_rect_radio.clicked.connect(self.on_mode_changed)
         self.mode_group.addButton(self.mode_rect_radio, 1)
         control_layout1.addWidget(self.mode_rect_radio)
         
-        self.mode_polyline_radio = QRadioButton("折线")
+        self.mode_polyline_radio = QRadioButton("剖线图")
         self.mode_polyline_radio.clicked.connect(self.on_mode_changed)
         self.mode_group.addButton(self.mode_polyline_radio, 2)
         control_layout1.addWidget(self.mode_polyline_radio)
@@ -545,21 +578,30 @@ class LocalImageViewerDialog(QDialog):
                     # 其他维度不支持
                     raise ValueError(f"不支持的数据维度: {selected_ndim}D\n只支持2D图像或3D时序数据")
             elif self.is_tiff:
-                # 使用金字塔读取TIFF/GRD显示预览
-                self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
-                    self._read_tiff_pyramid_display(file_path)
                 self.image_source = GdalRasterSource(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
+                metadata = self.image_source.metadata()
+                self.original_width, self.original_height = metadata.width, metadata.height
+                self.nodata_value = metadata.nodata
+                self.downsample_factor = 1
+                self.image_data = self.image_source.read_window_native(0, 0, 1, 1)
             else:
-                # 使用金字塔读取普通图像显示预览
-                self.image_data, (self.original_width, self.original_height), self.downsample_factor = \
-                    self._read_image_pyramid_display(file_path)
                 self.image_source = self._create_standard_source(file_path)
+                metadata = self.image_source.metadata()
+                self.original_width, self.original_height = metadata.width, metadata.height
+                self.nodata_value = metadata.nodata
+                self.downsample_factor = 1
+                self.image_data = self.image_source.read_window_native(0, 0, 1, 1)
 
             self._reset_render_controls_for_new_image()
-            
+            if self.is_h5:
+                self.colormap_combo.blockSignals(True)
+                self.colormap_combo.setCurrentText('jet')
+                self.colormap_combo.blockSignals(False)
+                self.image_viewer.current_colormap = 'jet'
+                self.image_viewer.render_config.colormap_name = 'jet'
+
             # 显示图像
-            original_size = (self.original_width, self.original_height) if self.downsample_factor > 1 else None
-            self._set_viewer_source_or_array(original_size)
+            self._set_viewer_source_or_array(None)
             
             # H5文件默认使用jet colormap
             if self.is_h5:
@@ -579,17 +621,10 @@ class LocalImageViewerDialog(QDialog):
             self.image_viewer.fit_in_view(delayed=True)
             
             # 更新信息
-            if self.downsample_factor > 1:
-                info = self._compose_image_info([
-                    os.path.basename(file_path),
-                    f"原始尺寸: {self.original_width}x{self.original_height}",
-                    f"显示: {self.image_data.shape[1]}x{self.image_data.shape[0]} (1/{self.downsample_factor})",
-                ])
-            else:
-                info = self._compose_image_info([
-                    os.path.basename(file_path),
-                    f"尺寸: {self.original_width}x{self.original_height}",
-                ])
+            info = self._compose_image_info([
+                os.path.basename(file_path),
+                f"尺寸: {self.original_width}x{self.original_height}",
+            ])
             
             if self.image_data.ndim == 2:
                 info += " | 单波段"
@@ -754,7 +789,13 @@ class LocalImageViewerDialog(QDialog):
     def _apply_render_settings_update(self):
         try:
             settings = self.render_settings.get_all_settings()
-            self.image_viewer.set_render_settings(settings)
+            if settings.get("display_mode") != "晕渲地貌":
+                self._restore_base_render_source()
+            if self.render_settings.is_auto_range():
+                self._update_image_stats_to_render_settings()
+                settings = self.render_settings.get_all_settings()
+            viewer_settings = self._prepare_render_source_for_settings(settings)
+            self.image_viewer.set_render_settings(viewer_settings)
             
             # 更新colorbar
             if hasattr(self, 'colorbar'):
@@ -762,6 +803,68 @@ class LocalImageViewerDialog(QDialog):
                 self.colorbar.set_colormap(self.colormap_combo.currentText(), settings['colormap_reversed'])
         finally:
             self._hide_loading_indicator()
+
+    def _restore_base_render_source(self) -> None:
+        if self._base_render_source is not None and self.image_source is not self._base_render_source:
+            self.image_source = self._base_render_source
+            self._hillshade_cache_key = None
+            self.image_data = self.image_source.read_window_native(0, 0, 1, 1)
+            self.image_viewer.set_raster_source(self.image_source, reset_view=False)
+
+    def _prepare_render_source_for_settings(self, settings: dict) -> dict:
+        """为晕渲地貌这类派生图像准备缓存源，避免缩放/平移时反复计算。"""
+        if settings.get("display_mode") != "晕渲地貌" or self.image_source is None:
+            self._restore_base_render_source()
+            return settings
+
+        base_source = self._base_render_source or self.image_source
+        params = settings.get("hillshade_params", {})
+        gray_band = int(settings.get("gray_band", 1))
+        key = (
+            f"hillshade_full_v3_b{gray_band}_az{float(params.get('azimuth', 315.0)):.3f}"
+            f"_alt{float(params.get('altitude', 45.0)):.3f}"
+            f"_z{float(params.get('z_factor', 1.0)):.6f}"
+        )
+        if self.image_source is not base_source and self._hillshade_cache_key == key:
+            return self._hillshade_view_settings(settings)
+
+        meta = base_source.metadata()
+        base_gt = meta.geotransform
+
+        def _transform(full_array):
+            arr = np.asarray(full_array)
+            if arr.ndim == 3:
+                band = min(max(gray_band, 1), arr.shape[2]) - 1
+                arr = arr[:, :, band]
+            return calculate_hillshade(
+                arr,
+                azimuth=float(params.get("azimuth", 315.0)),
+                altitude=float(params.get("altitude", 45.0)),
+                z_factor=float(params.get("z_factor", 1.0)),
+                nodata_value=meta.nodata,
+                geotransform=base_gt,
+                projection=meta.crs_wkt,
+            )
+
+        cache_path = write_full_derived_raster_cache(
+            base_source,
+            key,
+            _transform,
+            output_band_count=1,
+            invalidate_on_source_mtime=False,
+            stable_cache_key=True,
+        )
+        hillshade_source = GdalRasterSource(str(cache_path), source_path=meta.path, pyramid_threshold_mb=0)
+        self.image_source = HillshadeCompositeRasterSource(base_source, hillshade_source)
+        self.image_data = self.image_source.read_window_native(0, 0, 1, 1)
+        self._hillshade_cache_key = key
+        self.image_viewer.set_raster_source(self.image_source, reset_view=False)
+        return self._hillshade_view_settings(settings)
+
+    def _hillshade_view_settings(self, settings: dict) -> dict:
+        view_settings = dict(settings)
+        view_settings["display_mode"] = "灰度"
+        return view_settings
     
     def on_suggest_colormap(self, colormap_name):
         """接收建议的colormap并切换"""
@@ -771,26 +874,12 @@ class LocalImageViewerDialog(QDialog):
         """从当前图像计算统计信息并更新到渲染设置"""
         if self.image_source is not None:
             settings = self.render_settings.get_all_settings()
-            if settings["display_mode"] == "RGB":
-                ranges = [
-                    self.image_source.band_minmax(band_index)
-                    for band_index in settings["rgb_bands"]
-                ]
-                ranges = [item for item in ranges if item is not None]
-                if ranges:
-                    min_val = float(min(item[0] for item in ranges))
-                    max_val = float(max(item[1] for item in ranges))
-                    self.render_settings.set_image_stats(min_val, max_val)
-                    if hasattr(self, 'colorbar'):
-                        self.colorbar.set_range(min_val, max_val)
-                    return
-            else:
-                min_max = self.image_source.band_minmax(settings["gray_band"])
-                if min_max is not None:
-                    self.render_settings.set_image_stats(*min_max)
-                    if hasattr(self, 'colorbar'):
-                        self.colorbar.set_range(*min_max)
-                    return
+            value_range = self.image_source.value_range_for_settings(settings)
+            if value_range is not None:
+                self.render_settings.set_image_stats(*value_range)
+                if hasattr(self, 'colorbar'):
+                    self.colorbar.set_range(*value_range)
+                return
 
         if self.image_data is not None:
             arr = self.image_data
@@ -837,6 +926,20 @@ class LocalImageViewerDialog(QDialog):
         settings = get_settings()
         settings.setValue("show_fit_curve", checked)
         self._refresh_analysis_chart()
+
+    def _normalize_plot_values(self, values):
+        """把 GDAL/PIL/HDF5 读出的标量或数组规范成绘图可识别的形状。"""
+        normalized = []
+        for value in values or []:
+            if value is None:
+                normalized.append(np.nan)
+                continue
+            arr = np.asarray(value)
+            if arr.ndim == 0:
+                normalized.append(float(arr))
+            else:
+                normalized.append(arr.astype(np.float64, copy=False).ravel())
+        return normalized
 
     def _refresh_analysis_chart(self):
         """根据当前绘制状态刷新分析图"""
@@ -1000,7 +1103,7 @@ class LocalImageViewerDialog(QDialog):
                 return
             
             # 根据显示比例计算原始坐标和获取原始像素值
-            if self.downsample_factor > 1:
+            if self.image_source is None and self.downsample_factor > 1:
                 # 将显示坐标转换为原始坐标
                 original_path_points = []
                 path_values = []
@@ -1030,7 +1133,7 @@ class LocalImageViewerDialog(QDialog):
                 self.polyline_original_points = display_path_points
             
             # 排除Nodata值并绘制折线图
-            self.plot_polyline(path_values, self.polyline_original_points)
+            self.plot_polyline(self._normalize_plot_values(path_values), self.polyline_original_points)
             
         except Exception as e:
             QMessageBox.warning(self, "警告", f"绘制折线图失败: {str(e)}")
@@ -1046,6 +1149,11 @@ class LocalImageViewerDialog(QDialog):
                 self.canvas.draw_idle()
             except:
                 pass
+
+    def _ensure_chart_hover(self):
+        if not hasattr(self, "_chart_hover_connection"):
+            self._chart_hover_connection = self.canvas.mpl_connect('motion_notify_event', self.on_chart_mouse_move)
+        self._chart_annotation = None
     
     def on_chart_mouse_move(self, event):
         """图表鼠标移动事件（从图表传来）"""
@@ -1054,7 +1162,10 @@ class LocalImageViewerDialog(QDialog):
             self.image_viewer._hide_hover_marker()
             if hasattr(self, 'hover_line') and self.hover_line:
                 self.hover_line.set_visible(False)
-                self.canvas.draw_idle()
+            return
+
+        if event.xdata is None:
+            self.canvas.draw_idle()
             return
         
         # 获取鼠标位置的x坐标（索引）
@@ -1090,7 +1201,7 @@ class LocalImageViewerDialog(QDialog):
             if hasattr(self, 'hover_line') and self.hover_line:
                 self.hover_line.set_visible(False)
                 self.canvas.draw_idle()
-    
+
     def _compute_histogram_spec(self, values, bins=128, low_pct=1.0, high_pct=99.0):
         """参考 HSBA 直方图规格：固定 bins + 百分位范围。"""
         flat = np.asarray(values, dtype=np.float64).ravel()
@@ -1255,6 +1366,7 @@ class LocalImageViewerDialog(QDialog):
         """绘制直方图（使用填充折线图）"""
         self.figure.clear()
         ax = self.figure.add_subplot(111)
+        self._chart_points = []
         
         # 绘制每个波段的直方图
         colors = ['red', 'green', 'blue', 'cyan', 'magenta', 'yellow']
@@ -1294,6 +1406,10 @@ class LocalImageViewerDialog(QDialog):
                 alpha=0.55,
                 label=f'{label}直方图'
             )
+            self._chart_points.extend(
+                (float(x), float(y), f"{label}: {x:.6g}, 密度 {y:.6g}")
+                for x, y in zip(bin_centers, density, strict=False)
+            )
             
             # 绘制平滑后的经验曲线
             smooth_density = self._smooth_1d(density, sigma=1.0)
@@ -1306,18 +1422,16 @@ class LocalImageViewerDialog(QDialog):
                 label=f'{label}平滑'
             )
             
-            # 拟合 GMM 曲线（2/3 峰中择优）
+            # 拟合曲线只叠加平滑后的经验密度，不重新估计额外峰值，避免引入不存在的极小值。
             if self.show_fit_curve:
-                fit = self._select_gmm_fit(bin_centers, counts, smooth_density)
-                if fit is not None:
-                    ax.plot(
-                        bin_centers,
-                        fit["mixture"],
-                        color='black',
-                        linewidth=2.2,
-                        alpha=0.9,
-                        label=f'{label}拟合'
-                    )
+                ax.plot(
+                    bin_centers,
+                    smooth_density,
+                    color='black',
+                    linewidth=2.2,
+                    alpha=0.9,
+                    label=f'{label}拟合'
+                )
         
         if x_ranges:
             x_min = min(r[0] for r in x_ranges)
@@ -1335,6 +1449,7 @@ class LocalImageViewerDialog(QDialog):
         
         self.figure.tight_layout()
         self.canvas.draw()
+        self._ensure_chart_hover()
         
         if self.show_fit_curve:
             self.chart_info_label.setText(f"直方图(平滑+拟合): 共{sum(len(d) for d in data_list)}个像素")
@@ -1345,6 +1460,7 @@ class LocalImageViewerDialog(QDialog):
         """绘制折线图（改进版：平滑曲线+折点标记+填充）"""
         self.figure.clear()
         ax = self.figure.add_subplot(111)
+        self._chart_points = []
         
         if not values:
             self.canvas.draw()
@@ -1381,6 +1497,10 @@ class LocalImageViewerDialog(QDialog):
             # 绘制填充曲线
             ax.fill_between(valid_indices, valid_values, alpha=0.3, color='red', label='像素值')
             ax.plot(valid_indices, valid_values, color='red', linewidth=1)
+            self._chart_points.extend(
+                (float(idx), float(val), f"点 {idx}: {val:.6g}")
+                for idx, val in zip(valid_indices, valid_values, strict=False)
+            )
             
             # 平滑拟合曲线（参考 HSBA 的平滑思路）
             series = np.full(len(values), np.nan, dtype=np.float64)
@@ -1425,6 +1545,10 @@ class LocalImageViewerDialog(QDialog):
                 ax.fill_between(valid_indices, valid_values, alpha=0.2, color=color)
                 ax.plot(valid_indices, valid_values, color=color, linewidth=1, 
                        label=f'波段{band_idx+1}')
+                self._chart_points.extend(
+                    (float(idx), float(val), f"点 {idx} 波段{band_idx+1}: {val:.6g}")
+                    for idx, val in zip(valid_indices, valid_values, strict=False)
+                )
                 
                 # 平滑拟合曲线
                 series = np.full(len(values), np.nan, dtype=np.float64)
@@ -1509,7 +1633,7 @@ class LocalImageViewerDialog(QDialog):
         self.canvas.draw()
         
         # 连接鼠标移动事件
-        self.canvas.mpl_connect('motion_notify_event', self.on_chart_mouse_move)
+        self._ensure_chart_hover()
         
         self.chart_info_label.setText(f"折线图: 共{len(points)}个点")    
     def open_h5_file(self):
@@ -1617,6 +1741,11 @@ class LocalImageViewerDialog(QDialog):
             self.downsample_factor = downsample_factor
             self._converted_to_db = False
             self._reset_render_controls_for_new_image()
+            self.colormap_combo.blockSignals(True)
+            self.colormap_combo.setCurrentText('jet')
+            self.colormap_combo.blockSignals(False)
+            self.image_viewer.current_colormap = 'jet'
+            self.image_viewer.render_config.colormap_name = 'jet'
             
             # 显示图像
             display_original_size = original_size if downsample_factor > 1 else None
@@ -1960,7 +2089,10 @@ class LocalImageViewerDialog(QDialog):
                 min_positive = np.min(data[data > 0]) if np.any(data > 0) else 1e-10
                 data[(data <= 0) & ~nodata_mask] = min_positive
                 # 转换为dB，但保持nodata为0
-                data = np.where(nodata_mask, 0, 10 * np.log10(data))
+                db_data = np.zeros_like(data, dtype=np.float32)
+                valid_mask = ~nodata_mask
+                db_data[valid_mask] = 10 * np.log10(data[valid_mask])
+                data = db_data
             
             return data
         except Exception as e:
@@ -2006,21 +2138,25 @@ class LocalImageViewerDialog(QDialog):
             return
         
         try:
-            # 更新图像数据
-            self.image_data = self._convert_array_to_db(self.image_data)
-            
-            # 设置转换标志
+            self._show_loading_indicator("正在生成 dB 派生图像缓存...")
+            if self.image_source is not None:
+                cache_path = write_derived_raster_cache(self.image_source, "db10", self._convert_block_to_db)
+                self.image_source = GdalRasterSource(str(cache_path), source_path=self.image_file, pyramid_threshold_mb=0)
+                self.image_data = self.image_source.read_window_native(0, 0, 1, 1)
+                self.downsample_factor = 1
+                self._set_viewer_source_or_array(None)
+            else:
+                self.image_data = self._convert_array_to_db(self.image_data)
+                original_size = (self.original_width, self.original_height) if self.downsample_factor > 1 else None
+                self._set_viewer_source_or_array(original_size)
+
             self._converted_to_db = True
-            
-            # 重新显示图像
-            original_size = (self.original_width, self.original_height) if self.downsample_factor > 1 else None
-            self.image_source = None
-            self._set_viewer_source_or_array(original_size)
             
             # 设置Nodata值到图像查看器
             self.image_viewer.set_nodata_value(self.nodata_value)
             self._update_image_stats_to_render_settings()
             self._apply_render_settings_update()
+            self.image_viewer.fit_in_view(delayed=True)
             
             # 更新信息标签（添加dB标记）
             current_info = self.image_info_label.text()

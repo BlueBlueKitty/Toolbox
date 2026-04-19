@@ -102,7 +102,7 @@ class PreviewMaskItem(pg.ImageItem):
             return
         rgba = np.zeros((mask.shape[0], mask.shape[1], 4), dtype=np.uint8)
         color = QColor(color_name)
-        rgba[mask > 0] = [color.red(), color.green(), color.blue(), 176]
+        rgba[mask > 0] = [color.red(), color.green(), color.blue(), 255]
         self.setImage(rgba, autoLevels=False)
         x, y, width, height = bbox
         self.setRect(pg.QtCore.QRectF(x, y, width, height))

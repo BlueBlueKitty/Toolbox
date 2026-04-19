@@ -36,7 +36,7 @@ def detect_overviews(dataset) -> list[OverviewInfo]:
 
 
 def choose_overview_for_scale(overviews: list[OverviewInfo], target_downsample: float) -> OverviewInfo | None:
-    candidates = [overview for overview in overviews if overview.downsample_factor <= target_downsample * 1.25]
+    candidates = [overview for overview in overviews if overview.downsample_factor <= target_downsample]
     if not candidates:
         return None
     return max(candidates, key=lambda overview: overview.downsample_factor)

@@ -17,8 +17,8 @@ class OperationProgressWidget(QWidget):
 
         self.message_label = QLabel("就绪")
         self.progress_bar = QProgressBar()
-        self.progress_bar.setMinimumWidth(220)
-        self.progress_bar.setVisible(False)
+        self.progress_bar.setFixedWidth(220)
+        self.progress_bar.setVisible(True)
         self.progress_bar.setTextVisible(True)
 
         layout.addWidget(self.message_label, 1)
@@ -58,12 +58,12 @@ class OperationProgressWidget(QWidget):
         self._reset_timer.start(max(0, auto_reset_ms))
 
     def fail_task(self, message: str, auto_reset_ms: int = 3000) -> None:
-        self.progress_bar.setVisible(False)
+        self.progress_bar.setVisible(True)
         self.message_label.setText(message)
         self._reset_timer.start(max(0, auto_reset_ms))
 
     def reset(self) -> None:
-        self.progress_bar.setVisible(False)
+        self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.message_label.setText("就绪")

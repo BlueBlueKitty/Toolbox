@@ -7,7 +7,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, Qt, Signal
+from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QTransform
+from PySide6.QtWidgets import QGraphicsEllipseItem
 import pyqtgraph as pg
 
 from src.rendering.canvas import LayeredRasterCanvas
@@ -30,6 +32,7 @@ class SegmentationCanvas(LayeredRasterCanvas):
     mouse_moved = Signal(object)
     mouse_released = Signal(object)
     view_state_changed = Signal(object)
+    tool_wheel_adjust_requested = Signal(int)
 
     LAYER_ANNOTATIONS = "annotations"
     LAYER_MASK = "mask"
@@ -58,16 +61,34 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self.draft_item.path_item.setParentItem(self.view_box.childGroup)
         self.snap_item.path_item.setParentItem(self.view_box.childGroup)
 
-        self.layer_manager.add_layer(LayerSpec(self.LAYER_PREVIEW_MASK, "预览Mask", "raster_overlay", opacity=0.35), self.preview_mask_item)
+        self.layer_manager.add_layer(LayerSpec(self.LAYER_PREVIEW_MASK, "预览Mask", "raster_overlay", opacity=1.0), self.preview_mask_item)
         self.layer_manager.add_layer(LayerSpec(self.LAYER_ANNOTATIONS, "矢量", "vector", opacity=1.0))
         self.layer_manager.add_layer(LayerSpec(self.LAYER_MASK, "Mask", "raster_overlay", opacity=0.45))
         self.layer_manager.add_layer(LayerSpec(self.LAYER_PREVIEW_VECTOR, "预览矢量", "vector", opacity=1.0))
         self.layer_manager.add_layer(LayerSpec(self.LAYER_DRAFT, "绘制草稿", "vector", opacity=1.0), self.draft_item.path_item)
         self.layer_manager.add_layer(LayerSpec(self.LAYER_SNAP, "吸附提示", "vector", opacity=1.0), self.snap_item.path_item)
+        self.layer_manager.move_layer(self.LAYER_PREVIEW_MASK, len(self.layer_manager.layers()) - 1)
 
         self._preview_polygon_items: list[object] = []
         self._interaction_mode = "browse"
         self._is_panning = False
+        self._last_pointer_payload: CanvasMousePayload | None = None
+        self._tool_color = QColor("#ffd43b")
+        self._tool_icon_sources: dict[str, QIcon] = {}
+        self._brush_radius = 6
+        self._brush_range_item = QGraphicsEllipseItem()
+        range_pen = QPen(self._tool_color, 1.2)
+        range_pen.setCosmetic(True)
+        self._brush_range_item.setPen(range_pen)
+        self._brush_range_item.setBrush(Qt.NoBrush)
+        self._brush_range_item.setZValue(20_000)
+        self._brush_range_item.setVisible(False)
+        self.view_box.addItem(self._brush_range_item)
+        self._tool_cursors = {
+            "magic_wand": self._make_tool_cursor("magic"),
+            "brush": self._make_tool_cursor("brush"),
+            "eraser": self._make_tool_cursor("eraser"),
+        }
         self._refresh_timer.timeout.disconnect()
         self._refresh_timer.timeout.connect(self.refresh_view)
         self.view_box.sigRangeChanged.connect(self._on_view_range_changed)
@@ -81,10 +102,57 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self._interaction_mode = tool_name
         self.view_box.setMouseEnabled(x=True, y=True)
         self.view_box.setMouseMode(pg.ViewBox.PanMode)
-        self.graphics.viewport().setCursor(Qt.ArrowCursor if tool_name == "browse" else Qt.CrossCursor)
+        self.graphics.viewport().setCursor(self._cursor_for_tool(tool_name))
+        self._brush_range_item.setVisible(False)
+
+    def set_brush_radius(self, radius: int) -> None:
+        self._brush_radius = max(1, int(radius))
+        if self._last_pointer_payload is not None:
+            self._update_brush_range_indicator(self._last_pointer_payload)
+
+    def set_tool_color(self, color_name: str) -> None:
+        color = QColor(color_name)
+        if not color.isValid():
+            color = QColor("#ffd43b")
+        self._tool_color = color
+        range_color = QColor(color)
+        range_color.setAlpha(230)
+        pen = QPen(range_color, 1.2)
+        pen.setCosmetic(True)
+        self._brush_range_item.setPen(pen)
+        self._rebuild_tool_cursors()
+        if self._last_pointer_payload is not None:
+            self._update_brush_range_indicator(self._last_pointer_payload)
+
+    def set_tool_icons(self, icons: dict[str, QIcon]) -> None:
+        self._tool_icon_sources = {
+            tool_name: icon
+            for tool_name, icon in icons.items()
+            if icon is not None and not icon.isNull()
+        }
+        self._rebuild_tool_cursors()
+
+    def _rebuild_tool_cursors(self) -> None:
+        # 旋转图标以适应光标方向
+        mapping = {
+            "magic_wand": ("magic_wand", -90),
+            "brush": ("brush", 90),
+            "eraser": ("eraser", 0),
+        }
+        for tool_name, (_kind, angle) in mapping.items():
+            icon = self._tool_icon_sources.get(tool_name)
+            if icon is not None and not icon.isNull():
+                self._tool_cursors[tool_name] = self._make_cursor_from_icon(icon, angle, self._tool_color)
+        self.graphics.viewport().setCursor(self._cursor_for_tool(self._interaction_mode))
+
+    def refresh_view(self):
+        super().refresh_view()
+        self.view_state_changed.emit(self.current_view_state())
 
     def eventFilter(self, obj, event):
         if obj is self.graphics.viewport():
+            if event.type() == QEvent.Wheel and self._handle_tool_wheel_adjust(event):
+                return True
             if event.type() == QEvent.MouseButtonPress:
                 if hasattr(event, "button") and event.button() == Qt.MiddleButton:
                     self._begin_pan_interaction()
@@ -98,7 +166,10 @@ class SegmentationCanvas(LayeredRasterCanvas):
                 if self._should_consume_left_mouse(event):
                     return True
             elif event.type() == QEvent.MouseMove:
-                self.mouse_moved.emit(self._payload_from_event(event))
+                payload = self._payload_from_event(event)
+                self._last_pointer_payload = payload
+                self.mouse_moved.emit(payload)
+                self._update_brush_range_indicator(payload)
                 if self.is_panning:
                     return LayeredRasterCanvas.eventFilter(self, obj, event)
                 if self._should_consume_left_drag(event):
@@ -203,7 +274,9 @@ class SegmentationCanvas(LayeredRasterCanvas):
         was_panning = self._is_panning
         self._is_panning = False
         if was_panning:
-            self._refresh_timer.start()
+            self._refresh_timer.stop()
+            self.refresh_view()
+        self.graphics.viewport().setCursor(self._cursor_for_tool(self._interaction_mode))
 
     def _should_forward_mouse_event(self, event) -> bool:
         return hasattr(event, "button") and event.button() in (Qt.LeftButton, Qt.RightButton)
@@ -225,6 +298,110 @@ class SegmentationCanvas(LayeredRasterCanvas):
             modifiers=event.modifiers(),
             double_click=double_click,
         )
+
+    def _cursor_for_tool(self, tool_name: str):
+        if tool_name == "browse":
+            return Qt.ArrowCursor
+        return self._tool_cursors.get(tool_name, Qt.CrossCursor)
+
+    def _make_tool_cursor(self, kind: str) -> QCursor:
+        pixmap = QPixmap(32, 32)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor("#ffffff"), 3))
+        painter.drawLine(2, 7, 12, 7)
+        painter.drawLine(7, 2, 7, 12)
+        painter.setPen(QPen(QColor("#111827"), 1))
+        painter.drawLine(2, 7, 12, 7)
+        painter.drawLine(7, 2, 7, 12)
+        if kind == "magic":
+            painter.setPen(QPen(QColor("#ffffff"), 5))
+            painter.drawLine(13, 13, 28, 28)
+            painter.setPen(QPen(QColor("#7c3aed"), 2))
+            painter.drawLine(13, 13, 28, 28)
+            painter.drawLine(13, 13, 19, 11)
+            painter.drawLine(13, 13, 11, 19)
+            painter.drawLine(22, 8, 22, 12)
+            painter.drawLine(20, 10, 24, 10)
+        elif kind == "eraser":
+            painter.setPen(QPen(QColor("#ffffff"), 5))
+            painter.drawLine(13, 13, 27, 27)
+            painter.setPen(QPen(QColor("#ef4444"), 2))
+            eraser = QPainterPath()
+            eraser.moveTo(12, 17)
+            eraser.lineTo(18, 11)
+            eraser.lineTo(28, 21)
+            eraser.lineTo(22, 27)
+            eraser.closeSubpath()
+            painter.setBrush(QColor(255, 255, 255, 230))
+            painter.drawPath(eraser)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawLine(16, 21, 22, 15)
+        else:
+            painter.setPen(QPen(QColor("#ffffff"), 5))
+            painter.drawLine(13, 13, 27, 27)
+            painter.setPen(QPen(QColor("#2563eb"), 2))
+            painter.drawLine(13, 13, 27, 27)
+            painter.setPen(QPen(QColor("#ffffff"), 4))
+            painter.drawPoint(28, 28)
+            painter.setPen(QPen(QColor("#111827"), 2))
+            painter.drawPoint(28, 28)
+        painter.end()
+        return QCursor(pixmap, 7, 7)
+
+    def _make_cursor_from_icon(self, icon: QIcon, angle: float, color: QColor | None = None) -> QCursor:
+        pixmap = QPixmap(36, 36)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor("#ffffff"), 3))
+        painter.drawLine(2, 7, 12, 7)
+        painter.drawLine(7, 2, 7, 12)
+        painter.setPen(QPen(QColor("#111827"), 1))
+        painter.drawLine(2, 7, 12, 7)
+        painter.drawLine(7, 2, 7, 12)
+
+        icon_pixmap = icon.pixmap(22, 22)
+        if not icon_pixmap.isNull():
+            rotated = icon_pixmap.transformed(QTransform().rotate(angle), Qt.SmoothTransformation)
+            if color is not None and color.isValid():
+                tinted = QPixmap(rotated.size())
+                tinted.fill(Qt.transparent)
+                tint_painter = QPainter(tinted)
+                tint_painter.drawPixmap(0, 0, rotated)
+                tint_painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+                tint_color = QColor(color)
+                tint_color.setAlpha(245)
+                tint_painter.fillRect(tinted.rect(), tint_color)
+                tint_painter.end()
+                rotated = tinted
+            painter.drawPixmap(13, 12, rotated)
+        painter.end()
+        return QCursor(pixmap, 7, 7)
+
+    def _update_brush_range_indicator(self, payload: CanvasMousePayload) -> None:
+        if self._interaction_mode not in {"brush", "eraser"}:
+            self._brush_range_item.setVisible(False)
+            return
+        radius = float(max(1, self._brush_radius))
+        self._brush_range_item.setRect(payload.x - radius, payload.y - radius, radius * 2, radius * 2)
+        self._brush_range_item.setVisible(True)
+        self._brush_range_item.update()
+        self.graphics.viewport().update()
+
+    def _handle_tool_wheel_adjust(self, event) -> bool:
+        if self._interaction_mode not in {"magic_wand", "brush", "eraser"}:
+            return False
+        if not (event.modifiers() & Qt.ControlModifier):
+            return False
+        steps = int(event.angleDelta().y() / 120)
+        if steps == 0:
+            steps = 1 if event.angleDelta().y() > 0 else -1
+        self.tool_wheel_adjust_requested.emit(steps * 2)
+        return True
 
     def _on_view_range_changed(self, *_args) -> None:
         if self.source is not None:

@@ -61,6 +61,9 @@ def render_raster_rgb(
     raw_array: np.ndarray,
     config: RasterRenderConfig,
     nodata_value=None,
+    geotransform=None,
+    projection=None,
+    downsample_factor=1,
 ) -> np.ndarray:
     from src.widgets.render_settings_widget import apply_render_settings
 
@@ -76,7 +79,14 @@ def render_raster_rgb(
             normalized = np.clip(rgb.astype(np.float32) / 255.0, 0.0, 1.0)
             rgb = np.clip(np.power(normalized, 1.0 / config.gamma) * 255.0, 0, 255).astype(np.uint8)
         return rgb
-    processed = apply_render_settings(raw_array, config.to_settings(), nodata_value=nodata_value)
+    processed = apply_render_settings(
+        raw_array,
+        config.to_settings(),
+        nodata_value=nodata_value,
+        geotransform=geotransform,
+        projection=projection,
+        downsample_factor=downsample_factor,
+    )
     if processed is None:
         raise ValueError("渲染失败：输入数组为空")
     if processed.ndim == 2:

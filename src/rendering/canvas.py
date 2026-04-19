@@ -16,6 +16,8 @@ from .config import default_raster_render_config, render_raster_rgb
 from .layers import LayerManager
 from .models import LayerSpec, RenderRequest, RenderTileResult, ViewportState
 
+_UNSET = object()
+
 
 class LayeredRasterCanvas(QWidget):
     pixel_clicked = Signal(int, int)
@@ -55,11 +57,12 @@ class LayeredRasterCanvas(QWidget):
         self.current_colormap = "gray"
         self.colormap_reversed = False
         self.current_zoom = 1.0
-        self.zoom_factor = 1.15
+        self.zoom_factor = 1.75
         self.min_zoom = 0.1
         self.max_zoom = 1000.0
         self.is_panning = False
         self.pan_start_pos = None
+        self._pan_start_view_range = None
         self.is_syncing = False
         self.nodata_value = None
         self.geotransform = None
@@ -75,6 +78,8 @@ class LayeredRasterCanvas(QWidget):
         self._last_request_signature = None
         self._is_refresh_panning = False
         self._dynamic_render_margin_ratio = 0.35
+        self._pan_axis_lock_ratio = 3.0
+        self._pan_axis_lock_tolerance_px = 6.0
         self._coordinates_are_image_space = False
         self._overlay_items_by_layer: dict[str, list[object]] = {}
 
@@ -88,7 +93,7 @@ class LayeredRasterCanvas(QWidget):
         self.graphics.viewport().setCursor(Qt.ArrowCursor)
         self.view_box.sigRangeChanged.connect(self._on_range_changed)
 
-    def set_raster_array(self, image_array, original_size=None):
+    def set_raster_array(self, image_array, original_size=None, refresh: bool = True):
         self.source = None
         self.last_render = None
         self._dynamic_source = False
@@ -100,9 +105,10 @@ class LayeredRasterCanvas(QWidget):
         else:
             self.original_height, self.original_width = image_array.shape[:2]
             self.downsample_factor = 1.0
-        self._update_display()
+        if refresh:
+            self._update_display()
 
-    def set_raster_source(self, source, reset_view: bool = True):
+    def set_raster_source(self, source, reset_view: bool = True, refresh: bool = True, nodata_value=_UNSET):
         self.source = source
         self.last_render = None
         self.image_array = None
@@ -114,7 +120,7 @@ class LayeredRasterCanvas(QWidget):
         metadata = source.metadata()
         self.original_width = int(metadata.width)
         self.original_height = int(metadata.height)
-        self.nodata_value = metadata.nodata
+        self.nodata_value = metadata.nodata if nodata_value is _UNSET else nodata_value
         self.geotransform = metadata.geotransform
         self.projection = metadata.crs_wkt
         self._image_rect = QRectF(0, 0, self.original_width, self.original_height)
@@ -132,7 +138,8 @@ class LayeredRasterCanvas(QWidget):
         )
         if reset_view:
             self.view_box.setRange(xRange=(0, self.original_width), yRange=(0, self.original_height), padding=0.02)
-        self.refresh_view()
+        if refresh:
+            self.refresh_view()
 
     def set_scene_mapping(self, scene_world_rect=None, image_world_rect=None):
         self.scene_world_rect = scene_world_rect
@@ -230,6 +237,14 @@ class LayeredRasterCanvas(QWidget):
         self.render_config = self._render_config_from_state()
         self._last_request_signature = None
         self.refresh_view() if self.source is not None else self._update_display()
+
+    def prime_render_settings(self, settings):
+        """Update render state without repainting; used before swapping data sources."""
+        self.render_settings = settings
+        if settings:
+            self.colormap_reversed = settings.get("colormap_reversed", False)
+        self.render_config = self._render_config_from_state()
+        self._last_request_signature = None
 
     def set_nodata_value(self, nodata_value):
         self.nodata_value = nodata_value
@@ -369,13 +384,32 @@ class LayeredRasterCanvas(QWidget):
 
     def wheelEvent(self, event):
         scene_pos = self.graphics.mapToScene(event.position().toPoint())
-        center = self.view_box.mapSceneToView(scene_pos)
-        if event.angleDelta().y() > 0 and self.current_zoom * self.zoom_factor <= self.max_zoom:
-            self.view_box.scaleBy((1.0 / self.zoom_factor, 1.0 / self.zoom_factor), center=center)
-            self.current_zoom *= self.zoom_factor
-        elif event.angleDelta().y() <= 0 and self.current_zoom / self.zoom_factor >= self.min_zoom:
-            self.view_box.scaleBy((self.zoom_factor, self.zoom_factor), center=center)
-            self.current_zoom /= self.zoom_factor
+        anchor = self.view_box.mapSceneToView(scene_pos)
+        ((x0, x1), (y0, y1)) = self.view_box.viewRange()
+        wheel_steps = max(abs(event.angleDelta().y()) / 120.0, 1.0)
+        wheel_factor = self.zoom_factor ** wheel_steps
+        if event.angleDelta().y() > 0:
+            next_zoom = min(self.current_zoom * wheel_factor, self.max_zoom)
+            if next_zoom <= self.current_zoom:
+                return
+            scale = self.current_zoom / next_zoom
+            self.current_zoom = next_zoom
+        elif event.angleDelta().y() <= 0:
+            next_zoom = max(self.current_zoom / wheel_factor, self.min_zoom)
+            if next_zoom >= self.current_zoom:
+                return
+            scale = self.current_zoom / next_zoom
+            self.current_zoom = next_zoom
+        else:
+            return
+        self.view_box.setRange(
+            xRange=(anchor.x() - (anchor.x() - x0) * scale, anchor.x() + (x1 - anchor.x()) * scale),
+            yRange=(anchor.y() - (anchor.y() - y0) * scale, anchor.y() + (y1 - anchor.y()) * scale),
+            padding=0,
+        )
+        if self.source is not None:
+            self._refresh_timer.stop()
+            self.refresh_view()
 
     def refresh_view(self):
         if self.source is None:
@@ -397,7 +431,19 @@ class LayeredRasterCanvas(QWidget):
         render_config = self._render_config_from_state()
         result = self.source.render(request, render_config)
         if self.nodata_value != getattr(self.source.metadata(), "nodata", None):
-            display_rgb = render_raster_rgb(result.raw_array, render_config, nodata_value=self.nodata_value)
+            rect_x, rect_y, rect_width, rect_height = result.image_rect
+            display_rgb = render_raster_rgb(
+                result.raw_array,
+                render_config,
+                nodata_value=self.nodata_value,
+                geotransform=self._window_geotransform(rect_x, rect_y),
+                projection=self.projection,
+                downsample_factor=max(
+                    rect_width / max(result.raw_array.shape[1], 1),
+                    rect_height / max(result.raw_array.shape[0], 1),
+                    1.0,
+                ),
+            )
             result = RenderTileResult(
                 result.raw_array,
                 display_rgb,
@@ -420,17 +466,25 @@ class LayeredRasterCanvas(QWidget):
     def current_render_request(self) -> RenderRequest:
         ((x0, x1), (y0, y1)) = self.view_box.viewRange()
         view_rect = self.graphics.viewport().rect()
+        viewport_width = max(int(view_rect.width()), 1)
+        viewport_height = max(int(view_rect.height()), 1)
         width = max(x1 - x0, 1)
         height = max(y1 - y0, 1)
-        margin_x = width * self._dynamic_render_margin_ratio
-        margin_y = height * self._dynamic_render_margin_ratio
+        scale_x = width / viewport_width
+        scale_y = height / viewport_height
+        margin_px_x = max(0, int(np.ceil(viewport_width * self._dynamic_render_margin_ratio)))
+        margin_px_y = max(0, int(np.ceil(viewport_height * self._dynamic_render_margin_ratio)))
+        margin_x = margin_px_x * scale_x
+        margin_y = margin_px_y * scale_y
+        screen_width = viewport_width + margin_px_x * 2
+        screen_height = viewport_height + margin_px_y * 2
         return RenderRequest(
             x=x0 - margin_x,
             y=y0 - margin_y,
-            width=width + margin_x * 2.0,
-            height=height + margin_y * 2.0,
-            screen_width=max(view_rect.width(), 1),
-            screen_height=max(view_rect.height(), 1),
+            width=screen_width * scale_x,
+            height=screen_height * scale_y,
+            screen_width=screen_width,
+            screen_height=screen_height,
         )
 
     def current_view_state(self) -> ViewportState:
@@ -484,7 +538,8 @@ class LayeredRasterCanvas(QWidget):
             self.is_panning = True
             self._is_refresh_panning = True
             self._refresh_timer.stop()
-            self.pan_start_pos = event.position().toPoint()
+            self.pan_start_pos = QPointF(event.position())
+            self._pan_start_view_range = self.view_box.viewRange()
             self.graphics.viewport().setCursor(Qt.ClosedHandCursor)
             if not self.is_syncing:
                 self.cursor_changed.emit(Qt.ClosedHandCursor)
@@ -493,14 +548,20 @@ class LayeredRasterCanvas(QWidget):
 
     def _handle_mouse_move(self, event) -> bool:
         if self.is_panning and self.pan_start_pos is not None:
-            current_pos = event.position().toPoint()
-            old_scene = self.graphics.mapToScene(self.pan_start_pos)
-            new_scene = self.graphics.mapToScene(current_pos)
-            old_view = self.view_box.mapSceneToView(old_scene)
-            new_view = self.view_box.mapSceneToView(new_scene)
-            delta = new_view - old_view
-            self.pan_start_pos = current_pos
-            self.view_box.translateBy(x=-delta.x(), y=-delta.y())
+            current_pos = QPointF(event.position())
+            start_range = self._pan_start_view_range or self.view_box.viewRange()
+            (x0, x1), (y0, y1) = start_range
+            view_rect = self.graphics.viewport().rect()
+            scale_x = (x1 - x0) / max(view_rect.width(), 1)
+            scale_y = (y1 - y0) / max(view_rect.height(), 1)
+            pixel_dx, pixel_dy = self._stabilized_pan_delta(current_pos.x() - self.pan_start_pos.x(), current_pos.y() - self.pan_start_pos.y())
+            dx = pixel_dx * scale_x
+            dy = pixel_dy * scale_y
+            self.view_box.setRange(
+                xRange=(x0 - dx, x1 - dx),
+                yRange=(y0 - dy, y1 - dy),
+                padding=0,
+            )
             if not self.is_syncing:
                 self.scroll_changed.emit(0, 0)
             return True
@@ -520,13 +581,30 @@ class LayeredRasterCanvas(QWidget):
             was_refresh_panning = self._is_refresh_panning
             self._is_refresh_panning = False
             self.pan_start_pos = None
+            self._pan_start_view_range = None
             self.graphics.viewport().setCursor(Qt.ArrowCursor)
             if not self.is_syncing:
                 self.cursor_changed.emit(Qt.ArrowCursor)
             if self.source is not None and was_refresh_panning:
-                self._refresh_timer.start()
+                self._refresh_timer.stop()
+                self.refresh_view()
             return True
         return False
+
+    def _stabilized_pan_delta(self, dx: float, dy: float) -> tuple[float, float]:
+        abs_dx = abs(dx)
+        abs_dy = abs(dy)
+        if (
+            abs_dx >= self._pan_axis_lock_ratio * max(abs_dy, 1e-9)
+            and abs_dy <= self._pan_axis_lock_tolerance_px
+        ):
+            return float(round(dx)), 0.0
+        if (
+            abs_dy >= self._pan_axis_lock_ratio * max(abs_dx, 1e-9)
+            and abs_dx <= self._pan_axis_lock_tolerance_px
+        ):
+            return 0.0, float(round(dy))
+        return float(round(dx)), float(round(dy))
 
     def _update_display(self):
         if self.image_array is None:
@@ -553,7 +631,27 @@ class LayeredRasterCanvas(QWidget):
                 return np.zeros(image_array.shape, dtype=np.uint8)
             normalized = np.clip((image_array.astype(np.float32) - vmin) / (vmax - vmin), 0.0, 1.0)
             return np.clip(normalized * 255.0, 0, 255).astype(np.uint8)
-        return render_raster_rgb(image_array, self._render_config_from_state(), nodata_value=self.nodata_value)
+        return render_raster_rgb(
+            image_array,
+            self._render_config_from_state(),
+            nodata_value=self.nodata_value,
+            geotransform=self.geotransform,
+            projection=self.projection,
+            downsample_factor=self.downsample_factor,
+        )
+
+    def _window_geotransform(self, x0: float, y0: float):
+        gt = self.geotransform
+        if gt is None:
+            return None
+        return (
+            gt[0] + x0 * gt[1] + y0 * gt[2],
+            gt[1],
+            gt[2],
+            gt[3] + x0 * gt[4] + y0 * gt[5],
+            gt[4],
+            gt[5],
+        )
 
     def _render_config_from_state(self):
         config = replace(self.render_config) if self.render_config is not None else default_raster_render_config()
@@ -569,7 +667,10 @@ class LayeredRasterCanvas(QWidget):
             config.auto_range = settings.get("auto_range", config.auto_range)
             value_range = settings.get("value_range", config.value_range)
             config.value_range = tuple(value_range)
-            config.global_value_range = tuple(value_range) if config.auto_range else None
+            if config.auto_range and config.stretch_mode != "直方图均衡化":
+                config.global_value_range = tuple(value_range)
+            else:
+                config.global_value_range = None
             config.colormap_reversed = settings.get("colormap_reversed", self.colormap_reversed)
             config.smooth_display = settings.get("smooth_display", config.smooth_display)
         else:

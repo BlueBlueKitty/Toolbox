@@ -81,6 +81,12 @@ class InteractiveImageViewer(LayeredRasterCanvas):
         elif mode == self.MODE_POLYLINE:
             self.clear_rect()
 
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape and self.cancel_active_drawing():
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def clear_rect(self):
         """清除矩形。"""
         self._remove_view_item(self.rect_item)
@@ -135,6 +141,8 @@ class InteractiveImageViewer(LayeredRasterCanvas):
 
         if self.draw_mode == self.MODE_RECT and self.rect_start is not None and inside_image:
             self._update_rect(image_pos)
+            x, y = int(image_pos.x()), int(image_pos.y())
+            self.mouse_moved.emit(x, y, self.get_pixel_value(x, y))
             return True
 
         if (
@@ -143,7 +151,9 @@ class InteractiveImageViewer(LayeredRasterCanvas):
             and not self.polyline_completed
             and inside_image
         ):
-            self._update_polyline_preview(int(image_pos.x()), int(image_pos.y()))
+            x, y = int(image_pos.x()), int(image_pos.y())
+            self._update_polyline_preview(x, y)
+            self.mouse_moved.emit(x, y, self.get_pixel_value(x, y))
             return True
 
         if self.draw_mode == self.MODE_NONE and self.polyline_completed and self.polyline_points:
@@ -386,3 +396,13 @@ class InteractiveImageViewer(LayeredRasterCanvas):
             self._update_polyline()
         if self.hover_marker and self.hover_marker.isVisible():
             self._hide_hover_marker()
+
+    def cancel_active_drawing(self) -> bool:
+        """取消尚未完成的矩形或折线绘制。"""
+        if self.rect_start is not None or self.current_rect is not None:
+            self.clear_rect()
+            return True
+        if self.polyline_points and not self.polyline_completed:
+            self.clear_polyline()
+            return True
+        return False

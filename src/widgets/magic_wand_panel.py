@@ -27,11 +27,12 @@ from src.segmentation.models import MagicWandParams
 class MagicWandPanel(QGroupBox):
     params_changed = Signal(object)
     merge_preview_changed = Signal(bool)
+    brush_size_changed = Signal(int)
     confirm_requested = Signal()
     cancel_requested = Signal()
 
     def __init__(self, parent=None):
-        super().__init__("魔法棒", parent)
+        super().__init__("参数", parent)
         layout = QFormLayout(self)
         layout.setLabelAlignment(Qt.AlignLeft)
         layout.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
@@ -40,11 +41,13 @@ class MagicWandPanel(QGroupBox):
         top_row = QHBoxLayout()
         self.single_preview_button = QToolButton()
         self.single_preview_button.setText("单次选区")
+        self.single_preview_button.setFixedWidth(110)
         self.single_preview_button.setCheckable(True)
         self.single_preview_button.setChecked(True)
         self.single_preview_button.setToolTip("每次点击都会生成一个新的选区，不与上一次结果合并。")
         self.merge_preview_button = QToolButton()
         self.merge_preview_button.setText("合并选区")
+        self.merge_preview_button.setFixedWidth(110)
         self.merge_preview_button.setCheckable(True)
         self.merge_preview_button.setToolTip("新的选区会叠加到当前未确认结果上，适合多次补选。")
         top_row.addStretch(1)
@@ -72,18 +75,19 @@ class MagicWandPanel(QGroupBox):
         self.connectivity_combo.setToolTip("控制区域生长的连通方式。8 连通更容易连上对角相邻像素。")
         layout.addRow(self._form_label("连通方式", "控制区域生长的连通方式。8 连通更容易连上对角相邻像素。"), self.connectivity_combo)
 
-        self.tolerance_slider, self.tolerance_value = self._make_slider(0, 50, 15)
+        self.tolerance_slider, self.tolerance_value = self._make_slider(0, 100, 15)
         self.tolerance_slider.setToolTip("允许与种子点颜色的最大差值。越大，选中的区域越多。")
-        layout.addRow(self._form_label("阈值", "允许与种子点颜色的最大差值。越大，选中的区域越多。"), self._slider_row(self.tolerance_slider, self.tolerance_value))
+        layout.addRow(self._form_label("阈值容差", "允许与种子点颜色的最大差值。越大，选中的区域越多。"), self._slider_row(self.tolerance_slider, self.tolerance_value))
 
         self.min_area_edit = QLineEdit("16")
+        self.min_area_edit.setFixedWidth(80)
         self.min_area_edit.setToolTip("小于该面积的识别结果会被忽略，用于过滤零碎噪声。")
         layout.addRow(self._form_label("最小面积", "小于该面积的识别结果会被忽略，用于过滤零碎噪声。"), self.min_area_edit)
 
-        self.fill_small_holes_radio = QRadioButton("填补小孔洞")
+        self.fill_small_holes_radio = QRadioButton("小孔洞")
         self.fill_small_holes_radio.setChecked(True)
         self.fill_small_holes_radio.setToolTip("只填补面积较小的内部孔洞，适合保留大孔洞结构。")
-        self.fill_all_holes_radio = QRadioButton("填补所有孔洞")
+        self.fill_all_holes_radio = QRadioButton("所有孔洞")
         self.fill_all_holes_radio.setToolTip("使用更快的整区孔洞填补算法，直接填满所有被包围的孔洞。")
         self.fill_holes_group = QButtonGroup(self)
         self.fill_holes_group.setExclusive(True)
@@ -96,7 +100,14 @@ class MagicWandPanel(QGroupBox):
         fill_holes_layout.addWidget(self.fill_small_holes_radio)
         fill_holes_layout.addWidget(self.fill_all_holes_radio)
         fill_holes_layout.addStretch(1)
-        layout.addRow(self._form_label("孔洞处理", "控制识别结果中内部孔洞的填补方式。"), fill_holes_row)
+        layout.addRow(self._form_label("填补孔洞", "控制识别结果中内部孔洞的填补方式。"), fill_holes_row)
+
+        self.brush_size_slider, self.brush_size_value = self._make_slider(1, 100, 12)
+        self.brush_size_slider.setToolTip("笔刷和橡皮擦的直径。")
+        layout.addRow(
+            self._form_label("笔刷/橡皮擦粗细", "控制笔刷和橡皮擦的作用范围。"),
+            self._slider_row(self.brush_size_slider, self.brush_size_value),
+        )
 
         self.confirm_button = QPushButton("确认预览")
         self.cancel_button = QPushButton("取消预览")
@@ -113,6 +124,7 @@ class MagicWandPanel(QGroupBox):
 
         self.single_preview_button.clicked.connect(lambda checked: self._set_merge_preview(not checked))
         self.merge_preview_button.clicked.connect(lambda checked: self._set_merge_preview(checked))
+        self.brush_size_slider.valueChanged.connect(self.brush_size_changed.emit)
         for widget in [
             self.mode_combo,
             self.connectivity_combo,
@@ -125,6 +137,9 @@ class MagicWandPanel(QGroupBox):
             signal.connect(self._emit_params)
         self.confirm_button.clicked.connect(self.confirm_requested)
         self.cancel_button.clicked.connect(self.cancel_requested)
+
+    def brush_size(self) -> int:
+        return int(self.brush_size_slider.value())
 
     def params(self) -> MagicWandParams:
         try:

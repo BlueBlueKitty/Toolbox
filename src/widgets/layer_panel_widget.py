@@ -21,9 +21,11 @@ class LayerPanelWidget(QGroupBox):
         self.layer_list.setDragDropMode(QListWidget.InternalMove)
         self.layer_list.setDefaultDropAction(Qt.MoveAction)
         self.layer_list.itemChanged.connect(self._on_item_changed)
+        self.layer_list.itemClicked.connect(self._on_item_clicked)
         self.layer_list.model().rowsMoved.connect(self._on_rows_moved)
         layout.addWidget(self.layer_list)
         self._updating = False
+        self._last_changed_item = None
 
     def set_layers(self, layers: list[LayerSpec]) -> None:
         self._updating = True
@@ -60,6 +62,18 @@ class LayerPanelWidget(QGroupBox):
     def _on_item_changed(self, item: QListWidgetItem) -> None:
         if self._updating:
             return
+        self._last_changed_item = item
+        self.visibility_changed.emit(item.data(Qt.UserRole), item.checkState() == Qt.Checked)
+
+    def _on_item_clicked(self, item: QListWidgetItem) -> None:
+        if self._updating:
+            return
+        if self._last_changed_item is item:
+            self._last_changed_item = None
+            return
+        self._updating = True
+        item.setCheckState(Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked)
+        self._updating = False
         self.visibility_changed.emit(item.data(Qt.UserRole), item.checkState() == Qt.Checked)
 
     def _on_rows_moved(self, *_args) -> None:

@@ -6,6 +6,7 @@ Copyright (c) 2025 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 
 import os
 import webbrowser
+from pathlib import Path
 from PySide6.QtWidgets import (QMainWindow, QApplication, QMessageBox, QDialog,
                                QWidget, QVBoxLayout, QGridLayout, QPushButton, QLabel,
                                QGroupBox, QScrollArea, QMenuBar, QMenu, QProgressDialog)
@@ -23,6 +24,12 @@ from src.dialogs import (TiffBoundarySettingsDialog, PixelTimeSeriesViewerDialog
 from src.utils import tiff_boundary_to_vector
 from src.utils import AppImageInstaller
 from src.utils import UpdateChecker, UpdateError, NetworkError
+from src.utils.display_pyramid import (
+    cleanup_pyramid_cache_async,
+    default_cache_dir,
+    get_cache_dir,
+    set_cache_dir,
+)
 from src.version import __version__, APP_DISPLAY_NAME
 from src.segmentation.project_manager import get_settings as get_segmentation_settings
 
@@ -60,6 +67,7 @@ class MainWindow(QMainWindow):
         self.pyramid_threshold_mb = self.settings.value("display/pyramid_threshold_mb", 128, type=int)
         self.geotiff_full_render_cache_limit_mb = self.pyramid_threshold_mb
         self._open_tool_windows = set()
+        cleanup_pyramid_cache_async(7)
         
         # 设置窗口属性
         self.setWindowTitle("遥感工具箱")
@@ -660,7 +668,17 @@ class MainWindow(QMainWindow):
     
     def _on_display_settings(self):
         """显示设置对话框"""
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QSpinBox, QDialogButtonBox, QHBoxLayout, QCheckBox
+        from PySide6.QtWidgets import (
+            QDialog,
+            QVBoxLayout,
+            QLabel,
+            QSpinBox,
+            QDialogButtonBox,
+            QHBoxLayout,
+            QCheckBox,
+            QLineEdit,
+            QFileDialog,
+        )
         
         dialog = QDialog(self)
         dialog.setWindowTitle("显示设置")
@@ -695,6 +713,36 @@ class MainWindow(QMainWindow):
         layout.addLayout(threshold_layout)
         
         layout.addSpacing(10)
+
+        cache_layout = QVBoxLayout()
+        cache_label = QLabel("显示缓存目录:")
+        cache_layout.addWidget(cache_label)
+
+        cache_path_layout = QHBoxLayout()
+        cache_dir_edit = QLineEdit(str(get_cache_dir()))
+        cache_dir_edit.setMinimumWidth(260)
+        cache_dir_edit.setToolTip(
+            "金字塔、HDF5/NetCDF 显示 GeoTIFF、晕渲山体阴影、GAMMA VRT 等显示缓存都会写入该目录。"
+        )
+        cache_path_layout.addWidget(cache_dir_edit, 1)
+
+        browse_button = QPushButton("浏览...")
+        reset_cache_button = QPushButton("恢复默认")
+
+        def browse_cache_dir():
+            start_dir = cache_dir_edit.text().strip() or str(default_cache_dir())
+            selected = QFileDialog.getExistingDirectory(dialog, "选择显示缓存目录", start_dir)
+            if selected:
+                cache_dir_edit.setText(selected)
+
+        browse_button.clicked.connect(browse_cache_dir)
+        reset_cache_button.clicked.connect(lambda: cache_dir_edit.setText(str(default_cache_dir())))
+        cache_path_layout.addWidget(browse_button)
+        cache_path_layout.addWidget(reset_cache_button)
+        cache_layout.addLayout(cache_path_layout)
+        layout.addLayout(cache_layout)
+
+        layout.addSpacing(10)
         
         # 平滑显示设置
         smooth_display = self.settings.value("display/smooth_display", False, type=bool)
@@ -726,19 +774,35 @@ class MainWindow(QMainWindow):
         layout.addWidget(button_box)
         
         if dialog.exec() == QDialog.Accepted:
+            cache_dir_text = cache_dir_edit.text().strip()
+            cache_dir_path = (
+                Path(os.path.expandvars(os.path.expanduser(cache_dir_text))).resolve()
+                if cache_dir_text
+                else default_cache_dir()
+            )
+            try:
+                cache_dir_path.mkdir(parents=True, exist_ok=True)
+                if not os.access(cache_dir_path, os.W_OK):
+                    raise OSError("目录不可写")
+            except OSError as exc:
+                QMessageBox.critical(self, "缓存目录不可用", f"无法使用缓存目录:\n{cache_dir_path}\n\n{exc}")
+                return
+
             self.pyramid_threshold_mb = threshold_spinbox.value()
             smooth_display = smooth_check.isChecked()
             self.geotiff_full_render_cache_limit_mb = self.pyramid_threshold_mb
             self.settings.setValue("display/pyramid_threshold_mb", self.pyramid_threshold_mb)
             self.settings.setValue("display/smooth_display", smooth_display)
+            cache_dir_path = set_cache_dir(cache_dir_path)
             self.segmentation_settings.setValue("segmentation/geotiff_full_render_cache_limit_mb", self.geotiff_full_render_cache_limit_mb)
             QMessageBox.information(
                 self, 
                 "设置已保存",
                 f"栅格显示阈值: {self.pyramid_threshold_mb} MB\n"
+                f"显示缓存目录: {cache_dir_path}\n"
                 f"平滑显示: {'已启用' if smooth_display else '已禁用'}\n"
                 "图像分割工具的整图渲染缓存阈值已同步使用该值。\n\n"
-                "新设置将在下次打开图像时生效。"
+                "新设置将在下次打开图像或生成缓存时生效。"
             )
 
 

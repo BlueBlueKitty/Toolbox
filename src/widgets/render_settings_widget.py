@@ -8,8 +8,8 @@ Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 import numpy as np
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLabel,
                                QComboBox, QDoubleSpinBox, QCheckBox, QPushButton,
-                               QGroupBox, QGridLayout, QSpinBox, QFrame)
-from PySide6.QtCore import Signal, Qt
+                               QGroupBox, QGridLayout, QSpinBox, QFrame, QApplication)
+from PySide6.QtCore import QEvent, Signal, Qt
 
 
 class DeferredApplyDoubleSpinBox(QDoubleSpinBox):
@@ -45,6 +45,11 @@ class DeferredApplyDoubleSpinBox(QDoubleSpinBox):
         if new_value != self._committed_value:
             self._committed_value = new_value
             self.committed.emit()
+
+    def commit_pending(self):
+        if self.lineEdit().isModified():
+            self._commit_if_changed()
+            self.lineEdit().setModified(False)
 
 
 class RenderSettingsWidget(QWidget):
@@ -99,6 +104,9 @@ class RenderSettingsWidget(QWidget):
         self._smooth_display = False  # 默认禁用平滑变换，显示栅格边界
         
         self._create_ui()
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
         
     def _create_ui(self):
         """创建用户界面"""
@@ -227,10 +235,10 @@ class RenderSettingsWidget(QWidget):
         stretch_param_layout.addWidget(self.std_dev_spin)
         
         # ============ 4. 数值范围（最大最小值）============
-        self.auto_range_check = QCheckBox("最大最小值")
-        self.auto_range_check.setChecked(self._auto_range)
+        self.auto_range_check = QCheckBox("手动范围")
+        self.auto_range_check.setChecked(not self._auto_range)
         self.auto_range_check.stateChanged.connect(self._on_auto_range_changed)
-        self.auto_range_check.setToolTip("使用图像最大最小值自动计算数值范围")
+        self.auto_range_check.setToolTip("勾选后使用手动输入的最大最小值；未勾选时按拉伸方式自动计算固定范围")
         
         self.min_spin = DeferredApplyDoubleSpinBox()
         self.min_spin.setRange(-1e10, 1e10)
@@ -325,8 +333,8 @@ class RenderSettingsWidget(QWidget):
         self.gamma_spin.valueChanged.connect(self._on_settings_changed)
         value_layout.addWidget(self.gamma_spin, 0, 1, 1, 2)
         
-        self.auto_range_check = QCheckBox("自动范围")
-        self.auto_range_check.setChecked(self._auto_range)
+        self.auto_range_check = QCheckBox("手动范围")
+        self.auto_range_check.setChecked(not self._auto_range)
         self.auto_range_check.stateChanged.connect(self._on_auto_range_changed)
         value_layout.addWidget(self.auto_range_check, 1, 0)
         
@@ -500,12 +508,12 @@ class RenderSettingsWidget(QWidget):
         self._emit_settings_changed()
         
     def _on_auto_range_changed(self, state):
-        """自动范围复选框变更"""
-        self._auto_range = (state == Qt.Checked.value if hasattr(Qt.Checked, 'value') else state == Qt.Checked)
+        """手动范围复选框变更。"""
+        checked = (state == Qt.Checked.value if hasattr(Qt.Checked, 'value') else state == Qt.Checked)
+        self._auto_range = not checked
         self.min_spin.setEnabled(not self._auto_range)
         self.max_spin.setEnabled(not self._auto_range)
-        if self._auto_range:
-            self._emit_settings_changed()
+        self._emit_settings_changed()
         
     def _on_display_mode_changed(self, mode):
         """显示模式变更"""
@@ -546,8 +554,8 @@ class RenderSettingsWidget(QWidget):
         return self.gamma_spin.value()
     
     def is_auto_range(self):
-        """是否自动范围"""
-        return self.auto_range_check.isChecked()
+        """是否按拉伸方式自动计算固定范围。"""
+        return not self.auto_range_check.isChecked()
     
     def get_value_range(self):
         """获取数值范围 (min, max)"""
@@ -591,6 +599,7 @@ class RenderSettingsWidget(QWidget):
     
     def get_all_settings(self):
         """获取所有设置"""
+        self.commit_pending_edits()
         value_range = self.get_value_range()
         return {
             'stretch_mode': self.get_stretch_mode(),
@@ -608,6 +617,34 @@ class RenderSettingsWidget(QWidget):
             'hillshade_params': self.get_hillshade_params(),
             'smooth_display': self.is_smooth_display(),
         }
+
+    def commit_pending_edits(self):
+        """提交正在编辑但尚未失焦的数值输入。"""
+        if hasattr(self, "min_spin"):
+            self.min_spin.commit_pending()
+        if hasattr(self, "max_spin"):
+            self.max_spin.commit_pending()
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonPress and hasattr(self, "min_spin"):
+            focus = QApplication.focusWidget()
+            focused_spin = None
+            for spin in (self.min_spin, self.max_spin):
+                if focus is spin or focus is spin.lineEdit():
+                    focused_spin = spin
+                    break
+            if focused_spin is not None and not self._is_descendant(obj, focused_spin):
+                focused_spin.commit_pending()
+                focused_spin.clearFocus()
+        return super().eventFilter(obj, event)
+
+    def _is_descendant(self, obj, parent):
+        widget = obj if isinstance(obj, QWidget) else None
+        while widget is not None:
+            if widget is parent:
+                return True
+            widget = widget.parentWidget()
+        return False
     
     # ==================== 属性设置方法 ====================
     
@@ -667,7 +704,7 @@ class RenderSettingsWidget(QWidget):
         self.percent_high_spin.setValue(98.0)
         self.std_dev_spin.setValue(2.0)
         self.gamma_spin.setValue(1.0)
-        self.auto_range_check.setChecked(True)
+        self.auto_range_check.setChecked(False)
         self.min_spin.setEnabled(False)
         self.max_spin.setEnabled(False)
         self.min_spin.setValue(0.0)
@@ -776,6 +813,7 @@ def apply_render_settings(image_array, settings, nodata_value=None, geotransform
     
     # 2D数组处理
     if display_mode == '晕渲地貌':
+        
         # 晕渲地貌模式：计算hillshade并叠加
         from ..utils.image_io import calculate_hillshade
         
@@ -785,37 +823,12 @@ def apply_render_settings(image_array, settings, nodata_value=None, geotransform
         altitude = hillshade_params.get('altitude', 45.0)
         z_factor = hillshade_params.get('z_factor', 1.0)
         
-        # 根据降采样因子调整geotransform（像素间距需要乘以降采样因子）
-        adjusted_geotransform = None
-        if geotransform is not None and downsample_factor > 1:
-            # geotransform = (x_origin, pixel_width, 0, y_origin, 0, pixel_height)
-            adjusted_geotransform = (
-                geotransform[0],
-                geotransform[1] * downsample_factor,
-                geotransform[2],
-                geotransform[3],
-                geotransform[4],
-                geotransform[5] * downsample_factor
-            )
-        elif geotransform is not None:
-            adjusted_geotransform = geotransform
-        
         # 计算hillshade
         hillshade = calculate_hillshade(arr, azimuth=azimuth, altitude=altitude, 
                                        z_factor=z_factor, nodata_value=nodata_value,
-                                       geotransform=adjusted_geotransform, projection=projection)
+                                       geotransform=geotransform, projection=projection)
         
-        # 对原始DEM应用拉伸
-        dem_stretched = _apply_stretch_to_channel(arr, valid_mask, settings, nodata_value)
-        
-        # 如果 dem_stretched 是 RGB (3通道)，而 hillshade 是 2D (单通道)
-        # 需要给 hillshade 增加一个维度以对齐广播
-        if dem_stretched.ndim == 3 and hillshade.ndim == 2:
-            hillshade = hillshade[:, :, np.newaxis]
-        
-        # 将hillshade和拉伸后的DEM相乘叠加（乘法混合）
-        result_final = dem_stretched * hillshade
-        result = np.clip(result_final, 0.0, 1.0).astype(np.float32)
+        result = apply_hillshade_blend(arr, valid_mask, settings, nodata_value, hillshade)
         
         # # 只显示hillshade
         # result = hillshade.astype(np.float32)
@@ -881,6 +894,15 @@ def _apply_stretch_to_channel(arr, valid_mask, settings, nodata_value):
     result[valid_mask] = normalized[valid_mask].astype(np.float32)
     
     return result
+
+
+def apply_hillshade_blend(arr, valid_mask, settings, nodata_value, hillshade):
+    """Apply the same DEM stretch * hillshade blend used by hillshade display mode."""
+    dem_stretched = _apply_stretch_to_channel(arr, valid_mask, settings, nodata_value)
+    if dem_stretched.ndim == 3 and hillshade.ndim == 2:
+        hillshade = hillshade[:, :, np.newaxis]
+    result_final = dem_stretched * hillshade
+    return np.clip(result_final, 0.0, 1.0).astype(np.float32)
 
 
 def _apply_histogram_equalization(arr, valid_mask, settings):

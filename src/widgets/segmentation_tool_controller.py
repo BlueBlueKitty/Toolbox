@@ -29,6 +29,8 @@ class SegmentationToolController(QObject):
     TOOL_RECTANGLE = "rectangle"
     TOOL_POLYGON = "polygon"
     TOOL_MAGIC_WAND = "magic_wand"
+    TOOL_BRUSH = "brush"
+    TOOL_ERASER = "eraser"
 
     def __init__(self, parent=None):
         super().__init__(parent)
