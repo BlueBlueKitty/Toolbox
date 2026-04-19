@@ -15,7 +15,7 @@ from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
     QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-    QPushButton, QProgressDialog, QRadioButton, QSplitter, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
+    QPushButton, QProgressDialog, QRadioButton, QSizePolicy, QSplitter, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from src.dialogs.local_raster_source_dialog import LocalRasterSourceConfigDialog
@@ -228,10 +228,10 @@ class RasterDataAcquisitionDialog(QDialog):
         right = QWidget()
         right.setMinimumWidth(520)
         right_layout = QVBoxLayout(right)
-        right_layout.addWidget(self._create_region_group())
-        right_layout.addWidget(self._create_source_group())
-        right_layout.addWidget(self._create_output_group())
-        right_layout.addWidget(self._create_log_group())
+        right_layout.addWidget(self._create_region_group(), 0)
+        right_layout.addWidget(self._create_source_group(), 0)
+        right_layout.addWidget(self._create_output_group(), 0)
+        right_layout.addWidget(self._create_log_group(), 1)
         button_row = QHBoxLayout()
         self.start_button = QPushButton("开始获取")
         self.start_button.clicked.connect(self.start_acquisition)
@@ -250,8 +250,11 @@ class RasterDataAcquisitionDialog(QDialog):
 
     def _create_region_group(self):
         group = QGroupBox("区域选择")
+        group.setMaximumHeight(250)
+        group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         layout = QVBoxLayout(group)
         self.region_tab = QTabWidget()
+        self.region_tab.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         if WEBENGINE_AVAILABLE and self.map_widget:
             map_tab = QWidget()
             map_layout = QVBoxLayout(map_tab)
@@ -300,9 +303,17 @@ class RasterDataAcquisitionDialog(QDialog):
         layout.addLayout(row)
         self.admin_bounds_label = QLabel("边界坐标: --")
         self.admin_area_label = QLabel("区域面积: -- km²")
+        self._limit_info_label(self.admin_bounds_label)
+        self._limit_info_label(self.admin_area_label)
         layout.addWidget(self.admin_bounds_label)
         layout.addWidget(self.admin_area_label)
         return widget
+
+    @staticmethod
+    def _limit_info_label(label, max_height=42):
+        label.setWordWrap(True)
+        label.setMaximumHeight(max_height)
+        label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
     def _create_file_tab(self, label_text, browse_handler, file_type):
         widget = QWidget()
@@ -314,16 +325,20 @@ class RasterDataAcquisitionDialog(QDialog):
             self.vector_file_edit = edit
             self.vector_info_label = QLabel("边界坐标: --")
             self.vector_area_label = QLabel("区域面积: -- km²")
+            self._limit_info_label(self.vector_info_label)
+            self._limit_info_label(self.vector_area_label)
         elif file_type == "tif":
             self.tif_file_edit = edit
             self.tif_info_label = QLabel("边界坐标(WGS84): --")
             self.tif_area_label = QLabel("区域面积: -- km²")
+            self._limit_info_label(self.tif_info_label)
+            self._limit_info_label(self.tif_area_label)
         else:
             self.gamma_par_file_edit = edit
             self.gamma_par_info_label = QLabel("边界坐标(WGS84): --")
             self.gamma_par_area_label = QLabel("区域面积: -- km²")
-            self.gamma_par_info_label.setWordWrap(True)
-            self.gamma_par_area_label.setWordWrap(True)
+            self._limit_info_label(self.gamma_par_info_label, 74)
+            self._limit_info_label(self.gamma_par_area_label)
         row.addWidget(QLabel(label_text)); row.addWidget(edit)
         btn = QPushButton("浏览"); btn.clicked.connect(browse_handler)
         row.addWidget(btn)
@@ -345,6 +360,8 @@ class RasterDataAcquisitionDialog(QDialog):
 
     def _create_source_group(self):
         group = QGroupBox("数据源选择")
+        group.setMinimumHeight(255)
+        group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         layout = QVBoxLayout(group)
         self.source_mode_group = QButtonGroup(self)
         row1 = QHBoxLayout()
@@ -359,8 +376,8 @@ class RasterDataAcquisitionDialog(QDialog):
         layout.addLayout(row1)
         self.local_summary_label = QTextEdit()
         self.local_summary_label.setReadOnly(True)
-        self.local_summary_label.setMinimumHeight(92)
-        self.local_summary_label.setMaximumHeight(150)
+        self.local_summary_label.setFixedHeight(74)
+        self.local_summary_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout.addWidget(self.local_summary_label)
 
         row2 = QHBoxLayout()
@@ -385,8 +402,8 @@ class RasterDataAcquisitionDialog(QDialog):
         layout.addLayout(row3)
         self.online_summary_label = QTextEdit()
         self.online_summary_label.setReadOnly(True)
-        self.online_summary_label.setMinimumHeight(68)
-        self.online_summary_label.setMaximumHeight(120)
+        self.online_summary_label.setFixedHeight(48)
+        self.online_summary_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout.addWidget(self.online_summary_label)
         return group
 
@@ -411,7 +428,7 @@ class RasterDataAcquisitionDialog(QDialog):
     def _create_log_group(self):
         group = QGroupBox("日志")
         layout = QVBoxLayout(group)
-        self.log_text = QTextEdit(); self.log_text.setReadOnly(True); self.log_text.setMinimumHeight(140)
+        self.log_text = QTextEdit(); self.log_text.setReadOnly(True); self.log_text.setMinimumHeight(70)
         layout.addWidget(self.log_text)
         return group
 
@@ -680,9 +697,9 @@ class RasterDataAcquisitionDialog(QDialog):
         expanded_north = min(90.0, north + 0.1)
         self.gamma_bounds = (expanded_south, expanded_north, expanded_west, expanded_east)
         summary_text = (
-            f"边界(WGS84，已向外扩大 0.1°): 西={expanded_west:.4f}, 东={expanded_east:.4f}, "
+            f"外扩0.1°范围: 西={expanded_west:.4f}, 东={expanded_east:.4f}\n"
             f"南={expanded_south:.4f}, 北={expanded_north:.4f}\n"
-            f"提示: 当前显示和后续获取使用的是扩大后的范围\n"
+            f"提示: 显示和获取均使用外扩范围"
             # f"四角: UL({corners['UL'][1]:.2f}, {corners['UL'][0]:.2f})  "
             # f"UR({corners['UR'][1]:.2f}, {corners['UR'][0]:.2f})  "
             # f"LR({corners['LR'][1]:.2f}, {corners['LR'][0]:.2f})  "
