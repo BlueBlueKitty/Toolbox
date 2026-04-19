@@ -1,7 +1,7 @@
 {
-  "version": "1.6.0",
-  "name": "v1.6.0版本, 像素时序查看器支持查看不同行列数大小的时序图像",
-  "changelog": "像素时序查看器通过地理坐标同步像素位置，支持查看不同行列数大小的时序图像。\n栅格数据获取工具支持根据GAMMA par文件确定矢量范围，以后就可以很方便地为地理编码准备DEM数据了！\n\n目前已有功能: \n1、TIFF 边界转矢量\n2、像素时序查看器\n3、图像局部查看器\n4、栅格数据获取工具",
+  "version": "1.7.0",
+  "name": "v1.7.0版本, 新增图像分割工具！",
+  "changelog": "新增图像分割工具，支持类似PS的魔法棒功能，方便快速分割图像",
   "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.6.0",
   "downloads": {
     "windows": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.6.0/Toolbox-1.6.0-x86_64-Setup.exe",
