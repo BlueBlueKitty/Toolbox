@@ -510,8 +510,7 @@ class LocalImageViewerDialog(QDialog):
                 self,
                 "打开图像文件",
                 last_path,
-                "图像文件 (*.tif *.tiff *.grd *.png *.jpg *.jpeg *.bmp *.h5 *.hdf5 *.nc);;所有文件 (*.*)",
-                options=QFileDialog.Option.DontUseNativeDialog
+                "图像文件 (*.tif *.tiff *.grd *.png *.jpg *.jpeg *.bmp *.h5 *.hdf5 *.nc);;所有文件 (*.*)"
             )
         
         if not file_path:
@@ -1701,8 +1700,7 @@ class LocalImageViewerDialog(QDialog):
                 self,
                 "打开h5文件",
                 last_path,
-                "HDF5/NetCDF Files (*.h5 *.hdf5 *.nc);;所有文件 (*.*)",
-                options=QFileDialog.Option.DontUseNativeDialog
+                "HDF5/NetCDF Files (*.h5 *.hdf5 *.nc);;所有文件 (*.*)"
             )
         
         if not file_path:
@@ -1966,8 +1964,7 @@ class LocalImageViewerDialog(QDialog):
                 self,
                 "打开GAMMA二进制文件",
                 last_path,
-                "所有文件 (*.*)",
-                options=QFileDialog.Option.DontUseNativeDialog
+                "所有文件 (*.*)"
             )
         
         if not file_path:

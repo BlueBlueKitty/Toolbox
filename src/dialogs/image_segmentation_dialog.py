@@ -1111,7 +1111,6 @@ class ImageSegmentationDialog(QDialog):
                 "打开图像",
                 self._last_image_dir,
                 "Images (*.jpg *.jpeg *.png *.tif *.tiff)",
-                options=QFileDialog.Option.DontUseNativeDialog,
             )
         if not file_path:
             return
@@ -1195,7 +1194,6 @@ class ImageSegmentationDialog(QDialog):
             "打开项目",
             self._last_project_dir,
             f"Segmentation Project (*{self.project_manager.PROJECT_SUFFIX} *{self.project_manager.LEGACY_PROJECT_SUFFIX});;JSON (*.json)",
-            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not file_path:
             return
@@ -1251,7 +1249,6 @@ class ImageSegmentationDialog(QDialog):
                     ) if self._last_project_dir else Path(self.project.image_asset.path).with_suffix(self.project_manager.PROJECT_SUFFIX)
                 ),
                 f"Segmentation Project (*{self.project_manager.PROJECT_SUFFIX})",
-                options=QFileDialog.Option.DontUseNativeDialog,
             )
             if not file_path:
                 return False

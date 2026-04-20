@@ -178,8 +178,7 @@ class TiffBoundarySettingsDialog(QDialog):
     
     def browse_input_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择TIFF文件", self.last_input_dir, "TIFF文件 (*.tif *.tiff);;所有文件 (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog
+            self, "选择TIFF文件", self.last_input_dir, "TIFF文件 (*.tif *.tiff);;所有文件 (*.*)"
         )
         if file_path:
             self.input_file.setText(file_path)
@@ -195,8 +194,7 @@ class TiffBoundarySettingsDialog(QDialog):
         filter_str = "Shapefile (*.shp);;KML (*.kml);;KMZ (*.kmz)"
         
         file_path, selected_filter = QFileDialog.getSaveFileName(
-            self, "保存矢量文件", self.last_input_dir, filter_str,
-            options=QFileDialog.Option.DontUseNativeDialog
+            self, "保存矢量文件", self.last_input_dir, filter_str
         )
         if file_path:
             # 根据选中的过滤器确定扩展名

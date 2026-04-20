@@ -1464,8 +1464,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         if not file_path:
             file_path, _ = QFileDialog.getOpenFileName(
-                self, "选择h5时序数据文件", last_folder, "HDF5/NetCDF Files (*.h5 *.hdf5 *.nc);;All Files (*)",
-                options=QFileDialog.Option.DontUseNativeDialog)
+                self, "选择h5时序数据文件", last_folder, "HDF5/NetCDF Files (*.h5 *.hdf5 *.nc);;All Files (*)")
         
         if not file_path:
             return
