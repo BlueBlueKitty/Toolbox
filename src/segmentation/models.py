@@ -108,6 +108,8 @@ class PreviewSelection:
     mask: Any
     contours: list[list[list[float]]] = field(default_factory=list)
     polygon_preview: list[AnnotationObject] = field(default_factory=list)
+    pixel_area: int = 0
+    filtered_by_min_area: bool = False
 
 
 @dataclass
@@ -155,6 +157,7 @@ class SegmentationProject:
     display_state: DisplayState = field(default_factory=DisplayState)
     active_tool: str = "browse"
     active_label_id: Optional[int] = None
+    magic_panel_settings: dict[str, Any] = field(default_factory=dict)
     layer_visibility: dict[str, bool] = field(
         default_factory=lambda: {
             "base_raster": True,
@@ -177,6 +180,7 @@ class SegmentationProject:
             "display_state": asdict(self.display_state),
             "active_tool": self.active_tool,
             "active_label_id": self.active_label_id,
+            "magic_panel_settings": dict(self.magic_panel_settings),
             "layer_visibility": dict(self.layer_visibility),
             "export_prefs": dict(self.export_prefs),
         }
@@ -205,6 +209,7 @@ class SegmentationProject:
             display_state=DisplayState.from_dict(payload.get("display_state", {})),
             active_tool=payload.get("active_tool", "browse"),
             active_label_id=payload.get("active_label_id"),
+            magic_panel_settings=payload.get("magic_panel_settings", {}),
             layer_visibility=_normalize_layer_visibility(payload.get("layer_visibility", {})),
             export_prefs=payload.get("export_prefs", {}),
         )

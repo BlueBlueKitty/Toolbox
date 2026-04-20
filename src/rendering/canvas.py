@@ -25,6 +25,7 @@ class LayeredRasterCanvas(QWidget):
     view_transformed = Signal(object)
     cursor_changed = Signal(object)
     scroll_changed = Signal(int, int)
+    files_dropped = Signal(list)
 
     BASE_LAYER_ID = "base_raster"
 
@@ -91,7 +92,10 @@ class LayeredRasterCanvas(QWidget):
         self.graphics.viewport().installEventFilter(self)
         self.graphics.viewport().setMouseTracking(True)
         self.graphics.viewport().setCursor(Qt.ArrowCursor)
+        self.setAcceptDrops(True)
+        self.graphics.viewport().setAcceptDrops(True)
         self.view_box.sigRangeChanged.connect(self._on_range_changed)
+        self._apply_background_from_palette()
 
     def set_raster_array(self, image_array, original_size=None, refresh: bool = True):
         self.source = None
@@ -371,6 +375,15 @@ class LayeredRasterCanvas(QWidget):
 
     def eventFilter(self, obj, event):
         if obj is self.graphics.viewport():
+            if event.type() == QEvent.DragEnter:
+                if self._accept_drag_event(event):
+                    return True
+            if event.type() == QEvent.DragMove:
+                if self._accept_drag_event(event):
+                    return True
+            if event.type() == QEvent.Drop:
+                if self._handle_drop_event(event):
+                    return True
             if event.type() == QEvent.MouseButtonPress:
                 return self._handle_mouse_press(event)
             if event.type() == QEvent.MouseMove:
@@ -381,6 +394,37 @@ class LayeredRasterCanvas(QWidget):
                 self.wheelEvent(event)
                 return True
         return super().eventFilter(obj, event)
+
+    def changeEvent(self, event):
+        if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
+            self._apply_background_from_palette()
+        super().changeEvent(event)
+
+    def _apply_background_from_palette(self) -> None:
+        window_color = self.palette().color(self.backgroundRole())
+        is_dark = window_color.lightness() < 128
+        self.graphics.setBackground(QColor("#000000" if is_dark else "#ffffff"))
+
+    def _accept_drag_event(self, event) -> bool:
+        mime = event.mimeData()
+        if mime is None or not mime.hasUrls():
+            return False
+        local_paths = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+        if not local_paths:
+            return False
+        event.acceptProposedAction()
+        return True
+
+    def _handle_drop_event(self, event) -> bool:
+        mime = event.mimeData()
+        if mime is None or not mime.hasUrls():
+            return False
+        local_paths = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+        if not local_paths:
+            return False
+        self.files_dropped.emit(local_paths)
+        event.acceptProposedAction()
+        return True
 
     def wheelEvent(self, event):
         scene_pos = self.graphics.mapToScene(event.position().toPoint())

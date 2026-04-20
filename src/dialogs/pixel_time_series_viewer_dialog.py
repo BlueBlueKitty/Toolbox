@@ -395,6 +395,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 图像查看器
         viewer = LayeredRasterCanvas()
         setattr(self, f'image_viewer_{viewer_id}', viewer)
+        viewer.files_dropped.connect(self._on_viewer_files_dropped)
         
         # 连接像素点击信号
         viewer.pixel_clicked.connect(lambda x, y: self.on_pixel_clicked(viewer_id, x, y))
@@ -486,6 +487,66 @@ class PixelTimeSeriesViewerDialog(QDialog):
         viewer.mouse_moved.connect(lambda x, y, val: self.on_viewer_mouse_moved(viewer_id, x, y, val))
         
         return panel
+
+    def on_theme_mode_changed(self, _mode: str) -> None:
+        for viewer_id in (1, 2):
+            viewer = getattr(self, f"image_viewer_{viewer_id}", None)
+            if viewer is not None:
+                viewer._apply_background_from_palette()
+
+    def _on_viewer_files_dropped(self, paths: list[str]) -> None:
+        mode, target = self._classify_drop_target(paths)
+        if mode == "files":
+            self.load_images(target)
+            return
+        if mode == "folder":
+            self.open_folder(target)
+            return
+        if mode == "h5":
+            self.open_h5_timeseries(target)
+            return
+        if mode == "gamma":
+            self.open_gamma_folder(target)
+            return
+        QMessageBox.warning(self, "拖拽打开失败", "未识别拖入数据类型，无法打开。")
+
+    def _classify_drop_target(self, paths: list[str]):
+        if not paths:
+            return None, None
+        local_paths = [str(Path(item)) for item in paths if os.path.exists(item)]
+        if not local_paths:
+            return None, None
+        raster_exts = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp", ".grd"}
+        h5_exts = {".h5", ".hdf5", ".nc"}
+        dirs = [item for item in local_paths if os.path.isdir(item)]
+        files = [item for item in local_paths if os.path.isfile(item)]
+        if dirs:
+            folder = dirs[0]
+            entries = [Path(folder) / name for name in os.listdir(folder)]
+            file_entries = [entry for entry in entries if entry.is_file()]
+            if any(entry.suffix.lower() in h5_exts for entry in file_entries):
+                h5_file = next((entry for entry in file_entries if entry.suffix.lower() in h5_exts), None)
+                return ("h5", str(h5_file)) if h5_file else (None, None)
+            if any(entry.suffix.lower() in raster_exts for entry in file_entries):
+                return "folder", folder
+            return "gamma", folder
+        if files:
+            if len(files) == 1:
+                first = files[0]
+                ext = Path(first).suffix.lower()
+                if ext in h5_exts:
+                    return "h5", first
+                if ext in raster_exts:
+                    return "files", [first]
+                return "gamma", str(Path(first).parent)
+            raster_files = [item for item in files if Path(item).suffix.lower() in raster_exts]
+            if raster_files:
+                return "files", sorted(raster_files)
+            h5_file = next((item for item in files if Path(item).suffix.lower() in h5_exts), None)
+            if h5_file:
+                return "h5", h5_file
+            return "gamma", str(Path(files[0]).parent)
+        return None, None
         
     def sync_other_viewer(self, source_viewer_id, transform):
         """同步其他查看器的视图变换（缩放）
@@ -1353,13 +1414,14 @@ class PixelTimeSeriesViewerDialog(QDialog):
         finally:
             self._hide_loading_indicator()
     
-    def open_folder(self):
+    def open_folder(self, folder: str | None = None):
         """打开图像文件夹"""
         # 读取上次打开的路径
         settings = get_settings()
         last_folder = settings.value("last_folder_path", "")
-        
-        folder = QFileDialog.getExistingDirectory(self, "选择图像文件夹", last_folder)
+
+        if not folder:
+            folder = QFileDialog.getExistingDirectory(self, "选择图像文件夹", last_folder)
         if not folder:
             return
         
@@ -1394,15 +1456,16 @@ class PixelTimeSeriesViewerDialog(QDialog):
         finally:
             self._hide_loading_indicator()
     
-    def open_h5_timeseries(self):
+    def open_h5_timeseries(self, file_path: str | None = None):
         """打开h5时序数据"""
         # 读取上次打开的路径
         settings = get_settings()
         last_folder = settings.value("last_h5_path", "")
         
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择h5时序数据文件", last_folder, "HDF5/NetCDF Files (*.h5 *.hdf5 *.nc);;All Files (*)",
-            options=QFileDialog.Option.DontUseNativeDialog)
+        if not file_path:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "选择h5时序数据文件", last_folder, "HDF5/NetCDF Files (*.h5 *.hdf5 *.nc);;All Files (*)",
+                options=QFileDialog.Option.DontUseNativeDialog)
         
         if not file_path:
             return
@@ -1674,13 +1737,14 @@ class PixelTimeSeriesViewerDialog(QDialog):
         finally:
             self._loading_new_series = False
     
-    def open_gamma_folder(self):
+    def open_gamma_folder(self, folder: str | None = None):
         """打开GAMMA二进制文件时序文件夹"""
         settings = get_settings()
         last_folder = settings.value("last_gamma_folder_path", "")
         last_format = settings.value("last_gamma_format", "float32")
         
-        folder = QFileDialog.getExistingDirectory(self, "选择GAMMA时序文件夹", last_folder)
+        if not folder:
+            folder = QFileDialog.getExistingDirectory(self, "选择GAMMA时序文件夹", last_folder)
         if not folder:
             return
         

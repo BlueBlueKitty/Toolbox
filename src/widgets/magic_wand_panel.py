@@ -4,10 +4,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont, QFontDatabase, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
+    QDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -16,9 +20,11 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSlider,
+    QSpinBox,
     QSizePolicy,
     QToolButton,
     QWidget,
+    QDialogButtonBox,
 )
 
 from src.segmentation.models import MagicWandParams
@@ -30,9 +36,15 @@ class MagicWandPanel(QGroupBox):
     brush_size_changed = Signal(int)
     confirm_requested = Signal()
     cancel_requested = Signal()
+    slider_config_changed = Signal(str, dict)
 
     def __init__(self, parent=None):
         super().__init__("参数", parent)
+        self._material_icon_family = self._load_material_icon_font()
+        self._slider_configs: dict[str, dict[str, int]] = {
+            "tolerance": {"min": 0, "max": 100, "default": 15},
+            "brush_size": {"min": 1, "max": 100, "default": 12},
+        }
         layout = QFormLayout(self)
         layout.setLabelAlignment(Qt.AlignLeft)
         layout.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
@@ -77,7 +89,12 @@ class MagicWandPanel(QGroupBox):
 
         self.tolerance_slider, self.tolerance_value = self._make_slider(0, 100, 15)
         self.tolerance_slider.setToolTip("允许与种子点颜色的最大差值。越大，选中的区域越多。")
-        layout.addRow(self._form_label("阈值容差", "允许与种子点颜色的最大差值。越大，选中的区域越多。"), self._slider_row(self.tolerance_slider, self.tolerance_value))
+        tolerance_label, self.tolerance_settings_btn = self._form_label_with_settings(
+            "阈值容差",
+            "允许与种子点颜色的最大差值。越大，选中的区域越多。",
+            "tolerance",
+        )
+        layout.addRow(tolerance_label, self._slider_row(self.tolerance_slider, self.tolerance_value))
 
         self.min_area_edit = QLineEdit("16")
         self.min_area_edit.setFixedWidth(80)
@@ -104,8 +121,13 @@ class MagicWandPanel(QGroupBox):
 
         self.brush_size_slider, self.brush_size_value = self._make_slider(1, 100, 12)
         self.brush_size_slider.setToolTip("笔刷和橡皮擦的直径。")
+        brush_label, self.brush_settings_btn = self._form_label_with_settings(
+            "笔刷/橡皮擦粗细",
+            "控制笔刷和橡皮擦的作用范围。",
+            "brush_size",
+        )
         layout.addRow(
-            self._form_label("笔刷/橡皮擦粗细", "控制笔刷和橡皮擦的作用范围。"),
+            brush_label,
             self._slider_row(self.brush_size_slider, self.brush_size_value),
         )
 
@@ -137,6 +159,7 @@ class MagicWandPanel(QGroupBox):
             signal.connect(self._emit_params)
         self.confirm_button.clicked.connect(self.confirm_requested)
         self.cancel_button.clicked.connect(self.cancel_requested)
+        self.refresh_icons()
 
     def brush_size(self) -> int:
         return int(self.brush_size_slider.value())
@@ -180,10 +203,89 @@ class MagicWandPanel(QGroupBox):
         slider.valueChanged.connect(lambda current, target=label: target.setText(str(current)))
         return slider, label
 
-    def _form_label(self, text: str, tooltip: str) -> QLabel:
-        label = QLabel(text)
-        label.setToolTip(tooltip)
-        return label
+    def get_slider_configs(self) -> dict[str, dict[str, int]]:
+        return {
+            key: {
+                "min": int(cfg.get("min", 0)),
+                "max": int(cfg.get("max", 100)),
+                "default": int(cfg.get("default", cfg.get("min", 0))),
+            }
+            for key, cfg in self._slider_configs.items()
+        }
+
+    def apply_slider_configs(self, configs: dict[str, dict[str, int]] | None, *, emit_change: bool = False) -> None:
+        merged = self.get_slider_configs()
+        if isinstance(configs, dict):
+            for key in ("tolerance", "brush_size"):
+                incoming = configs.get(key)
+                if not isinstance(incoming, dict):
+                    continue
+                try:
+                    minimum = int(incoming.get("min", merged[key]["min"]))
+                    maximum = int(incoming.get("max", merged[key]["max"]))
+                    default = int(incoming.get("default", merged[key]["default"]))
+                except (TypeError, ValueError):
+                    continue
+                if minimum > maximum:
+                    minimum, maximum = maximum, minimum
+                default = max(minimum, min(maximum, default))
+                merged[key] = {"min": minimum, "max": maximum, "default": default}
+        self._slider_configs = merged
+        self._apply_slider_config_to_widget("tolerance")
+        self._apply_slider_config_to_widget("brush_size")
+        self.tolerance_slider.setValue(self._slider_configs["tolerance"]["default"])
+        self.brush_size_slider.setValue(self._slider_configs["brush_size"]["default"])
+        if emit_change:
+            self.slider_config_changed.emit("all", self.get_slider_configs())
+
+    def _apply_slider_config_to_widget(self, key: str) -> None:
+        slider = self.tolerance_slider if key == "tolerance" else self.brush_size_slider
+        cfg = self._slider_configs[key]
+        current = int(slider.value())
+        slider.blockSignals(True)
+        slider.setRange(cfg["min"], cfg["max"])
+        slider.setValue(max(cfg["min"], min(cfg["max"], current)))
+        slider.blockSignals(False)
+        if key == "tolerance":
+            self.tolerance_value.setText(str(slider.value()))
+        else:
+            self.brush_size_value.setText(str(slider.value()))
+
+    def _open_slider_range_dialog(self, key: str) -> None:
+        cfg = self._slider_configs[key]
+        dialog = QDialog(self)
+        dialog.setWindowTitle("设置滑动范围")
+        form = QFormLayout(dialog)
+        min_spin = QSpinBox(dialog)
+        min_spin.setRange(-1000000, 1000000)
+        min_spin.setValue(cfg["min"])
+        max_spin = QSpinBox(dialog)
+        max_spin.setRange(-1000000, 1000000)
+        max_spin.setValue(cfg["max"])
+        default_spin = QSpinBox(dialog)
+        default_spin.setRange(-1000000, 1000000)
+        default_spin.setValue(cfg["default"])
+        form.addRow("最小值", min_spin)
+        form.addRow("最大值", max_spin)
+        form.addRow("默认值", default_spin)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        form.addRow(buttons)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        minimum = int(min_spin.value())
+        maximum = int(max_spin.value())
+        if minimum > maximum:
+            minimum, maximum = maximum, minimum
+        default = int(default_spin.value())
+        default = max(minimum, min(maximum, default))
+        self._slider_configs[key] = {"min": minimum, "max": maximum, "default": default}
+        self._apply_slider_config_to_widget(key)
+        slider = self.tolerance_slider if key == "tolerance" else self.brush_size_slider
+        slider.setValue(default)
+        self.slider_config_changed.emit(key, self.get_slider_configs())
+        self._emit_params()
 
     def _slider_row(self, slider, label: QLabel) -> QWidget:
         widget = QWidget()
@@ -195,3 +297,56 @@ class MagicWandPanel(QGroupBox):
         layout.addWidget(label)
         layout.addStretch(1)
         return widget
+
+    def _form_label_with_settings(self, text: str, tooltip: str, slider_key: str) -> tuple[QWidget, QToolButton]:
+        widget = QWidget()
+        row = QHBoxLayout(widget)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        label = QLabel(text)
+        label.setToolTip(tooltip)
+        row.addWidget(label)
+        setting_btn = QToolButton(widget)
+        setting_btn.setToolTip("设置最小值/最大值/默认值")
+        setting_btn.setAutoRaise(True)
+        setting_btn.clicked.connect(lambda: self._open_slider_range_dialog(slider_key))
+        row.addWidget(setting_btn)
+        row.addStretch(1)
+        return widget, setting_btn
+
+    def refresh_icons(self) -> None:
+        settings_icon = self._material_icon("settings")
+        if settings_icon.isNull():
+            return
+        self.tolerance_settings_btn.setIcon(settings_icon)
+        self.brush_settings_btn.setIcon(settings_icon)
+
+    def _form_label(self, text: str, tooltip: str) -> QLabel:
+        label = QLabel(text)
+        label.setToolTip(tooltip)
+        return label
+
+    def _load_material_icon_font(self) -> str | None:
+        font_path = Path(__file__).resolve().parents[2] / "resources" / "fonts" / "MaterialIcons-Regular.ttf"
+        if not font_path.exists():
+            return None
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        if font_id < 0:
+            return None
+        families = QFontDatabase.applicationFontFamilies(font_id)
+        return families[0] if families else None
+
+    def _material_icon(self, icon_name: str) -> QIcon:
+        if not self._material_icon_family:
+            return QIcon()
+        pixmap = QPixmap(18, 18)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        font = QFont(self._material_icon_family)
+        font.setPixelSize(18)
+        painter.setFont(font)
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, icon_name)
+        painter.end()
+        return QIcon(pixmap)

@@ -114,6 +114,10 @@ class LocalImageViewerDialog(QDialog):
         for button in self.findChildren(QPushButton):
             button.setAutoDefault(False)
             button.setDefault(False)
+
+    def on_theme_mode_changed(self, _mode: str) -> None:
+        if hasattr(self, "image_viewer") and self.image_viewer is not None:
+            self.image_viewer._apply_background_from_palette()
     
     def _update_render_settings_bands(self):
         """根据当前图像更新渲染设置的波段数和统计信息"""
@@ -404,6 +408,7 @@ class LocalImageViewerDialog(QDialog):
         
         # 图像查看器
         self.image_viewer = InteractiveImageViewer()
+        self.image_viewer.files_dropped.connect(self._on_viewer_files_dropped)
         self.image_viewer.mouse_moved.connect(self.on_mouse_moved)
         self.image_viewer.rect_drawn.connect(self.on_rect_drawn)
         self.image_viewer.polyline_drawn.connect(self.on_polyline_drawn)
@@ -447,19 +452,67 @@ class LocalImageViewerDialog(QDialog):
         
         main_layout.addWidget(splitter)
         
-    def open_image(self):
+    def _on_viewer_files_dropped(self, paths: list[str]) -> None:
+        mode, target = self._classify_drop_target(paths)
+        if mode == "image":
+            self.open_image(target)
+            return
+        if mode == "h5":
+            self.open_h5_file(target)
+            return
+        if mode == "gamma":
+            self.open_gamma_file(target)
+            return
+        QMessageBox.warning(self, "拖拽打开失败", "未识别拖入数据类型，无法打开。")
+
+    def _classify_drop_target(self, paths: list[str]) -> tuple[str | None, str | None]:
+        if not paths:
+            return None, None
+        local_paths = [str(Path(item)) for item in paths if os.path.exists(item)]
+        if not local_paths:
+            return None, None
+        raster_exts = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp", ".grd"}
+        h5_exts = {".h5", ".hdf5", ".nc"}
+        dirs = [item for item in local_paths if os.path.isdir(item)]
+        files = [item for item in local_paths if os.path.isfile(item)]
+        if dirs:
+            folder = dirs[0]
+            entries = [Path(folder) / name for name in os.listdir(folder)]
+            file_entries = [entry for entry in entries if entry.is_file()]
+            h5_file = next((entry for entry in file_entries if entry.suffix.lower() in h5_exts), None)
+            if h5_file is not None:
+                return "h5", str(h5_file)
+            raster_file = next((entry for entry in file_entries if entry.suffix.lower() in raster_exts), None)
+            if raster_file is not None:
+                return "image", str(raster_file)
+            gamma_file = next((entry for entry in file_entries if "par" not in entry.name.lower()), None)
+            if gamma_file is not None:
+                return "gamma", str(gamma_file)
+            return None, None
+        if files:
+            first = files[0]
+            ext = Path(first).suffix.lower()
+            if ext in h5_exts:
+                return "h5", first
+            if ext in raster_exts:
+                return "image", first
+            return "gamma", first
+        return None, None
+
+    def open_image(self, file_path: str | None = None):
         """打开图像文件"""
         # 读取上次打开的路径
         settings = get_settings()
         last_path = settings.value("last_file_path", "")
-        
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "打开图像文件",
-            last_path,
-            "图像文件 (*.tif *.tiff *.grd *.png *.jpg *.jpeg *.bmp *.h5 *.hdf5 *.nc);;所有文件 (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog
-        )
+
+        if not file_path:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "打开图像文件",
+                last_path,
+                "图像文件 (*.tif *.tiff *.grd *.png *.jpg *.jpeg *.bmp *.h5 *.hdf5 *.nc);;所有文件 (*.*)",
+                options=QFileDialog.Option.DontUseNativeDialog
+            )
         
         if not file_path:
             return
@@ -1637,19 +1690,20 @@ class LocalImageViewerDialog(QDialog):
         self._ensure_chart_hover()
         
         self.chart_info_label.setText(f"折线图: 共{len(points)}个点")    
-    def open_h5_file(self):
+    def open_h5_file(self, file_path: str | None = None):
         """打开h5文件（逐级选择）"""
         # 读取上次打开的路径
         settings = get_settings()
         last_path = settings.value("last_h5_path", "")
         
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "打开h5文件",
-            last_path,
-            "HDF5/NetCDF Files (*.h5 *.hdf5 *.nc);;所有文件 (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog
-        )
+        if not file_path:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "打开h5文件",
+                last_path,
+                "HDF5/NetCDF Files (*.h5 *.hdf5 *.nc);;所有文件 (*.*)",
+                options=QFileDialog.Option.DontUseNativeDialog
+            )
         
         if not file_path:
             return
@@ -1901,19 +1955,20 @@ class LocalImageViewerDialog(QDialog):
                 
                 self.image_info_label.setText(info)
 
-    def open_gamma_file(self):
+    def open_gamma_file(self, file_path: str | None = None):
         """打开GAMMA二进制文件"""
         settings = get_settings()
         last_path = settings.value("last_gamma_path", "")
         last_format = settings.value("last_gamma_format", "float32")
-        
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "打开GAMMA二进制文件",
-            last_path,
-            "所有文件 (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog
-        )
+
+        if not file_path:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "打开GAMMA二进制文件",
+                last_path,
+                "所有文件 (*.*)",
+                options=QFileDialog.Option.DontUseNativeDialog
+            )
         
         if not file_path:
             return

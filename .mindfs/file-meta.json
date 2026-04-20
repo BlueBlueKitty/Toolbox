@@ -1,0 +1,66 @@
+{
+  "src/dialogs/image_segmentation_dialog.py": [
+    {
+      "source_session": "1776658221-c4faf28ce567",
+      "created_at": "2026-04-20T04:16:15.1036706Z",
+      "updated_at": "2026-04-20T04:18:02.1037863Z",
+      "created_by": "agent"
+    }
+  ],
+  "src/dialogs/local_image_viewer_dialog.py": [
+    {
+      "source_session": "1776658221-c4faf28ce567",
+      "created_at": "2026-04-20T04:19:14.4694504Z",
+      "updated_at": "2026-04-20T04:20:00.1132877Z",
+      "created_by": "agent"
+    }
+  ],
+  "src/dialogs/pixel_time_series_viewer_dialog.py": [
+    {
+      "source_session": "1776658221-c4faf28ce567",
+      "created_at": "2026-04-20T04:18:27.8699516Z",
+      "updated_at": "2026-04-20T04:20:44.0042106Z",
+      "created_by": "agent"
+    }
+  ],
+  "src/main_window.py": [
+    {
+      "source_session": "1776658221-c4faf28ce567",
+      "created_at": "2026-04-20T04:14:40.3307382Z",
+      "updated_at": "2026-04-20T04:21:24.1366918Z",
+      "created_by": "agent"
+    }
+  ],
+  "src/rendering/canvas.py": [
+    {
+      "source_session": "1776658221-c4faf28ce567",
+      "created_at": "2026-04-20T04:14:01.6538479Z",
+      "updated_at": "2026-04-20T04:21:01.6372451Z",
+      "created_by": "agent"
+    }
+  ],
+  "src/segmentation/algorithms/magic_wand.py": [
+    {
+      "source_session": "1776658221-c4faf28ce567",
+      "created_at": "2026-04-20T04:15:06.5047059Z",
+      "updated_at": "2026-04-20T04:15:06.6351537Z",
+      "created_by": "agent"
+    }
+  ],
+  "src/segmentation/models.py": [
+    {
+      "source_session": "1776658221-c4faf28ce567",
+      "created_at": "2026-04-20T04:15:00.0901251Z",
+      "updated_at": "2026-04-20T04:15:00.1573041Z",
+      "created_by": "agent"
+    }
+  ],
+  "src/widgets/magic_wand_panel.py": [
+    {
+      "source_session": "1776658221-c4faf28ce567",
+      "created_at": "2026-04-20T04:15:55.2362525Z",
+      "updated_at": "2026-04-20T04:20:19.9793953Z",
+      "created_by": "agent"
+    }
+  ]
+}

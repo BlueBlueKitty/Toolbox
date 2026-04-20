@@ -11,7 +11,7 @@ from collections import OrderedDict
 from pathlib import Path
 import numpy as np
 
-from PySide6.QtCore import QObject, QPointF, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QPointF, Qt, QThread, QTimer, Signal, QEvent
 from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QFontDatabase, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QPixmap, QShortcut, QTransform
 from PySide6.QtWidgets import (
     QApplication,
@@ -42,7 +42,7 @@ from src.segmentation import (
     UpdateLabelAssignmentCommand,
     UpdateMaskPatchCommand,
 )
-from src.segmentation.models import DisplayState
+from src.segmentation.models import DisplayState, PreviewSelection
 from src.segmentation.algorithms import MagicWandSegmenter
 from src.segmentation.exporters import (
     export_coco,
@@ -127,6 +127,9 @@ class ImageSegmentationDialog(QDialog):
         self._mask_paint_bbox: tuple[int, int, int, int] | None = None
         self._mask_paint_before_patch: np.ndarray | None = None
         self._last_mask_paint_point: tuple[float, float] | None = None
+        self._merge_preview_entries: list[dict] = []
+        self._preview_undo_stack: list[dict] = []
+        self._preview_redo_stack: list[dict] = []
         self._autosave_thread: QThread | None = None
         self._autosave_worker: AutosaveWorker | None = None
         self._magic_preview_timer = QTimer(self)
@@ -242,6 +245,7 @@ class ImageSegmentationDialog(QDialog):
             SegmentationToolController.TOOL_BRUSH: self._make_tool_icon("brush"),
             SegmentationToolController.TOOL_ERASER: self._make_tool_icon("ink_eraser"),
         })
+        self.canvas.files_dropped.connect(self._on_canvas_files_dropped)
         self.canvas.set_tool_color(self._active_label_color())
         splitter.addWidget(self.canvas)
 
@@ -311,6 +315,7 @@ class ImageSegmentationDialog(QDialog):
         self.layer_panel.order_changed.connect(self._on_layer_order_changed)
         self.magic_panel.params_changed.connect(self._schedule_magic_preview)
         self.magic_panel.merge_preview_changed.connect(self._on_merge_preview_changed)
+        self.magic_panel.slider_config_changed.connect(self._on_magic_slider_config_changed)
         self.magic_panel.brush_size_changed.connect(self._on_brush_size_changed)
         self.canvas.tool_wheel_adjust_requested.connect(self._adjust_active_tool_slider)
         self.magic_panel.confirm_requested.connect(self._confirm_magic_preview)
@@ -329,6 +334,55 @@ class ImageSegmentationDialog(QDialog):
         QShortcut(QKeySequence(Qt.Key_Escape), self, activated=self._escape_action)
         for idx in range(1, 10):
             QShortcut(QKeySequence(str(idx)), self, activated=lambda value=idx: self._activate_label_shortcut(str(value)))
+
+    def changeEvent(self, event) -> None:
+        if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
+            self._refresh_toolbar_icons()
+            self.magic_panel.refresh_icons()
+        super().changeEvent(event)
+
+    def on_theme_mode_changed(self, _mode: str) -> None:
+        self._refresh_toolbar_icons()
+        self.magic_panel.refresh_icons()
+
+    def _refresh_toolbar_icons(self) -> None:
+        if not hasattr(self, "open_action"):
+            return
+        self.open_action.setIcon(self._make_tool_icon("image"))
+        self.open_project_action.setIcon(self._make_tool_icon("folder_open"))
+        self.save_project_action.setIcon(self._make_tool_icon("save"))
+        self.export_action.setIcon(self._make_tool_icon("ios_share"))
+        self.undo_action.setIcon(self._make_tool_icon("undo"))
+        self.redo_action.setIcon(self._make_tool_icon("redo"))
+        self.clear_annotations_action.setIcon(self._make_tool_icon("delete_sweep"))
+        self.actual_size_action.setIcon(self._make_tool_icon("zoom_in_map"))
+        self.browse_tool_action.setIcon(self._make_tool_icon("pan_tool"))
+        self.rectangle_tool_action.setIcon(self._make_tool_icon("crop_square"))
+        self.polygon_tool_action.setIcon(self._make_tool_icon("gesture"))
+        self.magic_tool_action.setIcon(self._make_tool_icon("auto_fix_high", -90))
+        self.brush_tool_action.setIcon(self._make_tool_icon("brush", 90))
+        self.eraser_tool_action.setIcon(self._make_tool_icon("ink_eraser", 0))
+        self.canvas.set_tool_icons({
+            SegmentationToolController.TOOL_MAGIC_WAND: self._make_tool_icon("auto_fix_high"),
+            SegmentationToolController.TOOL_BRUSH: self._make_tool_icon("brush"),
+            SegmentationToolController.TOOL_ERASER: self._make_tool_icon("ink_eraser"),
+        })
+
+    def _on_magic_slider_config_changed(self, _key: str, configs: dict) -> None:
+        self.project.magic_panel_settings = dict(configs or {})
+        self._set_dirty(True)
+
+    def _on_canvas_files_dropped(self, paths: list[str]) -> None:
+        if not paths:
+            return
+        file_path = next((item for item in paths if os.path.isfile(item)), None)
+        if file_path is None:
+            QMessageBox.warning(self, "拖拽打开失败", "请拖入图像文件。")
+            return
+        if not file_path.lower().endswith((".jpg", ".jpeg", ".png", ".tif", ".tiff")):
+            QMessageBox.warning(self, "拖拽打开失败", "图像分割工具仅支持 JPG/PNG/TIF 图像。")
+            return
+        self.open_image(file_path)
 
     def _activate_label_shortcut(self, shortcut: str) -> None:
         for label in self.project.labels:
@@ -1044,19 +1098,21 @@ class ImageSegmentationDialog(QDialog):
             return
         self.render_settings.set_image_stats(*value_range)
 
-    def open_image(self) -> None:
+    def open_image(self, file_path: str | None = None) -> None:
         if not self._finish_node_edit_session():
             return
         if not self._handle_pending_magic_session():
             return
         if not self._prompt_save_project_if_needed():
             return
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "打开图像",
-            self._last_image_dir,
-            "Images (*.jpg *.jpeg *.png *.tif *.tiff)",
-        )
+        if not file_path:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "打开图像",
+                self._last_image_dir,
+                "Images (*.jpg *.jpeg *.png *.tif *.tiff)",
+                options=QFileDialog.Option.DontUseNativeDialog,
+            )
         if not file_path:
             return
         self._last_image_dir = os.path.dirname(file_path)
@@ -1097,6 +1153,7 @@ class ImageSegmentationDialog(QDialog):
                 labels=labels,
                 annotations=annotations,
                 active_label_id=active_label_id,
+                magic_panel_settings=self.magic_panel.get_slider_configs(),
             )
         else:
             self.project.image_asset = meta
@@ -1117,6 +1174,10 @@ class ImageSegmentationDialog(QDialog):
         self._update_image_stats_to_render_settings()
         self._apply_render_settings_update()
         self._replace_labels(self.project.labels)
+        if not self.project.magic_panel_settings:
+            self.project.magic_panel_settings = self.magic_panel.get_slider_configs()
+        self.magic_panel.apply_slider_configs(self.project.magic_panel_settings)
+        self.magic_panel.refresh_icons()
         self._clear_magic_preview()
         self._refresh_canvas()
         if reset_project:
@@ -1134,6 +1195,7 @@ class ImageSegmentationDialog(QDialog):
             "打开项目",
             self._last_project_dir,
             f"Segmentation Project (*{self.project_manager.PROJECT_SUFFIX} *{self.project_manager.LEGACY_PROJECT_SUFFIX});;JSON (*.json)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not file_path:
             return
@@ -1189,6 +1251,7 @@ class ImageSegmentationDialog(QDialog):
                     ) if self._last_project_dir else Path(self.project.image_asset.path).with_suffix(self.project_manager.PROJECT_SUFFIX)
                 ),
                 f"Segmentation Project (*{self.project_manager.PROJECT_SUFFIX})",
+                options=QFileDialog.Option.DontUseNativeDialog,
             )
             if not file_path:
                 return False
@@ -1332,6 +1395,8 @@ class ImageSegmentationDialog(QDialog):
         return export_project
 
     def undo(self) -> None:
+        if self._undo_preview_state():
+            return
         if self.tool_controller.is_node_edit_active():
             self._undo_node_edit_command()
             return
@@ -1344,6 +1409,8 @@ class ImageSegmentationDialog(QDialog):
             self._set_dirty(True)
 
     def redo(self) -> None:
+        if self._redo_preview_state():
+            return
         if self.tool_controller.is_node_edit_active():
             self._redo_node_edit_command()
             return
@@ -1715,7 +1782,7 @@ class ImageSegmentationDialog(QDialog):
 
     def _build_magic_preview_result(self, x: int, y: int):
         if self.current_source is None or self.project.image_asset is None:
-            return None, None
+            return None, None, None
         params = self.magic_panel.params()
         full_rgb = self._ensure_full_analysis_rgb()
         if full_rgb is not None:
@@ -1729,9 +1796,17 @@ class ImageSegmentationDialog(QDialog):
             )
             preview = self.segmenter.run_prepared(prepared, (x, y), params)
             if preview.bbox[2] <= 0 or preview.bbox[3] <= 0:
-                return None, None
+                return None, None, {
+                    "filtered_by_min_area": bool(preview.filtered_by_min_area),
+                    "pixel_area": int(preview.pixel_area),
+                    "min_area": int(params.min_area),
+                }
             self._remember_magic_roi_radius(x, y, params, max(self.project.image_asset.width, self.project.image_asset.height))
-            return preview.mask.astype(np.uint8), preview.bbox
+            return preview.mask.astype(np.uint8), preview.bbox, {
+                "filtered_by_min_area": bool(preview.filtered_by_min_area),
+                "pixel_area": int(preview.pixel_area),
+                "min_area": int(params.min_area),
+            }
 
         radius = self._initial_magic_roi_radius(x, y, params)
         max_side = self._analysis_max_roi_side()
@@ -1749,7 +1824,11 @@ class ImageSegmentationDialog(QDialog):
             prepared = self._prepare_magic_analysis_image(roi_rgb, x0, y0, width, height, params)
             preview = self.segmenter.run_prepared(prepared, (x - x0, y - y0), params)
             if preview.bbox[2] <= 0 or preview.bbox[3] <= 0:
-                return None, None
+                return None, None, {
+                    "filtered_by_min_area": bool(preview.filtered_by_min_area),
+                    "pixel_area": int(preview.pixel_area),
+                    "min_area": int(params.min_area),
+                }
             if (
                 self._preview_result_touches_roi_boundary(preview, roi_rgb.shape[1], roi_rgb.shape[0])
                 and max(x1 - x0, y1 - y0) < max_side
@@ -1759,7 +1838,11 @@ class ImageSegmentationDialog(QDialog):
                 continue
             bx, by, bw, bh = preview.bbox
             self._remember_magic_roi_radius(x, y, params, max(x - x0, y - y0, x1 - x, y1 - y))
-            return preview.mask.astype(np.uint8), (x0 + bx, y0 + by, bw, bh)
+            return preview.mask.astype(np.uint8), (x0 + bx, y0 + by, bw, bh), {
+                "filtered_by_min_area": bool(preview.filtered_by_min_area),
+                "pixel_area": int(preview.pixel_area),
+                "min_area": int(params.min_area),
+            }
 
     def _ensure_preview_polygons(self, source_tool: str = "magic_wand_preview", force: bool = False):
         if (
@@ -1825,27 +1908,30 @@ class ImageSegmentationDialog(QDialog):
         if not (0 <= x < full_width and 0 <= y < full_height):
             return
         self._start_progress("正在识别魔法棒选区...", maximum=100)
+        self._ensure_preview_mask_layer_visible_for_magic()
         if self._last_magic_seed != (x, y):
             self._set_preview_vector_visibility(False, user_initiated=False)
         try:
             self._update_progress(20, "正在计算局部识别区域...", maximum=100)
-            mapped_mask, mapped_bbox = self._build_magic_preview_result(int(np.floor(x)), int(np.floor(y)))
+            mapped_mask, mapped_bbox, preview_info = self._build_magic_preview_result(int(np.floor(x)), int(np.floor(y)))
             if mapped_mask is None or mapped_bbox is None:
-                self._finish_progress("没有识别到有效选区，可能是阈值太小或者最小面积参数太大了")
+                if preview_info and preview_info.get("filtered_by_min_area"):
+                    area = int(preview_info.get("pixel_area", 0))
+                    min_area = int(preview_info.get("min_area", self.magic_panel.params().min_area))
+                    self._finish_progress(f"识别区域像素数 {area} 小于最小面积阈值 {min_area}，已忽略")
+                else:
+                    self._finish_progress("没有识别到有效选区，可能是阈值太小或者最小面积参数太大了")
                 return
             self._update_progress(70, "正在合并预览 Mask...", maximum=100)
-            if self.magic_panel.merge_preview_enabled() and self._preview_mask is not None and self._preview_bbox is not None:
-                self._preview_mask, self._preview_bbox = GeometryService.merge_mask_bbox(
-                    self._preview_mask,
-                    self._preview_bbox,
-                    mapped_mask,
-                    mapped_bbox,
-                    "add",
-                )
+            if self.magic_panel.merge_preview_enabled():
+                self._push_preview_history()
+                self._upsert_merge_preview_entry((x, y), mapped_mask, mapped_bbox)
+                self._rebuild_merge_preview_from_entries()
             else:
+                self._clear_preview_history()
+                self._merge_preview_entries = []
                 self._preview_mask = mapped_mask
                 self._preview_bbox = mapped_bbox
-            from src.segmentation.models import PreviewSelection
             self.preview_selection = PreviewSelection(
                 seed_point=self._last_magic_seed or (x, y),
                 params=self.magic_panel.params(),
@@ -1853,6 +1939,8 @@ class ImageSegmentationDialog(QDialog):
                 mask=self._preview_mask,
                 contours=[],
                 polygon_preview=[],
+                pixel_area=int(preview_info.get("pixel_area", 0) if preview_info else 0),
+                filtered_by_min_area=bool(preview_info.get("filtered_by_min_area", False) if preview_info else False),
             )
             self._last_magic_seed = (x, y)
             if self.preview_selection:
@@ -1875,10 +1963,123 @@ class ImageSegmentationDialog(QDialog):
 
     def _on_merge_preview_changed(self, enabled: bool) -> None:
         if not enabled:
+            self._merge_preview_entries = []
+            self._clear_preview_history()
             self._preview_mask = None
             self._preview_bbox = None
             self.preview_selection = None
             self._update_preview_display()
+
+    def _ensure_preview_mask_layer_visible_for_magic(self) -> None:
+        if self.project.layer_visibility.get("preview_mask", True):
+            return
+        self.project.layer_visibility["preview_mask"] = True
+        self.layer_panel.set_layer_checked("preview_mask", True)
+        if self.canvas.layer_manager.layer("preview_mask"):
+            self.canvas.set_layer_visible("preview_mask", True)
+
+    def _snapshot_preview_state(self) -> dict:
+        entries = []
+        for item in self._merge_preview_entries:
+            entries.append(
+                {
+                    "seed": tuple(item["seed"]),
+                    "mask": np.asarray(item["mask"], dtype=np.uint8).copy(),
+                    "bbox": tuple(item["bbox"]),
+                }
+            )
+        return {
+            "entries": entries,
+            "preview_mask": None if self._preview_mask is None else np.asarray(self._preview_mask, dtype=np.uint8).copy(),
+            "preview_bbox": None if self._preview_bbox is None else tuple(self._preview_bbox),
+            "last_seed": self._last_magic_seed,
+        }
+
+    def _restore_preview_state(self, state: dict) -> None:
+        self._merge_preview_entries = [
+            {
+                "seed": tuple(item["seed"]),
+                "mask": np.asarray(item["mask"], dtype=np.uint8).copy(),
+                "bbox": tuple(item["bbox"]),
+            }
+            for item in state.get("entries", [])
+        ]
+        self._preview_mask = state.get("preview_mask")
+        if self._preview_mask is not None:
+            self._preview_mask = np.asarray(self._preview_mask, dtype=np.uint8).copy()
+        self._preview_bbox = state.get("preview_bbox")
+        self._last_magic_seed = state.get("last_seed")
+        if self._preview_mask is not None and self._preview_bbox is not None:
+            self.preview_selection = PreviewSelection(
+                seed_point=self._last_magic_seed or (0, 0),
+                params=self.magic_panel.params(),
+                bbox=self._preview_bbox,
+                mask=self._preview_mask,
+                contours=[],
+                polygon_preview=[],
+            )
+        else:
+            self.preview_selection = None
+        self._update_preview_display()
+        self._refresh_canvas()
+
+    def _push_preview_history(self) -> None:
+        self._preview_undo_stack.append(self._snapshot_preview_state())
+        self._preview_redo_stack.clear()
+
+    def _clear_preview_history(self) -> None:
+        self._preview_undo_stack.clear()
+        self._preview_redo_stack.clear()
+
+    def _undo_preview_state(self) -> bool:
+        if not self._preview_undo_stack:
+            return False
+        self._preview_redo_stack.append(self._snapshot_preview_state())
+        state = self._preview_undo_stack.pop()
+        self._restore_preview_state(state)
+        self.status_label.setText("已撤销一次预览Mask")
+        return True
+
+    def _redo_preview_state(self) -> bool:
+        if not self._preview_redo_stack:
+            return False
+        self._preview_undo_stack.append(self._snapshot_preview_state())
+        state = self._preview_redo_stack.pop()
+        self._restore_preview_state(state)
+        self.status_label.setText("已重做一次预览Mask")
+        return True
+
+    def _upsert_merge_preview_entry(self, seed: tuple[int, int], mask: np.ndarray, bbox: tuple[int, int, int, int]) -> None:
+        for item in self._merge_preview_entries:
+            if item["seed"] == seed:
+                item["mask"] = np.asarray(mask, dtype=np.uint8).copy()
+                item["bbox"] = tuple(bbox)
+                return
+        self._merge_preview_entries.append(
+            {
+                "seed": tuple(seed),
+                "mask": np.asarray(mask, dtype=np.uint8).copy(),
+                "bbox": tuple(bbox),
+            }
+        )
+
+    def _rebuild_merge_preview_from_entries(self) -> None:
+        merged_mask = None
+        merged_bbox = None
+        for item in self._merge_preview_entries:
+            if merged_mask is None or merged_bbox is None:
+                merged_mask = np.asarray(item["mask"], dtype=np.uint8).copy()
+                merged_bbox = tuple(item["bbox"])
+            else:
+                merged_mask, merged_bbox = GeometryService.merge_mask_bbox(
+                    merged_mask,
+                    merged_bbox,
+                    np.asarray(item["mask"], dtype=np.uint8),
+                    tuple(item["bbox"]),
+                    "add",
+                )
+        self._preview_mask = merged_mask
+        self._preview_bbox = merged_bbox
 
     def _confirm_magic_preview(self) -> None:
         if not self.preview_selection or self.project.active_label_id is None or self._preview_mask is None or self._preview_bbox is None:
@@ -1902,6 +2103,8 @@ class ImageSegmentationDialog(QDialog):
             raise
 
     def _clear_magic_preview(self) -> None:
+        self._merge_preview_entries = []
+        self._clear_preview_history()
         self.preview_selection = None
         self._last_magic_seed = None
         self._preview_mask = None

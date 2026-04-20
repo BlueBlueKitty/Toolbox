@@ -9,9 +9,10 @@ import webbrowser
 from pathlib import Path
 from PySide6.QtWidgets import (QMainWindow, QApplication, QMessageBox, QDialog,
                                QWidget, QVBoxLayout, QGridLayout, QPushButton, QLabel,
-                               QGroupBox, QScrollArea, QMenuBar, QMenu, QProgressDialog)
-from PySide6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor
-from PySide6.QtCore import Qt, QThread, Signal, QSettings, QTimer, QEvent
+                               QGroupBox, QScrollArea, QMenuBar, QMenu, QProgressDialog,
+                               QHBoxLayout, QToolButton)
+from PySide6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor, QPalette, QFont, QFontDatabase
+from PySide6.QtCore import Qt, QThread, Signal, QSettings, QTimer, QEvent, QSize
 import sys
 import traceback
 
@@ -62,6 +63,12 @@ class MainWindow(QMainWindow):
         # 初始化设置
         self.settings = QSettings("Toolbox", "RemoteSensingToolbox")
         self.segmentation_settings = get_segmentation_settings()
+        self._open_tool_windows = set()
+        app = QApplication.instance()
+        self._native_style_name = app.style().objectName() if app is not None and app.style() is not None else ""
+        self.theme_mode = self.settings.value("display/theme_mode", "dark", type=str)
+        self._material_icon_family = self._load_material_icon_font()
+        self._apply_theme(self.theme_mode, persist=False)
         
         # 显示金字塔阈值：超过该体积的图像会为渲染预览建立 overview。
         self.pyramid_threshold_mb = self.settings.value("display/pyramid_threshold_mb", 1024, type=int)
@@ -69,7 +76,6 @@ class MainWindow(QMainWindow):
             self.pyramid_threshold_mb = 512
             self.settings.setValue("display/pyramid_threshold_mb", self.pyramid_threshold_mb)
         self.geotiff_full_render_cache_limit_mb = self.pyramid_threshold_mb
-        self._open_tool_windows = set()
         cleanup_pyramid_cache_async(7)
         
         # 设置窗口属性
@@ -139,14 +145,23 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(15)
         
         # 标题
+        title_row = QHBoxLayout()
+        title_row.addStretch(1)
         title_label = QLabel("遥感工具箱")
-        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;")
+        title_label.setStyleSheet("font-size: 24px; font-weight: bold;")
         title_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(title_label)
+        title_row.addWidget(title_label)
+        title_row.addStretch(1)
+        self.theme_toggle_button = QToolButton()
+        self.theme_toggle_button.setToolTip("切换深色/浅色模式")
+        self.theme_toggle_button.clicked.connect(self._toggle_theme_mode)
+        self.theme_toggle_button.setAutoRaise(True)
+        title_row.addWidget(self.theme_toggle_button, 0, Qt.AlignRight | Qt.AlignTop)
+        main_layout.addLayout(title_row)
         
         # 副标题
         subtitle_label = QLabel("Remote Sensing Toolbox")
-        subtitle_label.setStyleSheet("font-size: 14px; color: #7f8c8d;")
+        subtitle_label.setStyleSheet("font-size: 14px;")
         subtitle_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(subtitle_label)
         
@@ -334,9 +349,10 @@ class MainWindow(QMainWindow):
         
         # 底部信息
         info_label = QLabel("© 2026 Yibo Yuan. All Rights Reserved.")
-        info_label.setStyleSheet("font-size: 12px; color: #95a5a6;")
+        info_label.setStyleSheet("font-size: 12px;")
         info_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(info_label)
+        self._update_theme_toggle_icon()
     
     def on_button_local_image_viewer_click(self):
         """
@@ -405,9 +421,98 @@ class MainWindow(QMainWindow):
         dialog.setAttribute(Qt.WA_DeleteOnClose, True)
         self._open_tool_windows.add(dialog)
         dialog.destroyed.connect(lambda *_args, ref=dialog: self._open_tool_windows.discard(ref))
+        if hasattr(dialog, "on_theme_mode_changed"):
+            dialog.on_theme_mode_changed(self.theme_mode)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _load_material_icon_font(self) -> str | None:
+        font_path = Path(__file__).resolve().parents[1] / "resources" / "fonts" / "MaterialIcons-Regular.ttf"
+        if not font_path.exists():
+            return None
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        if font_id < 0:
+            return None
+        families = QFontDatabase.applicationFontFamilies(font_id)
+        return families[0] if families else None
+
+    def _material_icon(self, icon_name: str) -> QIcon:
+        if self._material_icon_family:
+            pixmap = QPixmap(22, 22)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            font = QFont(self._material_icon_family)
+            font.setPixelSize(20)
+            painter.setFont(font)
+            painter.setPen(self.palette().color(QPalette.WindowText))
+            painter.drawText(pixmap.rect(), Qt.AlignCenter, icon_name)
+            painter.end()
+            return QIcon(pixmap)
+        return QIcon()
+
+    def _update_theme_toggle_icon(self) -> None:
+        if not hasattr(self, "theme_toggle_button"):
+            return
+        icon_name = "light_mode" if self.theme_mode == "dark" else "dark_mode"
+        icon = self._material_icon(icon_name)
+        if not icon.isNull():
+            self.theme_toggle_button.setIcon(icon)
+        self.theme_toggle_button.setIconSize(QSize(20, 20))
+
+    def _toggle_theme_mode(self) -> None:
+        next_mode = "light" if self.theme_mode == "dark" else "dark"
+        self._apply_theme(next_mode, persist=True)
+
+    def _build_palette(self, mode: str) -> QPalette:
+        dark = mode == "dark"
+        palette = QPalette()
+        if dark:
+            palette.setColor(QPalette.Window, QColor(37, 37, 38))
+            palette.setColor(QPalette.WindowText, QColor(235, 235, 235))
+            palette.setColor(QPalette.Base, QColor(30, 30, 30))
+            palette.setColor(QPalette.AlternateBase, QColor(45, 45, 46))
+            palette.setColor(QPalette.Text, QColor(235, 235, 235))
+            palette.setColor(QPalette.Button, QColor(50, 50, 52))
+            palette.setColor(QPalette.ButtonText, QColor(235, 235, 235))
+            palette.setColor(QPalette.ToolTipBase, QColor(40, 40, 42))
+            palette.setColor(QPalette.ToolTipText, QColor(235, 235, 235))
+            palette.setColor(QPalette.Highlight, QColor(54, 132, 255))
+            palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
+            palette.setColor(QPalette.PlaceholderText, QColor(170, 170, 170))
+        else:
+            palette.setColor(QPalette.Window, QColor(245, 246, 248))
+            palette.setColor(QPalette.WindowText, QColor(30, 34, 40))
+            palette.setColor(QPalette.Base, QColor(255, 255, 255))
+            palette.setColor(QPalette.AlternateBase, QColor(245, 246, 248))
+            palette.setColor(QPalette.Text, QColor(30, 34, 40))
+            palette.setColor(QPalette.Button, QColor(255, 255, 255))
+            palette.setColor(QPalette.ButtonText, QColor(30, 34, 40))
+            palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 255))
+            palette.setColor(QPalette.ToolTipText, QColor(30, 34, 40))
+            palette.setColor(QPalette.Highlight, QColor(30, 120, 220))
+            palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
+            palette.setColor(QPalette.PlaceholderText, QColor(130, 130, 130))
+        return palette
+
+    def _apply_theme(self, mode: str, persist: bool = True) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        # 保持系统原生样式，避免全局控件观感（按钮/字体/间距）被 Fusion 改写。
+        if self._native_style_name:
+            app.setStyle(self._native_style_name)
+        app.setPalette(self._build_palette(mode))
+        self.theme_mode = mode
+        if persist:
+            self.settings.setValue("display/theme_mode", mode)
+        self._update_theme_toggle_icon()
+        for dialog in list(self._open_tool_windows):
+            if dialog is None:
+                continue
+            if hasattr(dialog, "on_theme_mode_changed"):
+                dialog.on_theme_mode_changed(mode)
 
     def _check_appimage_install(self):
         """检查 AppImage 运行状态并询问是否安装"""

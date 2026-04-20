@@ -55,7 +55,14 @@ class MagicWandSegmenter(BaseSegmenter):
         mask = self._grow_region(prepared_image, seed_point, params)
         area = int(mask.sum())
         if area < params.min_area:
-            return PreviewSelection(seed_point, params, (0, 0, 0, 0), np.zeros((1, 1), dtype=np.uint8))
+            return PreviewSelection(
+                seed_point,
+                params,
+                (0, 0, 0, 0),
+                np.zeros((1, 1), dtype=np.uint8),
+                pixel_area=area,
+                filtered_by_min_area=True,
+            )
 
         ys, xs = np.where(mask > 0)
         if len(xs) == 0 or len(ys) == 0:
@@ -77,6 +84,8 @@ class MagicWandSegmenter(BaseSegmenter):
             mask=alpha_mask,
             contours=[],
             polygon_preview=[],
+            pixel_area=area,
+            filtered_by_min_area=False,
         )
 
     def prepare_image(self, image: np.ndarray, params: MagicWandParams) -> np.ndarray:
