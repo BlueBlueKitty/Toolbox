@@ -154,24 +154,34 @@ build_with_pyinstaller() {
         info "使用目录模式"
     fi
     
-    # 运行 PyInstaller，并保留完整日志供 CI 排查
+    # 运行 PyInstaller，并保留完整日志供 CI 排查。
+    # 某些环境下会出现“Build complete!”后进程在退出阶段异常(如 double free)，
+    # 此时产物已生成，不能让 set -e 直接中断后续 AppImage 步骤。
     PYINSTALLER_LOG="${BUILD_DIR}/pyinstaller-linux.log"
+    set +e
     python -m PyInstaller --clean --noconfirm Toolbox.spec 2>&1 | tee "${PYINSTALLER_LOG}"
     PYINSTALLER_EXIT=${PIPESTATUS[0]}
+    set -e
     
     # 检查构建产物是否存在
-    if [ "${PYINSTALLER_EXIT}" -ne 0 ]; then
+    if [ -d "${DIST_DIR}/Toolbox_linux" ] && [ -f "${DIST_DIR}/Toolbox_linux/Toolbox_linux" ]; then
+        if [ "${PYINSTALLER_EXIT}" -ne 0 ]; then
+            if grep -q "Build complete!" "${PYINSTALLER_LOG}"; then
+                warn "PyInstaller 退出码: ${PYINSTALLER_EXIT}，但日志显示 Build complete 且产物存在，继续后续步骤"
+            else
+                warn "PyInstaller 退出码: ${PYINSTALLER_EXIT}"
+                warn "PyInstaller 日志末尾 80 行:"
+                tail -n 80 "${PYINSTALLER_LOG}"
+                error "PyInstaller 打包失败"
+            fi
+        fi
+        success "PyInstaller 打包完成"
+    else
         warn "PyInstaller 退出码: ${PYINSTALLER_EXIT}"
         if [ -f "${PYINSTALLER_LOG}" ]; then
             warn "PyInstaller 日志末尾 80 行:"
             tail -n 80 "${PYINSTALLER_LOG}"
         fi
-        error "PyInstaller 打包失败"
-    fi
-
-    if [ -d "${DIST_DIR}/Toolbox_linux" ] && [ -f "${DIST_DIR}/Toolbox_linux/Toolbox_linux" ]; then
-        success "PyInstaller 打包完成"
-    else
         error "PyInstaller 打包失败：未找到输出文件"
     fi
 }
