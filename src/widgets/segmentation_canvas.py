@@ -41,6 +41,9 @@ class SegmentationCanvas(LayeredRasterCanvas):
     LAYER_DRAFT = "draft"
     LAYER_SNAP = "snap"
 
+    _CURSOR_HOTSPOT_X = 7
+    _CURSOR_HOTSPOT_Y = 7
+
     def __init__(self, parent=None):
         super().__init__(parent)
         try:
@@ -61,9 +64,9 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self.draft_item.path_item.setParentItem(self.view_box.childGroup)
         self.snap_item.path_item.setParentItem(self.view_box.childGroup)
 
-        self.layer_manager.add_layer(LayerSpec(self.LAYER_PREVIEW_MASK, "预览Mask", "raster_overlay", opacity=1.0), self.preview_mask_item)
+        self.layer_manager.add_layer(LayerSpec(self.LAYER_PREVIEW_MASK, "预览Mask", "raster_overlay", opacity=1.0, locked=True), self.preview_mask_item)
         self.layer_manager.add_layer(LayerSpec(self.LAYER_ANNOTATIONS, "矢量", "vector", opacity=1.0))
-        self.layer_manager.add_layer(LayerSpec(self.LAYER_MASK, "Mask", "raster_overlay", opacity=0.45))
+        self.layer_manager.add_layer(LayerSpec(self.LAYER_MASK, "Mask", "raster_overlay", opacity=0.45, locked=True))
         self.layer_manager.add_layer(LayerSpec(self.LAYER_PREVIEW_VECTOR, "预览矢量", "vector", opacity=1.0))
         self.layer_manager.add_layer(LayerSpec(self.LAYER_DRAFT, "绘制草稿", "vector", opacity=1.0), self.draft_item.path_item)
         self.layer_manager.add_layer(LayerSpec(self.LAYER_SNAP, "吸附提示", "vector", opacity=1.0), self.snap_item.path_item)
@@ -75,7 +78,7 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self._last_pointer_payload: CanvasMousePayload | None = None
         self._tool_color = QColor("#ffd43b")
         self._tool_icon_sources: dict[str, QIcon] = {}
-        self._brush_radius = 6
+        self._brush_radius = 6.0
         self._brush_range_item = QGraphicsEllipseItem()
         range_pen = QPen(self._tool_color, 1.2)
         range_pen.setCosmetic(True)
@@ -105,8 +108,8 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self.graphics.viewport().setCursor(self._cursor_for_tool(tool_name))
         self._brush_range_item.setVisible(False)
 
-    def set_brush_radius(self, radius: int) -> None:
-        self._brush_radius = max(1, int(radius))
+    def set_brush_radius(self, radius: float) -> None:
+        self._brush_radius = max(0.2, float(radius))
         if self._last_pointer_payload is not None:
             self._update_brush_range_indicator(self._last_pointer_payload)
 
@@ -349,7 +352,7 @@ class SegmentationCanvas(LayeredRasterCanvas):
             painter.setPen(QPen(QColor("#111827"), 2))
             painter.drawPoint(28, 28)
         painter.end()
-        return QCursor(pixmap, 7, 7)
+        return QCursor(pixmap, self._CURSOR_HOTSPOT_X, self._CURSOR_HOTSPOT_Y)
 
     def _make_cursor_from_icon(self, icon: QIcon, angle: float, color: QColor | None = None) -> QCursor:
         pixmap = QPixmap(36, 36)
@@ -380,13 +383,13 @@ class SegmentationCanvas(LayeredRasterCanvas):
                 rotated = tinted
             painter.drawPixmap(13, 12, rotated)
         painter.end()
-        return QCursor(pixmap, 7, 7)
+        return QCursor(pixmap, self._CURSOR_HOTSPOT_X, self._CURSOR_HOTSPOT_Y)
 
     def _update_brush_range_indicator(self, payload: CanvasMousePayload) -> None:
         if self._interaction_mode not in {"brush", "eraser"}:
             self._brush_range_item.setVisible(False)
             return
-        radius = float(max(1, self._brush_radius))
+        radius = float(max(0.2, self._brush_radius))
         self._brush_range_item.setRect(payload.x - radius, payload.y - radius, radius * 2, radius * 2)
         self._brush_range_item.setVisible(True)
         self._brush_range_item.update()
@@ -400,7 +403,7 @@ class SegmentationCanvas(LayeredRasterCanvas):
         steps = int(event.angleDelta().y() / 120)
         if steps == 0:
             steps = 1 if event.angleDelta().y() > 0 else -1
-        self.tool_wheel_adjust_requested.emit(steps * 2)
+        self.tool_wheel_adjust_requested.emit(steps)
         return True
 
     def _on_view_range_changed(self, *_args) -> None:

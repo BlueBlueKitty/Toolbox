@@ -166,6 +166,12 @@ class LocalImageViewerDialog(QDialog):
             return
         num_bands = self.image_data.shape[2] if self.image_data.ndim == 3 else 1
         self.render_settings.reset_to_defaults(num_bands)
+        if num_bands >= 3:
+            self.render_settings.display_mode_combo.setCurrentText("RGB")
+            self.render_settings.set_stretch_mode(self.render_settings.STRETCH_NONE)
+            self.render_settings.auto_range_check.setChecked(False)
+        else:
+            self.render_settings.display_mode_combo.setCurrentText("灰度")
         self.colormap_combo.blockSignals(True)
         self.colormap_combo.setCurrentText("gray")
         self.colormap_combo.blockSignals(False)
@@ -841,6 +847,7 @@ class LocalImageViewerDialog(QDialog):
     def _apply_render_settings_update(self):
         try:
             settings = self.render_settings.get_all_settings()
+            self.colormap_combo.setEnabled(settings.get("display_mode") != "RGB")
             if settings.get("display_mode") != "晕渲地貌":
                 self._restore_base_render_source()
             if self.render_settings.is_auto_range():

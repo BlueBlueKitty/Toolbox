@@ -42,17 +42,20 @@ class PolygonOverlayItem:
         self.feature = feature
         self.path_item = QGraphicsPathItem()
         self.scatter = pg.ScatterPlotItem()
-        self._color = color
+        self._style = color
         self._editable = False
         self.update_style(selected, editable)
         self.update_geometry(feature, active_vertex)
 
     def update_style(self, selected: bool, editable: bool = False) -> None:
-        color = QColor(self._color)
+        style = self._style if isinstance(self._style, dict) else {"color": str(self._style)}
+        color = QColor(style.get("color", "#22c55e"))
         fill = QColor(color)
-        fill.setAlpha(25 if not selected else 95)
+        base_fill_alpha = int(style.get("fill_alpha", 25 if not selected else 95))
+        fill.setAlpha(base_fill_alpha if not selected else max(base_fill_alpha, 95))
         pen = QPen(color if not selected else QColor(color).lighter(145))
-        pen.setWidthF(0.9 if not selected else 1.6)
+        width = float(style.get("line_width", 0.9 if not selected else 1.6))
+        pen.setWidthF(width if not selected else max(width, 1.6))
         pen.setCosmetic(True)
         self.path_item.setPen(pen)
         self.path_item.setBrush(QBrush(fill))
@@ -75,7 +78,8 @@ class PolygonOverlayItem:
         for ring_type, hole_index, ring in rings:
             for index, point in enumerate(ring[:-1] if len(ring) > 1 else ring):
                 is_active = active_vertex == (ring_type, hole_index, index)
-                spot_color = QColor("#f97316") if is_active else QColor(self._color)
+                style = self._style if isinstance(self._style, dict) else {"color": str(self._style)}
+                spot_color = QColor("#f97316") if is_active else QColor(style.get("color", "#22c55e"))
                 border_color = QColor("#111827") if is_active else QColor("#ffffff")
                 spots.append(
                     {

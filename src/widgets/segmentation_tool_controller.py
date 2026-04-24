@@ -93,7 +93,7 @@ class SegmentationToolController(QObject):
             return
         if self.active_tool == self.TOOL_MAGIC_WAND:
             self._clear_selection_for_new_drawing()
-            self.magic_wand_requested.emit(int(round(x)), int(round(y)))
+            self.magic_wand_requested.emit(int(math.floor(x)), int(math.floor(y)))
             return
         self._handle_selection_press(x, y, bool(payload.modifiers & Qt.ControlModifier))
 

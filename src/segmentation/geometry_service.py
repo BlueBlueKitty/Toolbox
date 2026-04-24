@@ -395,7 +395,7 @@ class GeometryService:
             if len(color) != 6:
                 continue
             rgb = [int(color[i:i + 2], 16) for i in (0, 2, 4)]
-            rgba[mask == label_id] = [rgb[0], rgb[1], rgb[2], 156]
+            rgba[mask == label_id] = [rgb[0], rgb[1], rgb[2], 255]
         return rgba
 
     @staticmethod

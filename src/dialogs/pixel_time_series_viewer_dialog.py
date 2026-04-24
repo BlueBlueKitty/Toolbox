@@ -7,6 +7,7 @@ Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 
 import os
 import re
+import copy
 import numpy as np
 from pathlib import Path
 from typing import Optional, Tuple
@@ -129,6 +130,7 @@ from src.utils.display_pyramid import (
 )
 from src.rendering.sources import GdalRasterSource, GammaVrtRasterSource, H5DatasetRasterSource
 from src.rendering.sources import StandardImageSource
+from src.rendering.config import default_raster_render_config
 
 
 class PixelTimeSeriesViewerDialog(QDialog):
@@ -151,6 +153,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.selected_pixel = None  # 选中的像素坐标 (x, y)
         self.selected_geo = None  # 选中的WGS84地理坐标 (lon, lat)
         self.selected_viewer_id = None  # 最近一次选点来自哪个窗口
+        self._active_render_viewer_id = 1
+        self._viewer_render_settings = {1: None, 2: None}
+        self._viewer_colormaps = {1: "gray", 2: "gray"}
         self.nodata_value = None  # Nodata值
         self._nodata_user_locked = False  # 是否使用用户手动指定的Nodata
         
@@ -196,6 +201,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         # 创建UI
         self._create_ui()
+        base_settings = self._default_render_settings_for_band_count(1)
+        self._viewer_render_settings[1] = copy.deepcopy(base_settings)
+        self._viewer_render_settings[2] = copy.deepcopy(base_settings)
+        self._apply_render_state_to_controls(1)
         self._loading_title_text = self.windowTitle()
         self._render_update_timer = QTimer(self)
         self._render_update_timer.setSingleShot(True)
@@ -399,6 +408,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         # 连接像素点击信号
         viewer.pixel_clicked.connect(lambda x, y: self.on_pixel_clicked(viewer_id, x, y))
+        viewer.canvas_left_clicked.connect(lambda: self._set_active_render_viewer(viewer_id))
         
         # 连接鼠标移动信号，用于更新colorbar
         viewer.mouse_moved.connect(lambda x, y, val: self.on_viewer_mouse_moved(viewer_id, x, y, val))
@@ -584,9 +594,100 @@ class PixelTimeSeriesViewerDialog(QDialog):
         target_viewer_id = 2 if source_viewer_id == 1 else 1
         target_viewer = getattr(self, f'image_viewer_{target_viewer_id}')
         target_viewer.sync_scroll(h_value, v_value)
+
+    def _default_render_settings_for_band_count(self, band_count: int) -> dict:
+        cfg = default_raster_render_config(max(1, int(band_count or 1)))
+        settings = cfg.to_settings()
+        settings["display_mode"] = cfg.display_mode
+        settings["gray_band"] = cfg.gray_band
+        settings["rgb_bands"] = tuple(cfg.rgb_bands)
+        settings["gamma"] = cfg.gamma
+        settings["stretch_mode"] = cfg.stretch_mode
+        settings["percent_clip"] = tuple(cfg.percent_clip)
+        settings["std_dev_n"] = cfg.std_dev_n
+        settings["auto_range"] = cfg.auto_range
+        settings["value_range"] = tuple(cfg.value_range)
+        settings["value_min"] = cfg.value_range[0]
+        settings["value_max"] = cfg.value_range[1]
+        settings["colormap_reversed"] = cfg.colormap_reversed
+        settings["smooth_display"] = cfg.smooth_display
+        return settings
+
+    def _viewer_band_count(self, viewer_id: int) -> int:
+        source = getattr(self, f'_cached_source_{viewer_id}', None)
+        if source is not None:
+            try:
+                return max(1, int(source.metadata().band_count or 1))
+            except Exception:
+                pass
+        data = getattr(self, f'_cached_image_{viewer_id}', None)
+        if data is None:
+            return 1
+        return int(data.shape[2]) if data.ndim == 3 else 1
+
+    def _normalized_settings_for_band_count(self, settings: dict | None, band_count: int) -> dict:
+        base = self._default_render_settings_for_band_count(band_count)
+        if isinstance(settings, dict):
+            base.update(settings)
+        bc = max(1, int(band_count or 1))
+        if bc < 3 and base.get("display_mode") == "RGB":
+            base["display_mode"] = "灰度"
+        base["gray_band"] = max(1, min(int(base.get("gray_band", 1)), bc))
+        rgb = tuple(base.get("rgb_bands", (1, 2, 3)))
+        base["rgb_bands"] = tuple(max(1, min(int(v), bc)) for v in rgb[:3])
+        base["percent_clip"] = tuple(base.get("percent_clip", (2.0, 98.0)))
+        base["value_range"] = tuple(base.get("value_range", (0.0, 1.0)))
+        base["value_min"] = base["value_range"][0]
+        base["value_max"] = base["value_range"][1]
+        return base
+
+    def _store_active_render_state(self) -> None:
+        viewer_id = self._active_render_viewer_id
+        self._viewer_render_settings[viewer_id] = self._normalized_settings_for_band_count(
+            self.render_settings.get_all_settings(),
+            self._viewer_band_count(viewer_id),
+        )
+        self._viewer_colormaps[viewer_id] = self.colormap_combo.currentText()
+
+    def _apply_render_state_to_controls(self, viewer_id: int) -> None:
+        settings = self._normalized_settings_for_band_count(
+            self._viewer_render_settings.get(viewer_id),
+            self._viewer_band_count(viewer_id),
+        )
+        self._viewer_render_settings[viewer_id] = copy.deepcopy(settings)
+        self.render_settings.blockSignals(True)
+        self.render_settings.set_num_bands(max(1, self._viewer_band_count(viewer_id)))
+        self.render_settings.display_mode_combo.setCurrentText(settings["display_mode"])
+        self.render_settings.gray_band_spin.setValue(int(settings["gray_band"]))
+        self.render_settings.band_r_spin.setValue(int(settings["rgb_bands"][0]))
+        self.render_settings.band_g_spin.setValue(int(settings["rgb_bands"][1]))
+        self.render_settings.band_b_spin.setValue(int(settings["rgb_bands"][2]))
+        self.render_settings.stretch_combo.setCurrentText(settings["stretch_mode"])
+        self.render_settings.percent_low_spin.setValue(float(settings["percent_clip"][0]))
+        self.render_settings.percent_high_spin.setValue(float(settings["percent_clip"][1]))
+        self.render_settings.std_dev_spin.setValue(float(settings["std_dev_n"]))
+        self.render_settings.gamma_spin.setValue(float(settings["gamma"]))
+        self.render_settings.auto_range_check.setChecked(not bool(settings["auto_range"]))
+        self.render_settings.min_spin.setValue(float(settings["value_range"][0]))
+        self.render_settings.max_spin.setValue(float(settings["value_range"][1]))
+        self.render_settings.reverse_check.setChecked(bool(settings["colormap_reversed"]))
+        self.render_settings.blockSignals(False)
+        self.colormap_combo.blockSignals(True)
+        self.colormap_combo.setCurrentText(self._viewer_colormaps.get(viewer_id, "gray"))
+        self.colormap_combo.blockSignals(False)
+        is_rgb = settings.get("display_mode") == "RGB"
+        self.colormap_combo.setEnabled(not is_rgb)
+
+    def _set_active_render_viewer(self, viewer_id: int) -> None:
+        viewer_id = 1 if int(viewer_id) == 1 else 2
+        if viewer_id == self._active_render_viewer_id:
+            return
+        self._store_active_render_state()
+        self._active_render_viewer_id = viewer_id
+        self._apply_render_state_to_controls(viewer_id)
     
     def on_colormap_changed(self, colormap_name):
-        """Colormap变化时同时更新两个窗口"""
+        """Colormap变化时更新当前选中窗口"""
         # 跳过分隔符项（分隔符以"━"开头）
         if colormap_name.startswith('━'):
             return
@@ -594,18 +695,16 @@ class PixelTimeSeriesViewerDialog(QDialog):
             return
         if self.image_count > 0:
             self._show_loading_indicator("正在重新渲染图像...")
-        
-        if hasattr(self, 'image_viewer_1'):
-            self.image_viewer_1.set_colormap(colormap_name)
-        if hasattr(self, 'image_viewer_2'):
-            self.image_viewer_2.set_colormap(colormap_name)
-        
-        # 更新colorbar
+        viewer_id = self._active_render_viewer_id
+        self._viewer_colormaps[viewer_id] = colormap_name
+        viewer = getattr(self, f'image_viewer_{viewer_id}', None)
+        if viewer is not None:
+            viewer.set_colormap(colormap_name)
         reversed = self.render_settings.reverse_check.isChecked() if hasattr(self, 'render_settings') else False
-        if hasattr(self, 'colorbar_1'):
-            self.colorbar_1.set_colormap(colormap_name, reversed)
-        if hasattr(self, 'colorbar_2'):
-            self.colorbar_2.set_colormap(colormap_name, reversed)
+        colorbar = getattr(self, f'colorbar_{viewer_id}', None)
+        if colorbar is not None:
+            colorbar.set_colormap(colormap_name, reversed)
+        self._refresh_colorbar_range(viewer_id)
         if self.image_count > 0:
             self._hide_loading_indicator()
     
@@ -620,20 +719,20 @@ class PixelTimeSeriesViewerDialog(QDialog):
     def _apply_render_settings_update(self):
         """应用渲染设置更新。"""
         try:
+            viewer_id = self._active_render_viewer_id
             if self.render_settings.is_auto_range():
-                self._update_image_stats_to_render_settings()
-            settings = self.render_settings.get_all_settings()
-            if hasattr(self, 'image_viewer_1'):
-                self.image_viewer_1.set_render_settings(settings)
-            if hasattr(self, 'image_viewer_2'):
-                self.image_viewer_2.set_render_settings(settings)
-            
-            # 更新colorbar的数值范围
-            if hasattr(self, 'colorbar_1'):
-                self._refresh_colorbar_range(1)
-            if hasattr(self, 'colorbar_2'):
-                self._refresh_colorbar_range(2)
-
+                self._update_image_stats_to_render_settings(viewer_id=viewer_id)
+            settings = self._normalized_settings_for_band_count(
+                self.render_settings.get_all_settings(),
+                self._viewer_band_count(viewer_id),
+            )
+            self._viewer_render_settings[viewer_id] = copy.deepcopy(settings)
+            self.colormap_combo.setEnabled(settings.get("display_mode") != "RGB")
+            viewer = getattr(self, f'image_viewer_{viewer_id}', None)
+            if viewer is not None:
+                viewer.set_render_settings(settings)
+                viewer.set_colormap(self._viewer_colormaps.get(viewer_id, "gray"))
+            self._refresh_colorbar_range(viewer_id)
             self._sync_selected_pixel_markers()
         finally:
             self._hide_loading_indicator()
@@ -680,35 +779,45 @@ class PixelTimeSeriesViewerDialog(QDialog):
         """新时序数据使用默认渲染参数，避免继承上一批影像的显示状态。"""
         self.render_settings.blockSignals(True)
         self.render_settings.reset_to_defaults(max(1, int(band_count or 1)))
+        if int(band_count or 1) >= 3:
+            self.render_settings.display_mode_combo.setCurrentText("RGB")
+            self.render_settings.set_stretch_mode(self.render_settings.STRETCH_NONE)
+            self.render_settings.auto_range_check.setChecked(False)
+        else:
+            self.render_settings.display_mode_combo.setCurrentText("灰度")
         self.render_settings.blockSignals(False)
         self.colormap_combo.blockSignals(True)
         self.colormap_combo.setCurrentText(colormap)
         self.colormap_combo.blockSignals(False)
-        if hasattr(self, 'image_viewer_1'):
-            self.image_viewer_1.current_colormap = colormap
-            self.image_viewer_1.render_config.colormap_name = colormap
-        if hasattr(self, 'image_viewer_2'):
-            self.image_viewer_2.current_colormap = colormap
-            self.image_viewer_2.render_config.colormap_name = colormap
+        settings = self._normalized_settings_for_band_count(
+            self.render_settings.get_all_settings(),
+            max(1, int(band_count or 1)),
+        )
+        self._viewer_render_settings[1] = copy.deepcopy(settings)
+        self._viewer_render_settings[2] = copy.deepcopy(settings)
+        self._viewer_colormaps[1] = colormap
+        self._viewer_colormaps[2] = colormap
+        self._active_render_viewer_id = 1
+        self.colormap_combo.setEnabled(settings.get("display_mode") != "RGB")
     
     def on_suggest_colormap(self, colormap_name):
         """接收建议的colormap并切换"""
         self.colormap_combo.setCurrentText(colormap_name)
     
-    def _update_image_stats_to_render_settings(self):
+    def _update_image_stats_to_render_settings(self, viewer_id=1):
         """从当前图像计算统计信息并更新到渲染设置"""
-        source = getattr(self, '_cached_source_1', None)
+        source = getattr(self, f'_cached_source_{viewer_id}', None)
         if source is not None:
-            settings = self.render_settings.get_all_settings()
+            settings = self._viewer_render_settings.get(viewer_id) or self.render_settings.get_all_settings()
             value_range = source.value_range_for_settings(settings)
             if value_range is not None:
                 self.render_settings.set_image_stats(*value_range)
                 return
 
-        # 使用第一个窗口的缓存图像
-        if self._cached_image_1 is not None:
-            arr = self._cached_image_1
-            nodata_value = self._get_effective_nodata_for_index(self.current_image_index_1)
+        data = getattr(self, f'_cached_image_{viewer_id}', None)
+        if data is not None:
+            arr = data
+            nodata_value = self._get_effective_nodata_for_index(getattr(self, f'current_image_index_{viewer_id}', 0))
             # 创建有效掩码
             valid_mask = np.isfinite(arr)
             if nodata_value is not None:
@@ -761,7 +870,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
         if data is None:
             return None
 
-        settings = self.render_settings.get_all_settings()
+        settings = self._normalized_settings_for_band_count(
+            self._viewer_render_settings.get(viewer_id),
+            self._viewer_band_count(viewer_id),
+        )
         display_mode = settings.get('display_mode', '灰度')
 
         if data.ndim == 3:
@@ -790,7 +902,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
         if colorbar is None:
             return
 
-        settings = self.render_settings.get_all_settings()
+        settings = self._normalized_settings_for_band_count(
+            self._viewer_render_settings.get(viewer_id),
+            self._viewer_band_count(viewer_id),
+        )
         data_range = self._get_colorbar_data_range(viewer_id)
         if settings.get('auto_range', True) and data_range is not None:
             vmin, vmax = data_range
@@ -799,7 +914,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             vmax = settings['value_max']
 
         colorbar.set_range(vmin, vmax)
-        colorbar.set_colormap(self.colormap_combo.currentText(), settings['colormap_reversed'])
+        colorbar.set_colormap(self._viewer_colormaps.get(viewer_id, "gray"), settings['colormap_reversed'])
 
     def _clear_cached_images(self):
         """清空两个窗口的图像缓存。"""
@@ -1338,7 +1453,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 viewer.set_geotransform(current_metadata.get('geotransform'), current_metadata.get('projection'))
             else:
                 viewer.set_geotransform(self.geotransform, self.projection)
-            viewer.prime_render_settings(self.render_settings.get_all_settings())
+            if image_source is not None:
+                band_count = int(image_source.metadata().band_count or 1)
+            else:
+                band_count = int(current_data.shape[2]) if current_data.ndim == 3 else 1
+            settings_for_viewer = self._normalized_settings_for_band_count(
+                self._viewer_render_settings.get(viewer_id),
+                band_count,
+            )
+            self._viewer_render_settings[viewer_id] = copy.deepcopy(settings_for_viewer)
+            viewer.prime_render_settings(settings_for_viewer)
+            viewer.set_colormap(self._viewer_colormaps.get(viewer_id, "gray"))
 
             if image_source is not None and not self._uses_geo_sync():
                 viewer.set_raster_source(image_source, reset_view=reset_view, nodata_value=current_nodata)
@@ -2082,6 +2207,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
     
     def on_pixel_clicked(self, viewer_id, x, y):
         """像素点击事件处理"""
+        self._set_active_render_viewer(viewer_id)
         self.selected_viewer_id = viewer_id
         self.selected_pixel = (x, y)
 

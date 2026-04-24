@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from PySide6.QtGui import QPainter
 
 from .models import LayerSpec, LayerState
 
@@ -56,6 +57,11 @@ class LayerManager:
         self._layers = OrderedDict(items)
         self._sync_z_order()
 
+    def set_blend_mode(self, layer_id: str, blend_mode: str) -> None:
+        state = self._require(layer_id)
+        state.spec.blend_mode = str(blend_mode or "source_over")
+        self._apply_item_state(state)
+
     def to_specs(self) -> list[LayerSpec]:
         return [state.spec for state in self.layers()]
 
@@ -80,3 +86,16 @@ class LayerManager:
             item.setOpacity(state.spec.opacity)
         if hasattr(item, "setZValue"):
             item.setZValue(state.z_order)
+        composition_map = {
+            "source_over": QPainter.CompositionMode_SourceOver,
+            "multiply": QPainter.CompositionMode_Multiply,
+            "screen": QPainter.CompositionMode_Screen,
+            "overlay": QPainter.CompositionMode_Overlay,
+            "plus": QPainter.CompositionMode_Plus,
+        }
+        if hasattr(item, "setCompositionMode"):
+            mode = composition_map.get(state.spec.blend_mode, QPainter.CompositionMode_SourceOver)
+            try:
+                item.setCompositionMode(mode)
+            except Exception:
+                pass

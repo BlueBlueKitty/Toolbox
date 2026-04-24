@@ -84,6 +84,16 @@ class GdalRasterSource(RasterImageSource):
     def _refresh_metadata(self) -> None:
         ds = self.dataset
         band = ds.GetRasterBand(1)
+        color_table = None
+        has_color_table = False
+        try:
+            ct = band.GetColorTable()
+            if ct is not None:
+                has_color_table = True
+                color_table = [tuple(int(v) for v in ct.GetColorEntry(i)) for i in range(ct.GetCount())]
+        except Exception:
+            color_table = None
+            has_color_table = False
         projection = ds.GetProjection()
         geotransform = ds.GetGeoTransform(can_return_null=True)
         self._metadata = ImageSourceMetadata(
@@ -99,6 +109,8 @@ class GdalRasterSource(RasterImageSource):
             geotransform=tuple(geotransform) if geotransform else None,
             resolution=(geotransform[1], geotransform[5]) if geotransform else None,
             has_georef=bool(projection or geotransform),
+            has_color_table=has_color_table,
+            color_table=color_table,
             overview_levels=detect_overviews(ds),
         )
 
@@ -152,6 +164,7 @@ class GdalRasterSource(RasterImageSource):
             raw,
             render_config,
             nodata_value=self._metadata.nodata,
+            color_table=self._metadata.color_table,
             geotransform=self._window_geotransform(request.x, request.y),
             projection=self._metadata.crs_wkt,
             downsample_factor=max(request.width / max(raw.shape[1], 1), request.height / max(raw.shape[0], 1), 1.0),
@@ -439,6 +452,8 @@ class StandardImageSource(RasterImageSource):
             geotransform=None,
             resolution=None,
             has_georef=False,
+            has_color_table=False,
+            color_table=None,
             overview_levels=[],
         )
 
@@ -446,7 +461,12 @@ class StandardImageSource(RasterImageSource):
         return self._metadata
 
     def render(self, request: RenderRequest, render_config: RasterRenderConfig) -> RenderTileResult:
-        display_rgb = render_raster_rgb(self._array, render_config, nodata_value=self._metadata.nodata)
+        display_rgb = render_raster_rgb(
+            self._array,
+            render_config,
+            nodata_value=self._metadata.nodata,
+            color_table=self._metadata.color_table,
+        )
         return RenderTileResult(
             raw_array=self._array,
             display_rgb=display_rgb,

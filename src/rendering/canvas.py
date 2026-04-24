@@ -21,6 +21,7 @@ _UNSET = object()
 
 class LayeredRasterCanvas(QWidget):
     pixel_clicked = Signal(int, int)
+    canvas_left_clicked = Signal()
     mouse_moved = Signal(int, int, object)
     view_transformed = Signal(object)
     cursor_changed = Signal(object)
@@ -45,7 +46,7 @@ class LayeredRasterCanvas(QWidget):
         self.view_box.addItem(self.image_item)
 
         self.layer_manager = LayerManager()
-        self.layer_manager.add_layer(LayerSpec(self.BASE_LAYER_ID, "图像", "raster"), self.image_item)
+        self.layer_manager.add_layer(LayerSpec(self.BASE_LAYER_ID, "图像", "raster", locked=True), self.image_item)
 
         self.image_array = None
         self.source = None
@@ -59,7 +60,7 @@ class LayeredRasterCanvas(QWidget):
         self.colormap_reversed = False
         self.current_zoom = 1.0
         self.zoom_factor = 1.75
-        self.min_zoom = 0.1
+        self.min_zoom = 0.01
         self.max_zoom = 1000.0
         self.is_panning = False
         self.pan_start_pos = None
@@ -312,6 +313,25 @@ class LayeredRasterCanvas(QWidget):
     def move_layer(self, layer_id: str, index: int) -> None:
         self.layer_manager.move_layer(layer_id, index)
 
+    def set_layer_blend_mode(self, layer_id: str, blend_mode: str) -> None:
+        self.layer_manager.set_blend_mode(layer_id, blend_mode)
+
+    def remove_layer(self, layer_id: str) -> None:
+        state = self.layer_manager.remove_layer(layer_id)
+        self.clear_overlay_layer(layer_id)
+        if state is None:
+            return
+        item = state.item
+        if item is None:
+            return
+        try:
+            if hasattr(item, "scene") and item.scene() is not None:
+                item.scene().removeItem(item)
+            else:
+                self.view_box.removeItem(item)
+        except (RuntimeError, ValueError):
+            pass
+
     def set_raster_overlay(self, layer_id: str, rgba_array, bbox=None, name: str | None = None, opacity: float = 1.0):
         item = self._single_image_layer(layer_id, name or layer_id, opacity)
         if rgba_array is None:
@@ -341,10 +361,10 @@ class LayeredRasterCanvas(QWidget):
         items = []
         for feature in features or []:
             feature_id = getattr(feature, "id", "")
-            color = style(feature) if callable(style) else str(style)
+            feature_style = style(feature) if callable(style) else style
             overlay = __import__("src.rendering.overlays", fromlist=["PolygonOverlayItem"]).PolygonOverlayItem(
                 feature,
-                color,
+                feature_style,
                 selected=feature_id in selected_ids,
                 editable=feature_id == editable_feature_id,
                 active_vertex=active_vertex if feature_id == editable_feature_id else None,
@@ -568,6 +588,8 @@ class LayeredRasterCanvas(QWidget):
                 item.setZValue(state.z_order)
 
     def _handle_mouse_press(self, event) -> bool:
+        if event.button() == Qt.LeftButton:
+            self.canvas_left_clicked.emit()
         if event.button() == Qt.LeftButton and (self.image_array is not None or self.source is not None):
             pos = self.image_pos_from_event(event)
             if pos is not None and self.image_contains_pos(pos):
@@ -774,13 +796,18 @@ class LayeredRasterCanvas(QWidget):
         else:
             self._image_rect = QRectF(0, 0, self.image_array.shape[1], self.image_array.shape[0])
         self.image_item.setRect(self._image_rect)
+        limit_rect = self._current_scene_rect()
+        if limit_rect.isNull():
+            limit_rect = QRectF(self._image_rect)
+        min_x_range = max(limit_rect.width() / 4000.0, 1e-6)
+        min_y_range = max(limit_rect.height() / 4000.0, 1e-6)
         self.view_box.setLimits(
-            xMin=self._image_rect.left() - self._image_rect.width() * 4,
-            xMax=self._image_rect.right() + self._image_rect.width() * 4,
-            yMin=self._image_rect.top() - self._image_rect.height() * 4,
-            yMax=self._image_rect.bottom() + self._image_rect.height() * 4,
-            minXRange=1,
-            minYRange=1,
+            xMin=limit_rect.left() - limit_rect.width() * 4,
+            xMax=limit_rect.right() + limit_rect.width() * 4,
+            yMin=limit_rect.top() - limit_rect.height() * 4,
+            yMax=limit_rect.bottom() + limit_rect.height() * 4,
+            minXRange=min_x_range,
+            minYRange=min_y_range,
         )
 
     def _current_scene_rect(self) -> QRectF:
@@ -851,12 +878,26 @@ class LayeredRasterCanvas(QWidget):
         self.view_transformed.emit(self.capture_view_state())
 
     def _on_range_changed(self, *_args):
+        self._update_current_zoom_from_view_range()
         if self.source is not None:
             if self._is_refresh_panning:
                 self._emit_view_changed()
                 return
             self._refresh_timer.start()
         self._emit_view_changed()
+
+    def _update_current_zoom_from_view_range(self) -> None:
+        if self.original_width <= 0 or self.original_height <= 0:
+            self.current_zoom = 1.0
+            return
+        ((x0, x1), (y0, y1)) = self.view_box.viewRange()
+        view_width = max(float(x1 - x0), 1e-6)
+        view_height = max(float(y1 - y0), 1e-6)
+        image_diag = float(np.hypot(self.original_width, self.original_height))
+        view_diag = float(np.hypot(view_width, view_height))
+        if view_diag <= 0:
+            return
+        self.current_zoom = max(self.min_zoom, min(self.max_zoom, image_diag / view_diag))
 
 
 class RasterCanvasSynchronizer:

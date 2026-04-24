@@ -53,20 +53,52 @@ class RasterRenderConfig:
         }
 
 
-def default_raster_render_config() -> RasterRenderConfig:
-    return RasterRenderConfig()
+def default_raster_render_config(band_count: int = 1, has_color_table: bool = False) -> RasterRenderConfig:
+    config = RasterRenderConfig()
+    if has_color_table:
+        config.display_mode = "灰度"
+        config.colormap_name = "gray"
+        return config
+    if int(band_count or 1) >= 3:
+        config.display_mode = "RGB"
+        config.rgb_bands = (1, 2, 3)
+        config.stretch_mode = "无拉伸"
+        config.auto_range = False
+    else:
+        config.display_mode = "灰度"
+        config.gray_band = 1
+    return config
 
 
 def render_raster_rgb(
     raw_array: np.ndarray,
     config: RasterRenderConfig,
     nodata_value=None,
+    color_table: list[tuple[int, int, int, int]] | None = None,
     geotransform=None,
     projection=None,
     downsample_factor=1,
 ) -> np.ndarray:
     from src.widgets.render_settings_widget import apply_render_settings
 
+    if color_table and raw_array.ndim == 2:
+        values = np.asarray(raw_array)
+        rgba = np.zeros((values.shape[0], values.shape[1], 4), dtype=np.uint8)
+        table = np.asarray(color_table, dtype=np.uint8)
+        clamped = np.clip(values.astype(np.int64), 0, max(len(table) - 1, 0))
+        rgba = table[clamped]
+        rgb = rgba[:, :, :3]
+        alpha = rgba[:, :, 3].astype(np.float32) / 255.0
+        if nodata_value is not None:
+            try:
+                nodata_mask = np.isnan(values) if np.isnan(nodata_value) else (values == nodata_value)
+            except Exception:
+                nodata_mask = values == nodata_value
+            alpha[nodata_mask] = 0.0
+        if np.any(alpha < 1.0):
+            bg = np.zeros_like(rgb)
+            rgb = (rgb.astype(np.float32) * alpha[..., None] + bg * (1.0 - alpha[..., None])).astype(np.uint8)
+        return rgb
     if (
         config.display_mode == "RGB"
         and raw_array.ndim == 3

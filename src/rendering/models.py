@@ -31,6 +31,8 @@ class ImageSourceMetadata:
     geotransform: Optional[tuple]
     resolution: Optional[tuple]
     has_georef: bool
+    has_color_table: bool = False
+    color_table: Optional[list[tuple[int, int, int, int]]] = None
     overview_levels: list[OverviewInfo] = field(default_factory=list)
 
 
@@ -73,6 +75,8 @@ class LayerSpec:
     opacity: float = 1.0
     locked: bool = False
     selectable: bool = True
+    blend_mode: str = "source_over"
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

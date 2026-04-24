@@ -500,6 +500,23 @@ class RenderSettingsWidget(QWidget):
             self.hillshade_altitude_spin.setVisible(is_hillshade)
             self.hillshade_zfactor_label.setVisible(is_hillshade)
             self.hillshade_zfactor_spin.setVisible(is_hillshade)
+        self._update_mode_dependent_enabled()
+
+    def _update_mode_dependent_enabled(self):
+        """RGB 模式下禁用不适用的渲染参数。"""
+        is_rgb = self._display_mode == "RGB"
+        for widget_name in (
+            "reverse_check",
+            "stretch_combo",
+            "stretch_param_widget",
+            "auto_range_check",
+            "min_spin",
+            "max_spin",
+            "gamma_spin",
+        ):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.setEnabled(not is_rgb)
     
     def _on_stretch_changed(self, mode):
         """拉伸方式变更"""
@@ -630,12 +647,22 @@ class RenderSettingsWidget(QWidget):
             focus = QApplication.focusWidget()
             focused_spin = None
             for spin in (self.min_spin, self.max_spin):
-                if focus is spin or focus is spin.lineEdit():
-                    focused_spin = spin
-                    break
+                try:
+                    line_edit = spin.lineEdit()
+                except RuntimeError:
+                    continue
+                try:
+                    if focus is spin or focus is line_edit:
+                        focused_spin = spin
+                        break
+                except RuntimeError:
+                    continue
             if focused_spin is not None and not self._is_descendant(obj, focused_spin):
-                focused_spin.commit_pending()
-                focused_spin.clearFocus()
+                try:
+                    focused_spin.commit_pending()
+                    focused_spin.clearFocus()
+                except RuntimeError:
+                    pass
         return super().eventFilter(obj, event)
 
     def _is_descendant(self, obj, parent):

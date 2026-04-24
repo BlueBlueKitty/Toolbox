@@ -29,10 +29,9 @@ class SegmentationProjectManager:
     def serialize_project(self, project: SegmentationProject, project_path: str | None = None) -> dict:
         payload = project.to_dict()
         image_asset = payload.get("image_asset")
-        if image_asset and image_asset.get("path") and project_path:
-            image_asset["path_mode"], image_asset["path"] = self._project_path_value(
-                image_asset["path"], project_path
-            )
+        if image_asset and image_asset.get("path"):
+            image_asset["path_mode"] = "absolute"
+            image_asset["path"] = str(Path(image_asset["path"]).resolve())
         if project_path:
             # 运行时矢量自动保存入口暂时关闭，仅保留代码路径以便后续恢复。
             # vector_path = self.vector_sidecar_path(project_path)

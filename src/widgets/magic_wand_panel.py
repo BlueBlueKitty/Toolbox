@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QFontDatabase, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -33,7 +34,8 @@ from src.segmentation.models import MagicWandParams
 class MagicWandPanel(QGroupBox):
     params_changed = Signal(object)
     merge_preview_changed = Signal(bool)
-    brush_size_changed = Signal(int)
+    brush_size_changed = Signal(float)
+    show_new_region_only_changed = Signal(bool)
     confirm_requested = Signal()
     cancel_requested = Signal()
     slider_config_changed = Signal(str, dict)
@@ -42,8 +44,10 @@ class MagicWandPanel(QGroupBox):
         super().__init__("参数", parent)
         self._material_icon_family = self._load_material_icon_font()
         self._slider_configs: dict[str, dict[str, int]] = {
-            "tolerance": {"min": 0, "max": 100, "default": 15},
-            "brush_size": {"min": 1, "max": 100, "default": 12},
+            "tolerance": {"min": 0, "max": 100, "default": 15, "step": 1},
+            # 使用离散档位映射到半径：
+            # 1..5 => 0.2,0.4,0.6,0.8,1.0；6.. => 2,3,4...
+            "brush_size": {"min": 1, "max": 104, "default": 10, "step": 1},
         }
         layout = QFormLayout(self)
         layout.setLabelAlignment(Qt.AlignLeft)
@@ -65,6 +69,9 @@ class MagicWandPanel(QGroupBox):
         top_row.addStretch(1)
         top_row.addWidget(self.single_preview_button)
         top_row.addWidget(self.merge_preview_button)
+        self.show_new_region_only_check = QCheckBox("仅显示新增区域")
+        self.show_new_region_only_check.setToolTip("勾选后，预览Mask仅显示与已有Mask不重叠的新增区域。")
+        top_row.addWidget(self.show_new_region_only_check)
         top_row.addStretch(1)
         top_row_widget = QWidget()
         top_row_widget.setLayout(top_row)
@@ -119,7 +126,7 @@ class MagicWandPanel(QGroupBox):
         fill_holes_layout.addStretch(1)
         layout.addRow(self._form_label("填补孔洞", "控制识别结果中内部孔洞的填补方式。"), fill_holes_row)
 
-        self.brush_size_slider, self.brush_size_value = self._make_slider(1, 100, 12)
+        self.brush_size_slider, self.brush_size_value = self._make_slider(1, 104, 10)
         self.brush_size_slider.setToolTip("笔刷和橡皮擦的直径。")
         brush_label, self.brush_settings_btn = self._form_label_with_settings(
             "笔刷/橡皮擦粗细",
@@ -146,23 +153,27 @@ class MagicWandPanel(QGroupBox):
 
         self.single_preview_button.clicked.connect(lambda checked: self._set_merge_preview(not checked))
         self.merge_preview_button.clicked.connect(lambda checked: self._set_merge_preview(checked))
-        self.brush_size_slider.valueChanged.connect(self.brush_size_changed.emit)
+        self.show_new_region_only_check.toggled.connect(self.show_new_region_only_changed.emit)
+        self.brush_size_slider.valueChanged.connect(lambda *_: self.brush_size_changed.emit(self.brush_size()))
+        self.tolerance_slider.valueChanged.connect(lambda value: self._on_slider_value_changed("tolerance", value))
+        self.brush_size_slider.valueChanged.connect(lambda value: self._on_slider_value_changed("brush_size", value))
         for widget in [
             self.mode_combo,
             self.connectivity_combo,
             self.tolerance_slider,
-            self.min_area_edit,
             self.fill_small_holes_radio,
             self.fill_all_holes_radio,
         ]:
             signal = getattr(widget, "valueChanged", None) or getattr(widget, "currentTextChanged", None) or getattr(widget, "toggled", None) or getattr(widget, "textChanged", None)
             signal.connect(self._emit_params)
+        # 最小面积仅在编辑完成（失焦/回车）后触发，避免输入过程中频繁重算
+        self.min_area_edit.editingFinished.connect(self._emit_params)
         self.confirm_button.clicked.connect(self.confirm_requested)
         self.cancel_button.clicked.connect(self.cancel_requested)
         self.refresh_icons()
 
-    def brush_size(self) -> int:
-        return int(self.brush_size_slider.value())
+    def brush_size(self) -> float:
+        return self._slider_value_to_brush_radius(int(self.brush_size_slider.value()))
 
     def params(self) -> MagicWandParams:
         try:
@@ -180,6 +191,9 @@ class MagicWandPanel(QGroupBox):
 
     def merge_preview_enabled(self) -> bool:
         return self.merge_preview_button.isChecked()
+
+    def only_show_new_region_enabled(self) -> bool:
+        return self.show_new_region_only_check.isChecked()
 
     def _set_merge_preview(self, enabled: bool) -> None:
         self.merge_preview_button.blockSignals(True)
@@ -209,9 +223,14 @@ class MagicWandPanel(QGroupBox):
                 "min": int(cfg.get("min", 0)),
                 "max": int(cfg.get("max", 100)),
                 "default": int(cfg.get("default", cfg.get("min", 0))),
+                "step": max(1, int(cfg.get("step", 1))),
             }
             for key, cfg in self._slider_configs.items()
         }
+
+    def slider_step(self, key: str) -> int:
+        cfg = self._slider_configs.get(key, {})
+        return max(1, int(cfg.get("step", 1)))
 
     def apply_slider_configs(self, configs: dict[str, dict[str, int]] | None, *, emit_change: bool = False) -> None:
         merged = self.get_slider_configs()
@@ -224,12 +243,13 @@ class MagicWandPanel(QGroupBox):
                     minimum = int(incoming.get("min", merged[key]["min"]))
                     maximum = int(incoming.get("max", merged[key]["max"]))
                     default = int(incoming.get("default", merged[key]["default"]))
+                    step = max(1, int(incoming.get("step", merged[key].get("step", 1))))
                 except (TypeError, ValueError):
                     continue
                 if minimum > maximum:
                     minimum, maximum = maximum, minimum
                 default = max(minimum, min(maximum, default))
-                merged[key] = {"min": minimum, "max": maximum, "default": default}
+                merged[key] = {"min": minimum, "max": maximum, "default": default, "step": step}
         self._slider_configs = merged
         self._apply_slider_config_to_widget("tolerance")
         self._apply_slider_config_to_widget("brush_size")
@@ -244,12 +264,14 @@ class MagicWandPanel(QGroupBox):
         current = int(slider.value())
         slider.blockSignals(True)
         slider.setRange(cfg["min"], cfg["max"])
-        slider.setValue(max(cfg["min"], min(cfg["max"], current)))
+        slider.setSingleStep(max(1, int(cfg.get("step", 1))))
+        slider.setPageStep(max(1, int(cfg.get("step", 1))))
+        slider.setValue(self._snap_slider_value(key, max(cfg["min"], min(cfg["max"], current))))
         slider.blockSignals(False)
         if key == "tolerance":
             self.tolerance_value.setText(str(slider.value()))
         else:
-            self.brush_size_value.setText(str(slider.value()))
+            self.brush_size_value.setText(self._format_brush_radius(self.brush_size()))
 
     def _open_slider_range_dialog(self, key: str) -> None:
         cfg = self._slider_configs[key]
@@ -265,9 +287,13 @@ class MagicWandPanel(QGroupBox):
         default_spin = QSpinBox(dialog)
         default_spin.setRange(-1000000, 1000000)
         default_spin.setValue(cfg["default"])
+        step_spin = QSpinBox(dialog)
+        step_spin.setRange(1, 1000000)
+        step_spin.setValue(max(1, int(cfg.get("step", 1))))
         form.addRow("最小值", min_spin)
         form.addRow("最大值", max_spin)
         form.addRow("默认值", default_spin)
+        form.addRow("调整间隔", step_spin)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
         form.addRow(buttons)
         buttons.accepted.connect(dialog.accept)
@@ -280,10 +306,11 @@ class MagicWandPanel(QGroupBox):
             minimum, maximum = maximum, minimum
         default = int(default_spin.value())
         default = max(minimum, min(maximum, default))
-        self._slider_configs[key] = {"min": minimum, "max": maximum, "default": default}
+        step = max(1, int(step_spin.value()))
+        self._slider_configs[key] = {"min": minimum, "max": maximum, "default": default, "step": step}
         self._apply_slider_config_to_widget(key)
         slider = self.tolerance_slider if key == "tolerance" else self.brush_size_slider
-        slider.setValue(default)
+        slider.setValue(self._snap_slider_value(key, default))
         self.slider_config_changed.emit(key, self.get_slider_configs())
         self._emit_params()
 
@@ -313,6 +340,102 @@ class MagicWandPanel(QGroupBox):
         row.addWidget(setting_btn)
         row.addStretch(1)
         return widget, setting_btn
+
+    def get_panel_state(self) -> dict:
+        return {
+            "slider_configs": self.get_slider_configs(),
+            "tolerance": int(self.tolerance_slider.value()),
+            "brush_size": int(self.brush_size_slider.value()),
+            "similarity_mode": str(self.mode_combo.currentData()),
+            "connectivity": int(self.connectivity_combo.currentText()),
+            "min_area": str(self.min_area_edit.text().strip() or "16"),
+            "fill_small_holes": bool(self.fill_small_holes_radio.isChecked()),
+            "fill_all_holes": bool(self.fill_all_holes_radio.isChecked()),
+            "merge_preview": bool(self.merge_preview_enabled()),
+            "show_new_region_only": bool(self.only_show_new_region_enabled()),
+        }
+
+    def apply_panel_state(self, state: dict | None, *, emit_change: bool = False) -> None:
+        payload = dict(state or {})
+        # 兼容旧项目：magic_panel_settings 仅保存了 slider_configs（tolerance/brush_size 为 dict）
+        if "slider_configs" not in payload:
+            legacy_like = all(isinstance(payload.get(key), dict) for key in ("tolerance", "brush_size"))
+            if legacy_like:
+                payload = {
+                    "slider_configs": {
+                        "tolerance": dict(payload.get("tolerance", {})),
+                        "brush_size": dict(payload.get("brush_size", {})),
+                    }
+                }
+        self.apply_slider_configs(payload.get("slider_configs"), emit_change=False)
+        self._set_mode_by_value(str(payload.get("similarity_mode", "rgb")))
+        connectivity = str(payload.get("connectivity", "8"))
+        if self.connectivity_combo.findText(connectivity) >= 0:
+            self.connectivity_combo.setCurrentText(connectivity)
+        self.min_area_edit.setText(str(payload.get("min_area", "16")))
+        fill_all = bool(payload.get("fill_all_holes", False))
+        self.fill_all_holes_radio.setChecked(fill_all)
+        self.fill_small_holes_radio.setChecked(not fill_all)
+        self._set_merge_preview(bool(payload.get("merge_preview", False)))
+        self.show_new_region_only_check.setChecked(bool(payload.get("show_new_region_only", False)))
+        tolerance_value = payload.get("tolerance", self.tolerance_slider.value())
+        brush_value = payload.get("brush_size", self.brush_size_slider.value())
+        try:
+            tolerance_int = int(tolerance_value)
+        except (TypeError, ValueError):
+            tolerance_int = int(self.tolerance_slider.value())
+        try:
+            brush_int = int(brush_value)
+        except (TypeError, ValueError):
+            brush_int = int(self.brush_size_slider.value())
+        self.tolerance_slider.setValue(self._snap_slider_value("tolerance", tolerance_int))
+        self.brush_size_slider.setValue(self._snap_slider_value("brush_size", brush_int))
+        self.tolerance_value.setText(str(self.tolerance_slider.value()))
+        self.brush_size_value.setText(self._format_brush_radius(self.brush_size()))
+        if emit_change:
+            self.slider_config_changed.emit("all", self.get_slider_configs())
+            self._emit_params()
+            self.brush_size_changed.emit(self.brush_size())
+            self.show_new_region_only_changed.emit(self.only_show_new_region_enabled())
+
+    def _set_mode_by_value(self, mode: str) -> None:
+        for index in range(self.mode_combo.count()):
+            if str(self.mode_combo.itemData(index)) == mode:
+                self.mode_combo.setCurrentIndex(index)
+                return
+
+    def _on_slider_value_changed(self, key: str, value: int) -> None:
+        slider = self.tolerance_slider if key == "tolerance" else self.brush_size_slider
+        snapped = self._snap_slider_value(key, value)
+        if snapped != value:
+            slider.blockSignals(True)
+            slider.setValue(snapped)
+            slider.blockSignals(False)
+        if key == "tolerance":
+            self.tolerance_value.setText(str(slider.value()))
+        else:
+            self.brush_size_value.setText(self._format_brush_radius(self.brush_size()))
+
+    def _snap_slider_value(self, key: str, value: int) -> int:
+        slider = self.tolerance_slider if key == "tolerance" else self.brush_size_slider
+        cfg = self._slider_configs.get(key, {})
+        minimum = int(cfg.get("min", slider.minimum()))
+        maximum = int(cfg.get("max", slider.maximum()))
+        step = max(1, int(cfg.get("step", 1)))
+        value = max(minimum, min(maximum, int(value)))
+        snapped = minimum + round((value - minimum) / step) * step
+        return max(minimum, min(maximum, int(snapped)))
+
+    def _slider_value_to_brush_radius(self, slider_value: int) -> float:
+        value = max(1, int(slider_value))
+        if value <= 5:
+            return round(value * 0.2, 1)
+        return float(value - 4)
+
+    def _format_brush_radius(self, radius: float) -> str:
+        if radius <= 1.0:
+            return f"{radius:.1f}"
+        return str(int(round(radius)))
 
     def refresh_icons(self) -> None:
         settings_icon = self._material_icon("settings")
