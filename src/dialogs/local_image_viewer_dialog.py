@@ -9,12 +9,14 @@ import os
 import numpy as np
 import h5py
 from pathlib import Path
+from shiboken6 import isValid
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                                 QFileDialog, QLabel, QMessageBox, QSplitter,
                                 QGroupBox, QButtonGroup, QRadioButton, QListWidget,
-                                QDialogButtonBox, QInputDialog, QComboBox, QFrame,
-                                QCheckBox, QApplication)
-from PySide6.QtCore import Qt, QSettings, QTimer
+                                QDialogButtonBox, QInputDialog, QComboBox, QFrame, QWidget,
+                                QCheckBox, QApplication, QToolButton)
+from PySide6.QtCore import Qt, QSettings, QTimer, QSize
+from PySide6.QtGui import QFontDatabase, QFont, QPainter, QPixmap, QIcon, QColor
 
 # 配置文件路径
 def get_settings():
@@ -27,7 +29,14 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as Navigation
 from matplotlib.figure import Figure
 import traceback
 
-from src.widgets import InteractiveImageViewer, ColormapComboBox, RenderSettingsWidget, ColorbarWidget
+from src.widgets import (
+    ColorbarWidget,
+    InteractiveImageViewer,
+    OperationProgressWidget,
+    RenderSidebarController,
+    RenderSidebarWidget,
+    SingleCanvasRenderBinding,
+)
 from src.utils.gamma_file_process import (
     GAMMA_FORMATS,
     read_gamma_region,
@@ -59,6 +68,8 @@ from src.utils.display_pyramid import (
 from src.dialogs.gamma_dialogs import GammaSingleFileDialog
 from src.rendering.sources import GdalRasterSource, GammaVrtRasterSource, H5DatasetRasterSource, HillshadeCompositeRasterSource
 from src.rendering.sources import StandardImageSource
+from src.rendering.style_auto_selector import DefaultRenderStyleFactory
+from src.rendering.styles import style_to_legacy_config
 
 
 class LocalImageViewerDialog(QDialog):
@@ -97,9 +108,10 @@ class LocalImageViewerDialog(QDialog):
         # dB转换标志
         self._converted_to_db = False   # 是否已转换为dB
 
-        # 拟合曲线显示开关（持久化）
-        settings = get_settings()
-        self.show_fit_curve = settings.value("show_fit_curve", True, type=bool)
+        # 拟合曲线功能已移除
+        self.show_fit_curve = False
+        self._material_icon_family = self._load_material_icon_font()
+        self._theme_mode = "dark"
         
         # 地理信息
         self.geotransform = None  # GDAL地理变换参数
@@ -116,8 +128,10 @@ class LocalImageViewerDialog(QDialog):
             button.setDefault(False)
 
     def on_theme_mode_changed(self, _mode: str) -> None:
+        self._theme_mode = _mode
         if hasattr(self, "image_viewer") and self.image_viewer is not None:
             self.image_viewer._apply_background_from_palette()
+        self._update_sidebar_toggle_icon()
     
     def _update_render_settings_bands(self):
         """根据当前图像更新渲染设置的波段数和统计信息"""
@@ -142,13 +156,75 @@ class LocalImageViewerDialog(QDialog):
 
     def _show_loading_indicator(self, message):
         self.setWindowTitle(f"{self._loading_title_text} - 加载中")
-        if hasattr(self, 'image_info_label'):
-            self.image_info_label.setText(message.replace("\n", " | "))
+        if hasattr(self, "operation_progress") and self.operation_progress is not None:
+            self.operation_progress.start_task(message.replace("\n", " | "), 0)
         QApplication.processEvents()
 
     def _hide_loading_indicator(self):
+        if not isValid(self):
+            return
         self.setWindowTitle(self._loading_title_text)
-        self._refresh_image_info_label()
+        if hasattr(self, "operation_progress") and self.operation_progress is not None:
+            self.operation_progress.finish_task("完成")
+
+    def _toggle_sidebar(self):
+        if not hasattr(self, "render_sidebar") or not hasattr(self, "outer_splitter"):
+            return
+        if self._sidebar_visible:
+            self.render_sidebar.setVisible(False)
+            self.outer_splitter.setSizes([self.outer_splitter.width(), 0])
+            base_width = getattr(self, "_sidebar_base_width", 0)
+            if base_width > 0:
+                self.resize(base_width, self.height())
+            self._sidebar_visible = False
+        else:
+            sidebar_width = max(180, min(240, int(self.render_sidebar.sizeHint().width())))
+            self._sidebar_base_width = self.width()
+            self.resize(self._sidebar_base_width + sidebar_width, self.height())
+            self.render_sidebar.setVisible(True)
+            self.outer_splitter.setSizes([max(1, self._sidebar_base_width), sidebar_width])
+            self._sidebar_visible = True
+
+    def _load_material_icon_font(self) -> str | None:
+        font_path = Path(__file__).resolve().parents[2] / "resources" / "fonts" / "MaterialIcons-Regular.ttf"
+        if not font_path.exists():
+            return None
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        if font_id < 0:
+            return None
+        families = QFontDatabase.applicationFontFamilies(font_id)
+        return families[0] if families else None
+
+    def _material_icon(self, icon_name: str, *, size: int = 20) -> QIcon:
+        if not self._material_icon_family:
+            return QIcon()
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        font = QFont(self._material_icon_family)
+        font.setPixelSize(size - 2)
+        painter.setFont(font)
+        icon_color = QColor("#e6e6e6") if self._theme_mode == "dark" else QColor("#334155")
+        painter.setPen(icon_color)
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, icon_name)
+        painter.end()
+        return QIcon(pixmap)
+
+    def _update_sidebar_toggle_icon(self) -> None:
+        if hasattr(self, "toggle_sidebar_btn") and self.toggle_sidebar_btn is not None:
+            self.toggle_sidebar_btn.setIcon(self._material_icon("tune"))
+
+    def _on_db_toggled(self, enabled: bool) -> None:
+        if enabled == bool(self._converted_to_db):
+            return
+        if enabled:
+            self.convert_to_db(show_message=False)
+            return
+        self._converted_to_db = False
+        self._clear_hillshade_cache()
+        if self.image_file:
+            self.load_image(self.image_file)
 
     def _set_viewer_source_or_array(self, original_size=None):
         if self.image_source is not None:
@@ -159,24 +235,46 @@ class LocalImageViewerDialog(QDialog):
             self._base_render_source = None
             self._hillshade_cache_key = None
             self.image_viewer.set_raster_array(self.image_data, original_size=original_size)
+        if hasattr(self, "render_sidebar_controller"):
+            self.render_sidebar_controller.refresh()
+        if hasattr(self, "render_sidebar"):
+            self.render_sidebar.set_db_checked(bool(self._converted_to_db))
 
     def _reset_render_controls_for_new_image(self):
         """新图像使用默认渲染参数，避免继承上一幅图的显示状态。"""
-        if self.image_data is None:
+        metadata = None
+        if self.image_source is not None:
+            metadata = self.image_source.metadata()
+        elif self.image_viewer is not None:
+            state = self.image_viewer.layer_manager.layer(self.image_viewer.BASE_LAYER_ID)
+            metadata = None if state is None or state.layer is None else state.layer.metadata
+        if metadata is None:
             return
-        num_bands = self.image_data.shape[2] if self.image_data.ndim == 3 else 1
-        self.render_settings.reset_to_defaults(num_bands)
-        if num_bands >= 3:
-            self.render_settings.display_mode_combo.setCurrentText("RGB")
-            self.render_settings.set_stretch_mode(self.render_settings.STRETCH_NONE)
-            self.render_settings.auto_range_check.setChecked(False)
-        else:
-            self.render_settings.display_mode_combo.setCurrentText("灰度")
+        config = style_to_legacy_config(
+            DefaultRenderStyleFactory.create(metadata),
+            DefaultRenderStyleFactory.create_display_settings(metadata),
+        )
+        num_bands = int(metadata.band_count or 1)
+        self.render_settings.blockSignals(True)
         self.colormap_combo.blockSignals(True)
-        self.colormap_combo.setCurrentText("gray")
-        self.colormap_combo.blockSignals(False)
-        self.image_viewer.current_colormap = "gray"
-        self.image_viewer.render_config.colormap_name = "gray"
+        try:
+            self.render_settings.reset_to_defaults(num_bands)
+            self.render_settings.display_mode_combo.setCurrentText(config.display_mode)
+            self.render_settings.gray_band_spin.setValue(int(config.gray_band))
+            self.render_settings.band_r_spin.setValue(int(config.rgb_bands[0]))
+            self.render_settings.band_g_spin.setValue(int(config.rgb_bands[1]))
+            self.render_settings.band_b_spin.setValue(int(config.rgb_bands[2]))
+            self.render_settings.set_stretch_mode(config.stretch_mode)
+            self.render_settings.auto_range_check.setChecked(not bool(config.auto_range))
+            self.render_settings.min_spin.setValue(float(config.value_range[0]))
+            self.render_settings.max_spin.setValue(float(config.value_range[1]))
+            self.render_settings.gamma_spin.setValue(float(config.gamma))
+            self.colormap_combo.setCurrentText(config.colormap_name)
+        finally:
+            self.render_settings.blockSignals(False)
+            self.colormap_combo.blockSignals(False)
+        self.image_viewer.current_colormap = config.colormap_name
+        self.image_viewer.render_config.colormap_name = config.colormap_name
 
     def _create_standard_source(self, file_path):
         try:
@@ -281,15 +379,6 @@ class LocalImageViewerDialog(QDialog):
         self.open_h5_btn = QPushButton("打开h5文件")
         self.open_h5_btn.clicked.connect(self.open_h5_file)
         control_layout1.addWidget(self.open_h5_btn)
-        
-        self.set_nodata_btn = QPushButton("设置Nodata值")
-        self.set_nodata_btn.clicked.connect(self.set_nodata_value)
-        control_layout1.addWidget(self.set_nodata_btn)
-        
-        self.to_db_btn = QPushButton("转为dB")
-        self.to_db_btn.clicked.connect(self.convert_to_db)
-        self.to_db_btn.setEnabled(False)
-        control_layout1.addWidget(self.to_db_btn)
 
         # 绘制模式选择
         control_layout1.addWidget(QLabel("绘制模式:"))
@@ -311,97 +400,25 @@ class LocalImageViewerDialog(QDialog):
         self.mode_group.addButton(self.mode_polyline_radio, 2)
         control_layout1.addWidget(self.mode_polyline_radio)
         
-        self.clear_btn = QPushButton("清除绘制")
-        self.clear_btn.clicked.connect(self.clear_drawing)
-        control_layout1.addWidget(self.clear_btn)
-
-        self.fit_curve_check = QCheckBox("拟合曲线")
-        self.fit_curve_check.setChecked(self.show_fit_curve)
-        self.fit_curve_check.toggled.connect(self.on_fit_curve_toggled)
-        control_layout1.addWidget(self.fit_curve_check)
-        
         control_layout1.addStretch()
+        self.toggle_sidebar_btn = QToolButton()
+        self.toggle_sidebar_btn.setToolTip("侧边栏")
+        self.toggle_sidebar_btn.setAutoRaise(True)
+        self._update_sidebar_toggle_icon()
+        self.toggle_sidebar_btn.setIconSize(QSize(20, 20))
+        self.toggle_sidebar_btn.clicked.connect(self._toggle_sidebar)
+        control_layout1.addWidget(self.toggle_sidebar_btn)
         
         main_layout.addLayout(control_layout1)
         
-        # 第二行：渲染设置（波段选择、Colormap、拉伸、Gamma等）
-        # 顺序：波段选择 | Colormap+反向 | 拉伸 | 最大最小值 | Gamma
-        control_layout2 = QHBoxLayout()
-        control_layout2.setSpacing(5)
-        
-        # 渲染设置组件（包含波段选择、反向、拉伸、最大最小值、Gamma）
-        self.render_settings = RenderSettingsWidget(compact=True)
-        self.render_settings.settings_changed.connect(self.on_render_settings_changed)
-        self.render_settings.suggest_colormap.connect(self.on_suggest_colormap)
-        
-        # 从主窗口设置中读取平滑显示设置
-        from PySide6.QtCore import QSettings
-        settings = QSettings("Toolbox", "RemoteSensingToolbox")
-        smooth_display = settings.value("display/smooth_display", False, type=bool)
-        self.render_settings.set_smooth_display(smooth_display)
-        
-        # 把波段选择部分放最前面
-        control_layout2.addWidget(self.render_settings.band_widget)
-        
-        # 分隔线
-        sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
-        sep.setFrameShadow(QFrame.Sunken)
-        control_layout2.addWidget(sep)
-        
-        # Colormap选择
-        control_layout2.addWidget(QLabel("Colormap:"))
-        self.colormap_combo = ColormapComboBox()
-        self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
-        control_layout2.addWidget(self.colormap_combo)
-        
-        # "反向"选项（从render_settings中获取）
-        control_layout2.addWidget(self.render_settings.reverse_check)
-        
-        # 分隔线
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.VLine)
-        sep2.setFrameShadow(QFrame.Sunken)
-        control_layout2.addWidget(sep2)
-        
-        # 拉伸控件（从render_settings获取）
-        control_layout2.addWidget(QLabel("拉伸:"))
-        control_layout2.addWidget(self.render_settings.stretch_combo)
-        control_layout2.addWidget(self.render_settings.stretch_param_widget)
-        
-        # 分隔线
-        sep3 = QFrame()
-        sep3.setFrameShape(QFrame.VLine)
-        sep3.setFrameShadow(QFrame.Sunken)
-        control_layout2.addWidget(sep3)
-        
-        # 最大最小值控件（从render_settings获取）
-        control_layout2.addWidget(self.render_settings.auto_range_check)
-        control_layout2.addWidget(self.render_settings.min_spin)
-        control_layout2.addWidget(self.render_settings.range_dash_label)
-        control_layout2.addWidget(self.render_settings.max_spin)
-        
-        # 分隔线
-        sep4 = QFrame()
-        sep4.setFrameShape(QFrame.VLine)
-        sep4.setFrameShadow(QFrame.Sunken)
-        control_layout2.addWidget(sep4)
-        
-        # Gamma控件（从render_settings获取）
-        control_layout2.addWidget(QLabel("γ:"))
-        control_layout2.addWidget(self.render_settings.gamma_spin)
-        
-        control_layout2.addStretch()
-        
-        main_layout.addLayout(control_layout2)
-        
-        # 第二排：文件信息
-        info_layout = QHBoxLayout()
         self.image_info_label = QLabel("未加载图像")
-        info_layout.addWidget(self.image_info_label)
-        info_layout.addStretch()
-        main_layout.addLayout(info_layout)
-        
+        self.image_info_label.setVisible(False)
+
+        outer_splitter = QSplitter(Qt.Horizontal)
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+
         # 创建主分割器：左侧图像，右侧图表
         splitter = QSplitter(Qt.Horizontal)
         
@@ -451,12 +468,34 @@ class LocalImageViewerDialog(QDialog):
         
         splitter.addWidget(right_widget)
         
-        # 设置分割器比例：图像窗口占4/5，图表窗口占1/5
-        # 使用setSizes设置具体尺寸（像素）
         total_width = 1400
         splitter.setSizes([int(total_width * 0.6), int(total_width * 0.4)])
-        
-        main_layout.addWidget(splitter)
+        content_layout.addWidget(splitter)
+        outer_splitter.addWidget(content_widget)
+
+        self.render_sidebar = RenderSidebarWidget(mode="simple")
+        self.render_settings = self.render_sidebar.render_settings
+        self.colormap_combo = self.render_sidebar.colormap_combo
+        self.render_settings.settings_changed.connect(self.on_render_settings_changed)
+        self.render_settings.suggest_colormap.connect(self.on_suggest_colormap)
+        self.render_sidebar.db_toggled.connect(self._on_db_toggled)
+        settings = QSettings("Toolbox", "RemoteSensingToolbox")
+        smooth_display = settings.value("display/smooth_display", False, type=bool)
+        self.render_settings.set_smooth_display(smooth_display)
+        self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
+        self.render_sidebar_binding = SingleCanvasRenderBinding(self.image_viewer)
+        self.render_sidebar_controller = RenderSidebarController(self.render_sidebar, self.render_sidebar_binding)
+        outer_splitter.addWidget(self.render_sidebar)
+        outer_splitter.setStretchFactor(0, 4)
+        outer_splitter.setStretchFactor(1, 1)
+        outer_splitter.setSizes([total_width, 0])
+        self.outer_splitter = outer_splitter
+        self._sidebar_visible = False
+        self._sidebar_base_width = total_width
+        self.render_sidebar.setVisible(False)
+        main_layout.addWidget(outer_splitter)
+        self.operation_progress = OperationProgressWidget()
+        main_layout.addWidget(self.operation_progress)
         
     def _on_viewer_files_dropped(self, paths: list[str]) -> None:
         mode, target = self._classify_drop_target(paths)
@@ -701,8 +740,8 @@ class LocalImageViewerDialog(QDialog):
             # 自动显示整个图像的直方图
             self.show_image_histogram()
             
-            # 启用转dB按钮
-            self.to_db_btn.setEnabled(True)
+            if hasattr(self, "render_sidebar"):
+                self.render_sidebar.set_db_checked(bool(self._converted_to_db))
             
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开图像失败: {str(e)}")
@@ -823,6 +862,9 @@ class LocalImageViewerDialog(QDialog):
 
     def on_colormap_changed(self, colormap_name):
         """颜色映射改变"""
+        if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
+            # 侧边栏模式下由 RenderSidebarController -> LayerManager 驱动，不走旧全局设置链路
+            return
         # 跳过分隔符项（分隔符以"━"开头）
         if colormap_name.startswith('━'):
             return
@@ -840,12 +882,23 @@ class LocalImageViewerDialog(QDialog):
     
     def on_render_settings_changed(self):
         """渲染设置变化时延迟更新图像显示，避免频繁重绘。"""
+        if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
+            return
+        if not isValid(self):
+            return
         if self.image_data is not None:
             self._show_loading_indicator("正在重新渲染图像...")
-        self._render_update_timer.start(150)
+        if hasattr(self, "_render_update_timer") and isValid(self._render_update_timer):
+            self._render_update_timer.start(150)
 
     def _apply_render_settings_update(self):
+        if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
+            return
+        if not isValid(self):
+            return
         try:
+            if not hasattr(self, "image_viewer") or not isValid(self.image_viewer):
+                return
             settings = self.render_settings.get_all_settings()
             self.colormap_combo.setEnabled(settings.get("display_mode") != "RGB")
             if settings.get("display_mode") != "晕渲地貌":
@@ -863,12 +916,26 @@ class LocalImageViewerDialog(QDialog):
         finally:
             self._hide_loading_indicator()
 
+    def closeEvent(self, event):
+        try:
+            if hasattr(self, "_render_update_timer") and isValid(self._render_update_timer):
+                self._render_update_timer.stop()
+            if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
+                self.render_sidebar_controller.close()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
     def _restore_base_render_source(self) -> None:
         if self._base_render_source is not None and self.image_source is not self._base_render_source:
             self.image_source = self._base_render_source
             self._hillshade_cache_key = None
             self.image_data = self.image_source.read_window_native(0, 0, 1, 1)
             self.image_viewer.set_raster_source(self.image_source, reset_view=False)
+
+    def _clear_hillshade_cache(self) -> None:
+        self._hillshade_cache_key = None
+        self._restore_base_render_source()
 
     def _prepare_render_source_for_settings(self, settings: dict) -> dict:
         """为晕渲地貌这类派生图像准备缓存源，避免缩放/平移时反复计算。"""
@@ -1847,8 +1914,8 @@ class LocalImageViewerDialog(QDialog):
             # 自动显示整个图像的直方图
             self.show_image_histogram()
             
-            # 启用转dB按钮
-            self.to_db_btn.setEnabled(True)
+            if hasattr(self, "render_sidebar"):
+                self.render_sidebar.set_db_checked(bool(self._converted_to_db))
             
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开h5文件失败: {str(e)}")
@@ -2112,8 +2179,8 @@ class LocalImageViewerDialog(QDialog):
             # 显示直方图
             self.show_image_histogram()
             
-            # 启用转dB按钮
-            self.to_db_btn.setEnabled(True)
+            if hasattr(self, "render_sidebar"):
+                self.render_sidebar.set_db_checked(bool(self._converted_to_db))
             
         except Exception as e:
             QMessageBox.critical(self, "错误", f"打开GAMMA文件失败: {str(e)}")
@@ -2192,7 +2259,7 @@ class LocalImageViewerDialog(QDialog):
             traceback.print_exc()
             return None
     
-    def convert_to_db(self):
+    def convert_to_db(self, show_message: bool = True):
         """将显示的图像转换为dB (10*log10)"""
         if self.image_data is None:
             return
@@ -2231,8 +2298,12 @@ class LocalImageViewerDialog(QDialog):
             # 重新显示直方图
             self.show_image_histogram()
             
-            QMessageBox.information(self, "成功", "已转换为dB (10*log10)")
+            if hasattr(self, "render_sidebar"):
+                self.render_sidebar.set_db_checked(True)
+            if show_message:
+                QMessageBox.information(self, "成功", "已转换为dB (10*log10)")
             
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"转换为dB失败: {str(e)}")
+            if show_message:
+                QMessageBox.critical(self, "错误", f"转换为dB失败: {str(e)}")
             traceback.print_exc()

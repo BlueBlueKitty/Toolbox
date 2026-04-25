@@ -10,7 +10,15 @@ from .colormap_combobox import ColormapComboBox
 from .interactive_image_viewer import InteractiveImageViewer
 from .leaflet_map_widget import LeafletMapWidget, MapBridge, WEBENGINE_AVAILABLE
 from .render_settings_widget import RenderSettingsWidget, apply_render_settings
+from .render_sidebar_widget import (
+    LayerManagerRenderBinding,
+    MultiCanvasRenderBinding,
+    RenderSidebarController,
+    RenderSidebarWidget,
+    SingleCanvasRenderBinding,
+)
 from .colorbar_widget import ColorbarWidget
+from .operation_progress_widget import OperationProgressWidget
 
 __all__ = [
     'LayeredRasterCanvas', 
@@ -20,7 +28,13 @@ __all__ = [
     'MapBridge',
     'WEBENGINE_AVAILABLE',
     'RenderSettingsWidget',
+    'RenderSidebarWidget',
+    'RenderSidebarController',
+    'SingleCanvasRenderBinding',
+    'MultiCanvasRenderBinding',
+    'LayerManagerRenderBinding',
     'apply_render_settings',
     'RasterCanvasSynchronizer',
     'ColorbarWidget',
+    'OperationProgressWidget',
 ]

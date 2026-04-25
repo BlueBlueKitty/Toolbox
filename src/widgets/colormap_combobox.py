@@ -49,8 +49,8 @@ class ColormapDelegate(QStyledItemDelegate):
             painter.drawText(option.rect, Qt.AlignCenter, colormap_name)
             return
         
-        # 绘制colormap渐变条
-        gradient_rect = option.rect.adjusted(5, 5, -100, -5)
+        # 绘制colormap渐变条 + 名称
+        gradient_rect = option.rect.adjusted(5, 5, -64, -5)
         
         if MATPLOTLIB_AVAILABLE and colormap_name != 'gray':
             try:
@@ -89,15 +89,14 @@ class ColormapDelegate(QStyledItemDelegate):
             gradient.setColorAt(0, Qt.black)
             gradient.setColorAt(1, Qt.white)
             painter.fillRect(gradient_rect, gradient)
-        
-        # 绘制文本
-        text_rect = option.rect.adjusted(gradient_rect.width() + 10, 0, -5, 0)
+
+        text_rect = option.rect.adjusted(gradient_rect.right() + 6, 0, -8, 0)
         painter.setPen(option.palette.text().color())
         painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, colormap_name)
-    
+        
     def sizeHint(self, option, index):
         """返回项目大小提示"""
-        return QSize(200, 30)
+        return QSize(150, 24)
 
 
 class ColormapComboBox(QComboBox):
@@ -185,8 +184,9 @@ class ColormapComboBox(QComboBox):
         self.available_colormaps.extend(misc_colormaps)
         
         # 设置下拉框样式
-        self.setIconSize(QSize(150, 20))
-        self.setMinimumWidth(200)
+        self.setIconSize(QSize(98, 16))
+        self.setMinimumWidth(120)
+        self._apply_icons()
         
     def get_current_colormap(self):
         """获取当前选中的colormap名称（排除分隔符）"""
@@ -195,3 +195,39 @@ class ColormapComboBox(QComboBox):
             return current
         # 如果当前是分隔符，返回第一个有效colormap
         return self.available_colormaps[0] if self.available_colormaps else 'gray'
+
+    def _apply_icons(self):
+        for index in range(self.count()):
+            name = self.itemText(index)
+            if name not in self.available_colormaps:
+                continue
+            self.setItemIcon(index, QIcon(self._create_colormap_pixmap(name)))
+
+    def _create_colormap_pixmap(self, colormap_name: str) -> QPixmap:
+        width, height = 94, 14
+        pixmap = QPixmap(width, height)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        rect = pixmap.rect()
+        if MATPLOTLIB_AVAILABLE and colormap_name != "gray":
+            try:
+                cmap = cm.get_cmap(colormap_name)
+                x = np.linspace(0, 1, width)
+                colors = cmap(x)
+                rgb = (colors[:, :3] * 255).astype(np.uint8)
+                rgb = np.repeat(rgb[np.newaxis, :, :], height, axis=0)
+                rgb = np.ascontiguousarray(rgb)
+                image = QImage(rgb.data, width, height, width * 3, QImage.Format_RGB888)
+                painter.drawImage(rect, image)
+            except Exception:
+                gradient = QLinearGradient(rect.topLeft(), rect.topRight())
+                gradient.setColorAt(0, Qt.black)
+                gradient.setColorAt(1, Qt.white)
+                painter.fillRect(rect, gradient)
+        else:
+            gradient = QLinearGradient(rect.topLeft(), rect.topRight())
+            gradient.setColorAt(0, Qt.black)
+            gradient.setColorAt(1, Qt.white)
+            painter.fillRect(rect, gradient)
+        painter.end()
+        return pixmap

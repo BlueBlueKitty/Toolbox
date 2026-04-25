@@ -11,10 +11,13 @@ from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QBrush, QPen
 from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsItem, QGraphicsLineItem, QVBoxLayout, QWidget
 import pyqtgraph as pg
+from shiboken6 import isValid
 
 from .config import default_raster_render_config, render_raster_rgb
 from .layers import LayerManager
-from .models import LayerSpec, RenderRequest, RenderTileResult, ViewportState
+from .models import LayerSpec, RasterLayer, RenderRequest, RenderTileResult, ViewportState
+from .style_auto_selector import DefaultRenderStyleFactory
+from .styles import default_display_settings, legacy_config_to_style, style_to_legacy_config
 
 _UNSET = object()
 
@@ -47,6 +50,8 @@ class LayeredRasterCanvas(QWidget):
 
         self.layer_manager = LayerManager()
         self.layer_manager.add_layer(LayerSpec(self.BASE_LAYER_ID, "图像", "raster", locked=True), self.image_item)
+        self.layer_manager.layer_style_changed.connect(self._on_base_layer_style_changed)
+        self.layer_manager.layer_display_changed.connect(self._on_base_layer_display_changed)
 
         self.image_array = None
         self.source = None
@@ -110,6 +115,7 @@ class LayeredRasterCanvas(QWidget):
         else:
             self.original_height, self.original_width = image_array.shape[:2]
             self.downsample_factor = 1.0
+        self._sync_base_layer_from_array(image_array)
         if refresh:
             self._update_display()
 
@@ -128,6 +134,7 @@ class LayeredRasterCanvas(QWidget):
         self.nodata_value = metadata.nodata if nodata_value is _UNSET else nodata_value
         self.geotransform = metadata.geotransform
         self.projection = metadata.crs_wkt
+        self._sync_base_layer_from_source(source, metadata)
         self._image_rect = QRectF(0, 0, self.original_width, self.original_height)
         margin_x = max(self.original_width * 4, 1)
         margin_y = max(self.original_height * 4, 1)
@@ -221,11 +228,13 @@ class LayeredRasterCanvas(QWidget):
     def set_colormap(self, colormap_name):
         self.current_colormap = colormap_name
         self.render_config.colormap_name = colormap_name
+        self._sync_base_layer_from_config()
         self._update_display() if self.source is None else self.refresh_view()
 
     def set_colormap_reversed(self, reversed):
         self.colormap_reversed = reversed
         self.render_config.colormap_reversed = reversed
+        self._sync_base_layer_from_config()
         self._update_display() if self.source is None else self.refresh_view()
 
     def set_render_config(self, render_config) -> None:
@@ -233,14 +242,18 @@ class LayeredRasterCanvas(QWidget):
         self.current_colormap = render_config.colormap_name
         self.colormap_reversed = render_config.colormap_reversed
         self._last_request_signature = None
+        self._sync_base_layer_from_config()
         self.refresh_view() if self.source is not None else self._update_display()
 
     def set_render_settings(self, settings):
+        if not isValid(self):
+            return
         self.render_settings = settings
         if settings:
             self.colormap_reversed = settings.get("colormap_reversed", False)
         self.render_config = self._render_config_from_state()
         self._last_request_signature = None
+        self._sync_base_layer_from_config()
         self.refresh_view() if self.source is not None else self._update_display()
 
     def prime_render_settings(self, settings):
@@ -250,9 +263,11 @@ class LayeredRasterCanvas(QWidget):
             self.colormap_reversed = settings.get("colormap_reversed", False)
         self.render_config = self._render_config_from_state()
         self._last_request_signature = None
+        self._sync_base_layer_from_config()
 
     def set_nodata_value(self, nodata_value):
         self.nodata_value = nodata_value
+        self._sync_base_layer_nodata(nodata_value)
         self.refresh_view() if self.source is not None else self._update_display()
 
     def set_geotransform(self, geotransform, projection=None):
@@ -476,9 +491,12 @@ class LayeredRasterCanvas(QWidget):
             self.refresh_view()
 
     def refresh_view(self):
-        if self.source is None:
+        if self.source is None or not isValid(self):
             return
         request = self.current_render_request()
+        if request is None:
+            return
+        request.layer_id = self.BASE_LAYER_ID
         signature = (
             int(request.x),
             int(request.y),
@@ -488,12 +506,17 @@ class LayeredRasterCanvas(QWidget):
             int(request.screen_height),
             tuple(request.bands or ()),
             self._render_config_signature(),
+            self._base_layer_revision(),
         )
         if signature == self._last_request_signature and self.last_render is not None:
             return
         self._last_request_signature = signature
         render_config = self._render_config_from_state()
-        result = self.source.render(request, render_config)
+        base_state = self.layer_manager.layer(self.BASE_LAYER_ID)
+        if base_state is not None and base_state.layer is not None:
+            result = self.source.render(request, style_to_legacy_config(base_state.layer.render_style, base_state.layer.display_settings))
+        else:
+            result = self.source.render(request, render_config)
         if self.nodata_value != getattr(self.source.metadata(), "nodata", None):
             rect_x, rect_y, rect_width, rect_height = result.image_rect
             display_rgb = render_raster_rgb(
@@ -528,8 +551,18 @@ class LayeredRasterCanvas(QWidget):
         self._rebuild_selected_pixel_marker()
 
     def current_render_request(self) -> RenderRequest:
+        if not all(
+            isValid(obj) for obj in (self, self.graphics, self.view_box)
+        ):
+            return None
         ((x0, x1), (y0, y1)) = self.view_box.viewRange()
-        view_rect = self.graphics.viewport().rect()
+        try:
+            viewport = self.graphics.viewport()
+            if viewport is None or not isValid(viewport):
+                return None
+            view_rect = viewport.rect()
+        except RuntimeError:
+            return None
         viewport_width = max(int(view_rect.width()), 1)
         viewport_height = max(int(view_rect.height()), 1)
         width = max(x1 - x0, 1)
@@ -744,6 +777,151 @@ class LayeredRasterCanvas(QWidget):
             config.colormap_reversed = self.colormap_reversed
         config.colormap_name = self.current_colormap
         return config
+
+    def _sync_base_layer_from_source(self, source, metadata) -> None:
+        current_config = self._render_config_from_state()
+        auto_style = DefaultRenderStyleFactory.create(metadata)
+        if current_config is None:
+            render_style = auto_style
+        else:
+            current_style = legacy_config_to_style(current_config, metadata)
+            if self._should_prefer_auto_style(current_style, auto_style, metadata):
+                render_style = auto_style
+            else:
+                render_style = current_style
+        display_settings = DefaultRenderStyleFactory.create_display_settings(metadata)
+        if self.nodata_value is not None and display_settings.nodata_policy.value != self.nodata_value:
+            display_settings = replace(
+                display_settings,
+                nodata_policy=replace(display_settings.nodata_policy, value=self.nodata_value, use_source_nodata=False),
+            )
+        layer = RasterLayer(
+            id=self.BASE_LAYER_ID,
+            name="图像",
+            source=source,
+            metadata=metadata,
+            render_style=render_style,
+            display_settings=display_settings,
+            visible=True,
+            selected=self.layer_manager.active_layer_id() == self.BASE_LAYER_ID,
+            locked=True,
+        )
+        self.layer_manager.add_raster_layer(layer, item=self.image_item)
+        self.render_config = style_to_legacy_config(render_style, display_settings)
+        self.current_colormap = self.render_config.colormap_name
+        self.colormap_reversed = self.render_config.colormap_reversed
+        self.layer_manager.set_active_layer(self.BASE_LAYER_ID)
+
+    def _sync_base_layer_from_array(self, image_array) -> None:
+        metadata = self._memory_metadata_for_array(image_array)
+        current_style = legacy_config_to_style(self._render_config_from_state(), metadata)
+        auto_style = DefaultRenderStyleFactory.create(metadata)
+        render_style = auto_style if self._should_prefer_auto_style(current_style, auto_style, metadata) else current_style
+        display_settings = default_display_settings(nodata_value=self.nodata_value)
+        layer = RasterLayer(
+            id=self.BASE_LAYER_ID,
+            name="图像",
+            source=None,
+            metadata=metadata,
+            render_style=render_style,
+            display_settings=display_settings,
+            visible=True,
+            selected=self.layer_manager.active_layer_id() == self.BASE_LAYER_ID,
+            locked=True,
+        )
+        self.layer_manager.add_raster_layer(layer, item=self.image_item)
+        self.layer_manager.set_active_layer(self.BASE_LAYER_ID)
+
+    def _sync_base_layer_from_config(self) -> None:
+        state = self.layer_manager.layer(self.BASE_LAYER_ID)
+        if state is None or state.layer is None:
+            return
+        state.layer.render_style = legacy_config_to_style(self._render_config_from_state(), state.layer.metadata)
+        state.layer.revision += 1
+        self.layer_manager.layer_style_changed.emit(self.BASE_LAYER_ID)
+
+    def _should_prefer_auto_style(self, current_style, auto_style, metadata) -> bool:
+        current_renderer = getattr(current_style, "renderer_type", "")
+        auto_renderer = getattr(auto_style, "renderer_type", "")
+        if auto_renderer == current_renderer:
+            return False
+        if auto_renderer in {"multiband", "paletted"} and current_renderer in {"singleband_gray", "singleband_pseudocolor"}:
+            band_indices = tuple(getattr(current_style, "band_indices", ()) or ())
+            color_ramp = getattr(getattr(current_style, "color_ramp", None), "name", "gray")
+            if band_indices in {(), (1,)} and str(color_ramp or "gray") == "gray":
+                return True
+        if auto_renderer == "singleband_pseudocolor" and current_renderer == "singleband_gray":
+            return True
+        if int(getattr(metadata, "band_count", 1) or 1) >= 3 and auto_renderer == "multiband" and current_renderer != "multiband":
+            return True
+        return False
+
+    def _sync_base_layer_nodata(self, nodata_value) -> None:
+        state = self.layer_manager.layer(self.BASE_LAYER_ID)
+        if state is None or state.layer is None:
+            return
+        display_settings = replace(
+            state.layer.display_settings,
+            nodata_policy=replace(
+                state.layer.display_settings.nodata_policy,
+                value=nodata_value,
+                use_source_nodata=nodata_value is None,
+            ),
+        )
+        self.layer_manager.set_display_settings(self.BASE_LAYER_ID, display_settings)
+
+    def _memory_metadata_for_array(self, image_array):
+        from .models import ImageSourceMetadata
+
+        return ImageSourceMetadata(
+            id=self.BASE_LAYER_ID,
+            path="",
+            path_mode="memory",
+            width=int(image_array.shape[1]),
+            height=int(image_array.shape[0]),
+            band_count=1 if image_array.ndim == 2 else int(image_array.shape[2]),
+            dtype=str(image_array.dtype),
+            nodata=self.nodata_value,
+            crs_wkt=self.projection,
+            geotransform=self.geotransform,
+            resolution=None,
+            has_georef=bool(self.geotransform or self.projection),
+            custom_properties={"source_kind": "memory"},
+        )
+
+    def _base_layer_revision(self) -> int:
+        state = self.layer_manager.layer(self.BASE_LAYER_ID)
+        if state is None or state.layer is None:
+            return 0
+        return int(state.layer.revision)
+
+    def _on_base_layer_style_changed(self, layer_id: str) -> None:
+        if layer_id != self.BASE_LAYER_ID:
+            return
+        state = self.layer_manager.layer(layer_id)
+        if state is None or state.layer is None:
+            return
+        self.render_config = style_to_legacy_config(state.layer.render_style, state.layer.display_settings)
+        self.current_colormap = self.render_config.colormap_name
+        self.colormap_reversed = self.render_config.colormap_reversed
+        self._last_request_signature = None
+        if self.source is not None:
+            self.refresh_view()
+        elif self.image_array is not None:
+            self._update_display()
+
+    def _on_base_layer_display_changed(self, layer_id: str) -> None:
+        if layer_id != self.BASE_LAYER_ID:
+            return
+        state = self.layer_manager.layer(layer_id)
+        if state is None or state.layer is None:
+            return
+        self.nodata_value = state.layer.display_settings.nodata_policy.value
+        self._last_request_signature = None
+        if self.source is not None:
+            self.refresh_view()
+        elif self.image_array is not None:
+            self._update_display()
 
     def _render_config_signature(self):
         config = self._render_config_from_state()

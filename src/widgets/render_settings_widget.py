@@ -62,14 +62,12 @@ class RenderSettingsWidget(QWidget):
     suggest_colormap = Signal(str)  # 参数为建议的colormap名称
     
     # 拉伸方式定义
-    STRETCH_NONE = "无拉伸"
     STRETCH_MIN_MAX = "最大最小"
     STRETCH_PERCENT = "百分比截断"
     STRETCH_STD_DEV = "标准差"
     STRETCH_HISTOGRAM = "直方图均衡化"
     
     STRETCH_MODES = [
-        STRETCH_NONE,
         STRETCH_MIN_MAX,
         STRETCH_PERCENT,
         STRETCH_STD_DEV,
@@ -223,15 +221,17 @@ class RenderSettingsWidget(QWidget):
         stretch_param_layout.addWidget(self.percent_high_spin)
         
         # 标准差参数
+        self.std_dev_label = QLabel("标准差数量")
         self.std_dev_spin = QDoubleSpinBox()
         self.std_dev_spin.setRange(0.5, 10)
         self.std_dev_spin.setValue(self._std_dev_n)
         self.std_dev_spin.setSingleStep(0.5)
         self.std_dev_spin.setKeyboardTracking(False)
-        self.std_dev_spin.setPrefix("n=")
+        self.std_dev_spin.setPrefix("")
         self.std_dev_spin.setMaximumWidth(70)
         self.std_dev_spin.valueChanged.connect(self._on_settings_changed)
         self.std_dev_spin.setToolTip("标准差倍数")
+        stretch_param_layout.addWidget(self.std_dev_label)
         stretch_param_layout.addWidget(self.std_dev_spin)
         
         # ============ 4. 数值范围（最大最小值）============
@@ -468,6 +468,8 @@ class RenderSettingsWidget(QWidget):
         
         # 标准差参数
         show_std = (mode == self.STRETCH_STD_DEV)
+        if hasattr(self, "std_dev_label"):
+            self.std_dev_label.setVisible(show_std)
         self.std_dev_spin.setVisible(show_std)
         
     def _update_band_controls_visibility(self):
@@ -556,7 +558,8 @@ class RenderSettingsWidget(QWidget):
     
     def get_stretch_mode(self):
         """获取拉伸方式"""
-        return self.stretch_combo.currentText()
+        value = self.stretch_combo.currentText()
+        return self.STRETCH_MIN_MAX if value == "无拉伸" else value
     
     def get_percent_clip(self):
         """获取百分比截断参数 (low, high)"""
@@ -696,14 +699,9 @@ class RenderSettingsWidget(QWidget):
             self.band_b_spin.setValue(1)
         
         # 如果只有单波段，只能使用灰度或晕渲地貌模式
-        if num_bands == 1:
-            # 如果当前是RGB模式，切换到灰度
-            if self.display_mode_combo.currentText() == "RGB":
-                self.display_mode_combo.setCurrentText("灰度")
-            # 单波段也允许使用晕渲地貌
-            self.display_mode_combo.setEnabled(True)
-        else:
-            self.display_mode_combo.setEnabled(True)
+        if num_bands == 1 and self.display_mode_combo.currentText() == "RGB":
+            self.display_mode_combo.setCurrentText("灰度")
+        self.display_mode_combo.setEnabled(True)
             
         self._block_signals = False
         self._update_band_controls_visibility()
@@ -750,7 +748,7 @@ class RenderSettingsWidget(QWidget):
         self._value_min = min_val
         self._value_max = max_val
         self._block_signals = False
-    
+
     def set_image_stats(self, min_val, max_val):
         """设置图像统计信息（最小值、最大值），用于填充到输入框"""
         self._block_signals = True
@@ -763,8 +761,9 @@ class RenderSettingsWidget(QWidget):
         
     def set_stretch_mode(self, mode):
         """设置拉伸方式"""
-        if mode in self.STRETCH_MODES:
-            self.stretch_combo.setCurrentText(mode)
+        normalized = self.STRETCH_MIN_MAX if mode == "无拉伸" else mode
+        if normalized in self.STRETCH_MODES:
+            self.stretch_combo.setCurrentText(normalized)
             
     def set_gamma(self, gamma):
         """设置Gamma值"""
@@ -877,9 +876,7 @@ def _apply_stretch_to_channel(arr, valid_mask, settings, nodata_value):
     
     # 计算拉伸范围
     if settings.get('auto_range', True):
-        if stretch_mode == RenderSettingsWidget.STRETCH_NONE:
-            vmin, vmax = np.min(valid_data), np.max(valid_data)
-        elif stretch_mode == RenderSettingsWidget.STRETCH_MIN_MAX:
+        if stretch_mode == "无拉伸" or stretch_mode == RenderSettingsWidget.STRETCH_MIN_MAX:
             vmin, vmax = np.min(valid_data), np.max(valid_data)
         elif stretch_mode == RenderSettingsWidget.STRETCH_PERCENT:
             low, high = settings.get('percent_clip', (2.0, 98.0))

@@ -76,6 +76,18 @@ class LayerPanelWidget(QGroupBox):
             for index in range(self.layer_list.count())
         ]
 
+    def set_current_layer(self, layer_id: str | None) -> None:
+        self._updating = True
+        try:
+            if layer_id is None:
+                self.layer_list.setCurrentItem(None)
+                return
+            item = self._item_for_layer(layer_id)
+            if item is not None:
+                self.layer_list.setCurrentItem(item)
+        finally:
+            self._updating = False
+
     def _item_for_layer(self, layer_id: str):
         for index in range(self.layer_list.count()):
             item = self.layer_list.item(index)

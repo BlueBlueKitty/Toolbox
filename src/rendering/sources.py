@@ -24,17 +24,33 @@ from src.utils.display_pyramid import (
 )
 from src.utils.gamma_file_process import read_gamma_pixel, read_gamma_region, validate_dimensions
 
-from .config import RasterRenderConfig, _apply_colormap_to_normalized, render_raster_rgb
-from .models import ImageSourceMetadata, RenderRequest, RenderTileResult
+from .config import RasterRenderConfig
+from .models import ImageSourceMetadata, RawRasterBlock, RenderRequest, RenderTileResult
 from .overview_manager import build_overviews, choose_overview_for_scale, detect_overviews
+from .pipeline import DEFAULT_RENDER_PIPELINE
+from .style_auto_selector import DefaultRenderStyleFactory
+from .styles import default_display_settings, legacy_config_to_style
 
 
 class RasterImageSource:
     def metadata(self) -> ImageSourceMetadata:
         raise NotImplementedError
 
-    def render(self, request: RenderRequest, render_config: RasterRenderConfig) -> RenderTileResult:
+    def read_block(self, request: RenderRequest, style=None) -> RawRasterBlock:
         raise NotImplementedError
+
+    def render(self, request: RenderRequest, render_config: RasterRenderConfig) -> RenderTileResult:
+        metadata = self.metadata()
+        style = legacy_config_to_style(render_config, metadata)
+        display_settings = default_display_settings(nodata_value=metadata.nodata)
+        return DEFAULT_RENDER_PIPELINE.render_source(
+            self,
+            request,
+            style,
+            display_settings,
+            layer_id=getattr(request, "layer_id", None),
+            layer_revision=0,
+        )
 
     def read_pixel(self, x: int, y: int):
         raise NotImplementedError
@@ -86,6 +102,13 @@ class GdalRasterSource(RasterImageSource):
         band = ds.GetRasterBand(1)
         color_table = None
         has_color_table = False
+        color_interpretations = []
+        for band_index in range(1, ds.RasterCount + 1):
+            try:
+                interp = gdal.GetColorInterpretationName(ds.GetRasterBand(band_index).GetColorInterpretation())
+                color_interpretations.append(str(interp or "").lower())
+            except Exception:
+                color_interpretations.append("")
         try:
             ct = band.GetColorTable()
             if ct is not None:
@@ -112,27 +135,27 @@ class GdalRasterSource(RasterImageSource):
             has_color_table=has_color_table,
             color_table=color_table,
             overview_levels=detect_overviews(ds),
+            color_interpretations=color_interpretations,
+            custom_properties={"source_kind": "gdal"},
         )
 
     def metadata(self) -> ImageSourceMetadata:
         return self._metadata
 
-    def render(self, request: RenderRequest, render_config: RasterRenderConfig) -> RenderTileResult:
+    def read_block(self, request: RenderRequest, style=None) -> RawRasterBlock:
         x0, y0, width, height, req_rect = self._clip_request(request)
         req_x, req_y, req_width, req_height = req_rect
         target_pixel_x = max(float(request.width) / max(request.screen_width, 1), 1e-9)
         target_pixel_y = max(float(request.height) / max(request.screen_height, 1), 1e-9)
         target_downsample = max(target_pixel_x, target_pixel_y, 1.0)
         overview = choose_overview_for_scale(self._metadata.overview_levels, target_downsample)
-        bands = self._select_bands(request, render_config)
+        bands = self._select_bands(request, style)
         buf_x = max(1, int(request.screen_width))
         buf_y = max(1, int(request.screen_height))
         dst_x = min(max(0, int(round((req_x - request.x) / target_pixel_x))), buf_x - 1)
         dst_y = min(max(0, int(round((req_y - request.y) / target_pixel_y))), buf_y - 1)
         read_buf_x = max(1, min(buf_x - dst_x, int(np.ceil(req_width / target_pixel_x - 1e-9))))
         read_buf_y = max(1, min(buf_y - dst_y, int(np.ceil(req_height / target_pixel_y - 1e-9))))
-        # Keep display geometry on the requested viewport grid; overviews only
-        # change the sampling source, not the ImageItem rect.
         image_rect = (float(request.x), float(request.y), float(request.width), float(request.height))
         source_window = (x0, y0, width, height)
         clipped_to_request = dst_x != 0 or dst_y != 0 or read_buf_x != buf_x or read_buf_y != buf_y
@@ -160,16 +183,15 @@ class GdalRasterSource(RasterImageSource):
                 arrays[-1] = _embed_array_in_request(arrays[-1], (buf_y, buf_x), dst_x, dst_y, self._metadata.nodata)
 
         raw = arrays[0] if len(arrays) == 1 else np.stack(arrays, axis=-1)
-        display_rgb = render_raster_rgb(
-            raw,
-            render_config,
+        return RawRasterBlock(
+            data=raw,
+            image_rect=image_rect,
+            source_window=source_window,
+            overview_level=overview,
             nodata_value=self._metadata.nodata,
-            color_table=self._metadata.color_table,
-            geotransform=self._window_geotransform(request.x, request.y),
-            projection=self._metadata.crs_wkt,
-            downsample_factor=max(request.width / max(raw.shape[1], 1), request.height / max(raw.shape[0], 1), 1.0),
+            metadata=self._metadata,
+            band_indices=tuple(bands),
         )
-        return RenderTileResult(raw, display_rgb, image_rect, overview, source_window)
 
     def read_pixel(self, x: int, y: int):
         if not (0 <= x < self._metadata.width and 0 <= y < self._metadata.height):
@@ -265,25 +287,12 @@ class GdalRasterSource(RasterImageSource):
         y1 = min(self._metadata.height, max(y0 + 1, int(np.ceil(req_y1))))
         return x0, y0, max(1, x1 - x0), max(1, y1 - y0), (req_x0, req_y0, req_x1 - req_x0, req_y1 - req_y0)
 
-    def _select_bands(self, request: RenderRequest, render_config: RasterRenderConfig):
+    def _select_bands(self, request: RenderRequest, style):
         if request.bands:
             return request.bands
-        if render_config.display_mode == "RGB":
-            return tuple(min(max(int(index), 1), self._metadata.band_count) for index in render_config.rgb_bands)
-        return (min(max(int(render_config.gray_band), 1), self._metadata.band_count),)
-
-    def _window_geotransform(self, x0: float, y0: float):
-        gt = self._metadata.geotransform
-        if gt is None:
-            return None
-        return (
-            gt[0] + x0 * gt[1] + y0 * gt[2],
-            gt[1],
-            gt[2],
-            gt[3] + x0 * gt[4] + y0 * gt[5],
-            gt[4],
-            gt[5],
-        )
+        if style is not None and getattr(style, "band_indices", None):
+            return tuple(min(max(int(index), 1), self._metadata.band_count) for index in style.band_indices)
+        return (1,)
 
 
 class GammaVrtRasterSource(GdalRasterSource):
@@ -296,25 +305,10 @@ class GammaVrtRasterSource(GdalRasterSource):
         vrt_threshold = 0 if _file_meets_threshold(file_path, pyramid_threshold_mb) else None
         super().__init__(vrt_path, source_path=file_path, pyramid_threshold_mb=vrt_threshold)
         self._metadata.nodata = 0
-
-    def render(self, request: RenderRequest, render_config: RasterRenderConfig) -> RenderTileResult:
-        result = super().render(request, render_config)
-        if self.gamma_format.lower().startswith("cpx"):
-            raw = np.angle(result.raw_array).astype(np.float32)
-            display_rgb = render_raster_rgb(
-                raw,
-                render_config,
-                nodata_value=0,
-                geotransform=self._window_geotransform(result.image_rect[0], result.image_rect[1]),
-                projection=self._metadata.crs_wkt,
-                downsample_factor=max(
-                    result.image_rect[2] / max(raw.shape[1], 1),
-                    result.image_rect[3] / max(raw.shape[0], 1),
-                    1.0,
-                ),
-            )
-            return RenderTileResult(raw, display_rgb, result.image_rect, result.overview_level, result.source_window)
-        return result
+        self._metadata.custom_properties.update({
+            "source_kind": "gamma",
+            "gamma_format": gamma_format,
+        })
 
     def read_pixel(self, x: int, y: int):
         value = read_gamma_pixel(self.gamma_file_path, x, y, self._metadata.width, self._metadata.height, self.gamma_format)
@@ -326,7 +320,7 @@ class GammaVrtRasterSource(GdalRasterSource):
 
 
 class HillshadeCompositeRasterSource(RasterImageSource):
-    """Render a base raster overview multiplied by a cached hillshade overview."""
+    """兼容层：保留旧的晕渲缓存数据源接口。"""
 
     def __init__(self, base_source: RasterImageSource, hillshade_source: RasterImageSource):
         self.base_source = base_source
@@ -335,51 +329,14 @@ class HillshadeCompositeRasterSource(RasterImageSource):
     def metadata(self) -> ImageSourceMetadata:
         return self.base_source.metadata()
 
+    def read_block(self, request: RenderRequest, style=None) -> RawRasterBlock:
+        return self.base_source.read_block(request, style=style)
+
     def render(self, request: RenderRequest, render_config: RasterRenderConfig) -> RenderTileResult:
-        from src.widgets.render_settings_widget import apply_hillshade_blend
-
-        base_config = replace(render_config, display_mode="灰度")
-        base_result = self.base_source.render(request, base_config)
-        shade_config = RasterRenderConfig(
-            display_mode="灰度",
-            gray_band=1,
-            auto_range=False,
-            value_range=(0.0, 1.0),
-            global_value_range=None,
-            colormap_name="gray",
-        )
-        shade_result = self.hillshade_source.render(request, shade_config)
-
-        settings = render_config.to_settings()
-        settings["display_mode"] = "灰度"
-        settings["gray_band"] = 1
-        arr = np.asarray(base_result.raw_array).astype(np.float64)
-        valid_mask = np.isfinite(arr)
-        nodata = self.base_source.metadata().nodata
-        if nodata is not None:
-            valid_mask = valid_mask & (arr != nodata)
-        hillshade = np.asarray(shade_result.raw_array, dtype=np.float32)
-        if hillshade.ndim == 3:
-            hillshade = hillshade[:, :, 0]
-        hillshade = np.clip(hillshade, 0.0, 1.0)
-        if arr.ndim == 3:
-            band = min(max(int(render_config.gray_band), 1), arr.shape[2]) - 1
-            arr = arr[:, :, band]
-            valid_mask = np.isfinite(arr)
-            if nodata is not None:
-                valid_mask = valid_mask & (arr != nodata)
-        if hillshade.shape != arr.shape:
-            hillshade = _resize_nearest(hillshade, arr.shape)
-
-        shaded = apply_hillshade_blend(arr, valid_mask, settings, nodata, hillshade)
-        display_rgb = _apply_colormap_to_normalized(shaded, render_config.colormap_name)
-        return RenderTileResult(
-            raw_array=base_result.raw_array,
-            display_rgb=display_rgb,
-            image_rect=base_result.image_rect,
-            overview_level=base_result.overview_level,
-            source_window=base_result.source_window,
-        )
+        metadata = self.metadata()
+        style = legacy_config_to_style(render_config, metadata)
+        display_settings = default_display_settings(nodata_value=metadata.nodata)
+        return DEFAULT_RENDER_PIPELINE.render_source(self.base_source, request, style, display_settings, layer_id=getattr(request, "layer_id", None))
 
     def read_pixel(self, x: int, y: int):
         return self.base_source.read_pixel(x, y)
@@ -407,6 +364,11 @@ class H5DatasetRasterSource(GdalRasterSource):
         _write_h5_dataset_geotiff_cache(cache_path, file_path, dataset_name, frame_index, band_count)
         cache_threshold = 0 if _file_meets_threshold(file_path, pyramid_threshold_mb) else None
         super().__init__(str(cache_path), source_path=file_path, pyramid_threshold_mb=cache_threshold)
+        self._metadata.custom_properties.update({
+            "source_kind": "h5_dataset",
+            "dataset_name": dataset_name,
+            "frame_index": frame_index,
+        })
 
     def read_pixel(self, x: int, y: int):
         with h5py.File(self.h5_file_path, "r") as h5f:
@@ -429,6 +391,22 @@ class H5DatasetRasterSource(GdalRasterSource):
             if ds.shape[0] < ds.shape[1] and ds.shape[0] < ds.shape[2]:
                 return np.moveaxis(ds[:, y:y + height, x:x + width], 0, -1).astype(np.float32)
             return ds[0, y:y + height, x:x + width].astype(np.float32)
+
+
+class H5TimeSeriesRasterSource(H5DatasetRasterSource):
+    """HDF5 时序二维切片数据源。"""
+
+    def __init__(self, file_path: str, dataset_name: str, time_index: int, pyramid_threshold_mb=None):
+        self.time_index = int(time_index)
+        super().__init__(file_path, dataset_name, frame_index=self.time_index, pyramid_threshold_mb=pyramid_threshold_mb)
+        self._metadata = replace(
+            self._metadata,
+            custom_properties={
+                **self._metadata.custom_properties,
+                "source_kind": "h5_timeseries",
+                "time_index": self.time_index,
+            },
+        )
 
 
 class StandardImageSource(RasterImageSource):
@@ -455,25 +433,32 @@ class StandardImageSource(RasterImageSource):
             has_color_table=False,
             color_table=None,
             overview_levels=[],
+            custom_properties={"source_kind": "standard_image"},
         )
 
     def metadata(self) -> ImageSourceMetadata:
         return self._metadata
 
-    def render(self, request: RenderRequest, render_config: RasterRenderConfig) -> RenderTileResult:
-        display_rgb = render_raster_rgb(
-            self._array,
-            render_config,
-            nodata_value=self._metadata.nodata,
-            color_table=self._metadata.color_table,
-        )
-        return RenderTileResult(
-            raw_array=self._array,
-            display_rgb=display_rgb,
-            image_rect=(0, 0, self._array.shape[1], self._array.shape[0]),
+    def read_block(self, request: RenderRequest, style=None) -> RawRasterBlock:
+        x0 = max(0, int(np.floor(request.x)))
+        y0 = max(0, int(np.floor(request.y)))
+        x1 = min(self._array.shape[1], max(x0 + 1, int(np.ceil(request.x + request.width))))
+        y1 = min(self._array.shape[0], max(y0 + 1, int(np.ceil(request.y + request.height))))
+        data = self._array[y0:y1, x0:x1].copy()
+        return RawRasterBlock(
+            data=data,
+            image_rect=(float(x0), float(y0), float(x1 - x0), float(y1 - y0)),
+            source_window=(x0, y0, int(x1 - x0), int(y1 - y0)),
             overview_level=None,
-            source_window=(0, 0, self._array.shape[1], self._array.shape[0]),
+            nodata_value=None,
+            metadata=self._metadata,
         )
+
+    def render(self, request: RenderRequest, render_config: RasterRenderConfig) -> RenderTileResult:
+        metadata = self.metadata()
+        style = legacy_config_to_style(render_config, metadata)
+        display_settings = default_display_settings(nodata_value=metadata.nodata)
+        return DEFAULT_RENDER_PIPELINE.render_source(self, request, style, display_settings, layer_id=getattr(request, "layer_id", None))
 
     def read_pixel(self, x: int, y: int):
         if not (0 <= x < self._array.shape[1] and 0 <= y < self._array.shape[0]):
@@ -533,30 +518,6 @@ def _file_meets_threshold(file_path: str, threshold_mb) -> bool:
         return Path(file_path).stat().st_size >= float(threshold_mb) * 1024 * 1024
     except OSError:
         return False
-
-
-def _window_geotransform(geotransform, x0: int, y0: int):
-    if geotransform is None:
-        return None
-    return (
-        geotransform[0] + x0 * geotransform[1] + y0 * geotransform[2],
-        geotransform[1],
-        geotransform[2],
-        geotransform[3] + x0 * geotransform[4] + y0 * geotransform[5],
-        geotransform[4],
-        geotransform[5],
-    )
-
-
-def _resize_nearest(array: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray:
-    if array.shape == target_shape:
-        return array
-    target_h, target_w = target_shape
-    if target_h <= 0 or target_w <= 0:
-        return np.zeros(target_shape, dtype=array.dtype)
-    y_indices = np.clip(np.round(np.linspace(0, array.shape[0] - 1, target_h)).astype(int), 0, array.shape[0] - 1)
-    x_indices = np.clip(np.round(np.linspace(0, array.shape[1] - 1, target_w)).astype(int), 0, array.shape[1] - 1)
-    return array[np.ix_(y_indices, x_indices)]
 
 
 def _embed_array_in_request(array: np.ndarray, target_shape: tuple[int, int], x: int, y: int, nodata_value) -> np.ndarray:

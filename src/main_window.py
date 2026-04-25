@@ -145,25 +145,35 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(15)
         
         # 标题
+        self.header_widget = QWidget()
+        self.header_widget.setObjectName("headerBar")
+        header_layout = QVBoxLayout(self.header_widget)
+        header_layout.setContentsMargins(10, 10, 10, 10)
+        header_layout.setSpacing(2)
         title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
         title_row.addStretch(1)
-        title_label = QLabel("遥感工具箱")
-        title_label.setStyleSheet("font-size: 24px; font-weight: bold;")
-        title_label.setAlignment(Qt.AlignCenter)
-        title_row.addWidget(title_label)
+        self.title_label = QLabel("遥感工具箱")
+        self.title_label.setObjectName("mainTitle")
+        self.title_label.setStyleSheet("font-size: 24px; font-weight: bold;")
+        self.title_label.setAlignment(Qt.AlignCenter)
+        title_row.addWidget(self.title_label)
         title_row.addStretch(1)
         self.theme_toggle_button = QToolButton()
         self.theme_toggle_button.setToolTip("切换深色/浅色模式")
         self.theme_toggle_button.clicked.connect(self._toggle_theme_mode)
         self.theme_toggle_button.setAutoRaise(True)
+        self.theme_toggle_button.setFixedSize(30, 30)
         title_row.addWidget(self.theme_toggle_button, 0, Qt.AlignRight | Qt.AlignTop)
-        main_layout.addLayout(title_row)
+        header_layout.addLayout(title_row)
         
         # 副标题
-        subtitle_label = QLabel("Remote Sensing Toolbox")
-        subtitle_label.setStyleSheet("font-size: 14px;")
-        subtitle_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(subtitle_label)
+        self.subtitle_label = QLabel("Remote Sensing Toolbox")
+        self.subtitle_label.setObjectName("subTitle")
+        self.subtitle_label.setStyleSheet("font-size: 14px;")
+        self.subtitle_label.setAlignment(Qt.AlignCenter)
+        header_layout.addWidget(self.subtitle_label)
+        main_layout.addWidget(self.header_widget)
         
         main_layout.addSpacing(20)
         
@@ -437,7 +447,7 @@ class MainWindow(QMainWindow):
         families = QFontDatabase.applicationFontFamilies(font_id)
         return families[0] if families else None
 
-    def _material_icon(self, icon_name: str) -> QIcon:
+    def _material_icon(self, icon_name: str, *, color: QColor | None = None) -> QIcon:
         if self._material_icon_family:
             pixmap = QPixmap(22, 22)
             pixmap.fill(Qt.transparent)
@@ -446,7 +456,7 @@ class MainWindow(QMainWindow):
             font = QFont(self._material_icon_family)
             font.setPixelSize(20)
             painter.setFont(font)
-            painter.setPen(self.palette().color(QPalette.WindowText))
+            painter.setPen(color or self.palette().color(QPalette.WindowText))
             painter.drawText(pixmap.rect(), Qt.AlignCenter, icon_name)
             painter.end()
             return QIcon(pixmap)
@@ -456,10 +466,15 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "theme_toggle_button"):
             return
         icon_name = "light_mode" if self.theme_mode == "dark" else "dark_mode"
-        icon = self._material_icon(icon_name)
+        icon_color = QColor("#f4d03f") if self.theme_mode == "dark" else QColor("#34495e")
+        icon = self._material_icon(icon_name, color=icon_color)
         if not icon.isNull():
             self.theme_toggle_button.setIcon(icon)
         self.theme_toggle_button.setIconSize(QSize(20, 20))
+        if self.theme_mode == "dark":
+            self.theme_toggle_button.setStyleSheet("QToolButton{border:1px solid #555;border-radius:15px;background:#2e2e2f;}QToolButton:hover{background:#3a3a3c;}")
+        else:
+            self.theme_toggle_button.setStyleSheet("QToolButton{border:1px solid #b9c3d0;border-radius:15px;background:#ffffff;}QToolButton:hover{background:#f3f6fb;}")
 
     def _toggle_theme_mode(self) -> None:
         next_mode = "light" if self.theme_mode == "dark" else "dark"
@@ -505,6 +520,22 @@ class MainWindow(QMainWindow):
             app.setStyle(self._native_style_name)
         app.setPalette(self._build_palette(mode))
         self.theme_mode = mode
+        if mode == "dark":
+            self.setStyleSheet(
+                "#headerBar{background:transparent;border:none;}"
+                "#mainTitle{color:#f2f2f2;font-weight:700;}"
+                "#subTitle{color:#c9d1d9;}"
+                "QMenuBar{background:#2b2b2c;color:#f2f2f2;}"
+                "QMenuBar::item:selected{background:#3a3a3c;}"
+            )
+        else:
+            self.setStyleSheet(
+                "#headerBar{background:transparent;border:none;}"
+                "#mainTitle{color:#1e293b;font-weight:700;}"
+                "#subTitle{color:#334155;}"
+                "QMenuBar{background:#e9eef5;color:#1f2937;}"
+                "QMenuBar::item:selected{background:#dbe6f4;}"
+            )
         if persist:
             self.settings.setValue("display/theme_mode", mode)
         self._update_theme_toggle_icon()

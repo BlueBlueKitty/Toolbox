@@ -45,6 +45,8 @@ class LayerPanelController:
         self.layer_panel.nodata_alpha_changed.connect(self._handle_nodata_changed)
         self.layer_panel.style_edit_requested.connect(self._handle_style_requested)
         self.layer_panel.property_requested.connect(self._handle_property_requested)
+        if hasattr(self.canvas, "layer_manager"):
+            self.canvas.layer_manager.active_layer_changed.connect(self.layer_panel.set_current_layer)
 
     def rebuild_panel_items(self) -> None:
         states = [
@@ -117,6 +119,11 @@ class LayerPanelController:
         self._invoke_after_change()
 
     def _handle_layer_selected(self, layer_id: str | None) -> None:
+        if hasattr(self.canvas, "layer_manager"):
+            try:
+                self.canvas.layer_manager.set_active_layer(layer_id)
+            except Exception:
+                pass
         if self.on_layer_selected is not None:
             self.on_layer_selected(layer_id)
 

@@ -9,14 +9,17 @@ import os
 import re
 import copy
 import numpy as np
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional, Tuple
+from shiboken6 import isValid
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                                 QFileDialog, QLabel, QSlider, QComboBox, QMessageBox,
                                 QSplitter, QGroupBox, QGridLayout, QCheckBox, QFormLayout,
-                                QDialogButtonBox, QInputDialog, QFrame,
-                                QApplication, QSizePolicy)
-from PySide6.QtCore import Qt, QSettings, QTimer
+                                QDialogButtonBox, QInputDialog, QFrame, QWidget,
+                                QApplication, QSizePolicy, QToolButton)
+from PySide6.QtCore import Qt, QSettings, QTimer, QSize
+from PySide6.QtGui import QFontDatabase, QFont, QPainter, QPixmap, QIcon, QColor
 
 # 导入共享的GAMMA对话框
 from src.dialogs.gamma_dialogs import GammaTimeSeriesDialog
@@ -92,7 +95,17 @@ import matplotlib.pyplot as plt
 import traceback
 
 from src.rendering.canvas import LayeredRasterCanvas
-from src.widgets import ColormapComboBox, RenderSettingsWidget, ColorbarWidget
+from src.rendering.models import ImageSourceMetadata
+from src.rendering.style_auto_selector import DefaultRenderStyleFactory
+from src.rendering.styles import style_to_legacy_config
+from src.rendering.sync import MultiCanvasSyncController, SyncOptions
+from src.widgets import (
+    ColorbarWidget,
+    MultiCanvasRenderBinding,
+    OperationProgressWidget,
+    RenderSidebarController,
+    RenderSidebarWidget,
+)
 from src.utils.gamma_file_process import (
     GAMMA_FORMATS,
     read_gamma_pixel,
@@ -128,7 +141,7 @@ from src.utils.display_pyramid import (
     read_standard_pyramid_display,
     write_derived_raster_cache,
 )
-from src.rendering.sources import GdalRasterSource, GammaVrtRasterSource, H5DatasetRasterSource
+from src.rendering.sources import GdalRasterSource, GammaVrtRasterSource, H5TimeSeriesRasterSource
 from src.rendering.sources import StandardImageSource
 from src.rendering.config import default_raster_render_config
 
@@ -198,9 +211,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # dB转换标志
         self._converted_to_db = False  # 是否已转换为dB
         self._loading_new_series = False
+        self._material_icon_family = self._load_material_icon_font()
+        self._theme_mode = "dark"
         
         # 创建UI
         self._create_ui()
+        self._set_series_status_text("未加载图像")
         base_settings = self._default_render_settings_for_band_count(1)
         self._viewer_render_settings[1] = copy.deepcopy(base_settings)
         self._viewer_render_settings[2] = copy.deepcopy(base_settings)
@@ -247,95 +263,23 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.sort_order_combo.currentIndexChanged.connect(self.sort_images)
         control_layout1.addWidget(self.sort_order_combo)
         
-        self.image_count_label = QLabel("未加载图像")
-        control_layout1.addWidget(self.image_count_label)
-        
         control_layout1.addStretch()
         
-        # Nodata值设置
-        self.set_nodata_btn = QPushButton("设置Nodata值")
-        self.set_nodata_btn.clicked.connect(self.set_nodata_value)
-        control_layout1.addWidget(self.set_nodata_btn)
-        
-        # 转为dB按钮
-        self.to_db_btn = QPushButton("转为dB")
-        self.to_db_btn.clicked.connect(self.convert_to_db)
-        self.to_db_btn.setEnabled(False)
-        control_layout1.addWidget(self.to_db_btn)
+        self.toggle_sidebar_btn = QToolButton()
+        self.toggle_sidebar_btn.setToolTip("侧边栏")
+        self.toggle_sidebar_btn.setAutoRaise(True)
+        self._update_sidebar_toggle_icon()
+        self.toggle_sidebar_btn.setIconSize(QSize(20, 20))
+        self.toggle_sidebar_btn.clicked.connect(self._toggle_sidebar)
+        control_layout1.addWidget(self.toggle_sidebar_btn)
 
         main_layout.addLayout(control_layout1)
         
-        # 第二行：渲染设置（波段选择、Colormap、拉伸、Gamma等）
-        # 顺序：波段选择 | Colormap+反向 | 拉伸 | 最大最小值 | Gamma
-        control_layout2 = QHBoxLayout()
-        control_layout2.setSpacing(5)
-        
-        # 渲染设置组件（包含波段选择、反向、拉伸、最大最小值、Gamma）
-        self.render_settings = RenderSettingsWidget(compact=True)
-        self.render_settings.settings_changed.connect(self.on_render_settings_changed)
-        self.render_settings.suggest_colormap.connect(self.on_suggest_colormap)
-        
-        # 从主窗口设置中读取平滑显示设置
-        from PySide6.QtCore import QSettings
-        settings = QSettings("Toolbox", "RemoteSensingToolbox")
-        smooth_display = settings.value("display/smooth_display", False, type=bool)
-        self.render_settings.set_smooth_display(smooth_display)
-        
-        # 把波段选择部分放最前面
-        control_layout2.addWidget(self.render_settings.band_widget)
-        
-        # 分隔线
-        sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
-        sep.setFrameShadow(QFrame.Sunken)
-        control_layout2.addWidget(sep)
-        
-        # Colormap选择
-        control_layout2.addWidget(QLabel("Colormap:"))
-        self.colormap_combo = ColormapComboBox()
-        self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
-        control_layout2.addWidget(self.colormap_combo)
-        
-        # "反向"选项（从render_settings中获取）
-        control_layout2.addWidget(self.render_settings.reverse_check)
-        
-        # 分隔线
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.VLine)
-        sep2.setFrameShadow(QFrame.Sunken)
-        control_layout2.addWidget(sep2)
-        
-        # 拉伸控件（从render_settings获取）
-        control_layout2.addWidget(QLabel("拉伸:"))
-        control_layout2.addWidget(self.render_settings.stretch_combo)
-        control_layout2.addWidget(self.render_settings.stretch_param_widget)
-        
-        # 分隔线
-        sep3 = QFrame()
-        sep3.setFrameShape(QFrame.VLine)
-        sep3.setFrameShadow(QFrame.Sunken)
-        control_layout2.addWidget(sep3)
-        
-        # 最大最小值控件（从render_settings获取）
-        control_layout2.addWidget(self.render_settings.auto_range_check)
-        control_layout2.addWidget(self.render_settings.min_spin)
-        control_layout2.addWidget(self.render_settings.range_dash_label)
-        control_layout2.addWidget(self.render_settings.max_spin)
-        
-        # 分隔线
-        sep4 = QFrame()
-        sep4.setFrameShape(QFrame.VLine)
-        sep4.setFrameShadow(QFrame.Sunken)
-        control_layout2.addWidget(sep4)
-        
-        # Gamma控件（从render_settings获取）
-        control_layout2.addWidget(QLabel("γ:"))
-        control_layout2.addWidget(self.render_settings.gamma_spin)
-        
-        control_layout2.addStretch()
-        
-        main_layout.addLayout(control_layout2)
-        
+        outer_splitter = QSplitter(Qt.Horizontal)
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+
         # 创建主分割器：上方图像查看区，下方时序曲线
         main_splitter = QSplitter(Qt.Vertical)
         
@@ -386,7 +330,46 @@ class PixelTimeSeriesViewerDialog(QDialog):
         main_splitter.setStretchFactor(0, 2)
         main_splitter.setStretchFactor(1, 1)
         
-        main_layout.addWidget(main_splitter)
+        content_layout.addWidget(main_splitter)
+        outer_splitter.addWidget(content_widget)
+
+        self.render_sidebar = RenderSidebarWidget(mode="multi_target")
+        self.render_settings = self.render_sidebar.render_settings
+        self.colormap_combo = self.render_sidebar.colormap_combo
+        self.render_settings.settings_changed.connect(self.on_render_settings_changed)
+        self.render_settings.suggest_colormap.connect(self.on_suggest_colormap)
+        self.render_sidebar.db_toggled.connect(self._on_db_toggled)
+        settings = QSettings("Toolbox", "RemoteSensingToolbox")
+        smooth_display = settings.value("display/smooth_display", False, type=bool)
+        self.render_settings.set_smooth_display(smooth_display)
+        self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
+        self.render_sidebar_binding = MultiCanvasRenderBinding(
+            {
+                "viewer_1": self.image_viewer_1,
+                "viewer_2": self.image_viewer_2,
+            },
+            {
+                "viewer_1": "窗口1",
+                "viewer_2": "窗口2",
+            },
+        )
+        self.render_sidebar_controller = RenderSidebarController(self.render_sidebar, self.render_sidebar_binding)
+        self.render_sidebar.target_changed.connect(self._on_sidebar_target_changed)
+        self.viewport_sync_controller = MultiCanvasSyncController(
+            [self.image_viewer_1, self.image_viewer_2],
+            options=SyncOptions(sync_pan=True, sync_zoom=True, sync_geographic_extent=True, sync_cursor=True),
+        )
+        outer_splitter.addWidget(self.render_sidebar)
+        outer_splitter.setStretchFactor(0, 4)
+        outer_splitter.setStretchFactor(1, 1)
+        outer_splitter.setSizes([self.width(), 0])
+        self.outer_splitter = outer_splitter
+        self._sidebar_visible = False
+        self._sidebar_base_width = self.width()
+        self.render_sidebar.setVisible(False)
+        main_layout.addWidget(outer_splitter)
+        self.operation_progress = OperationProgressWidget()
+        main_layout.addWidget(self.operation_progress)
     
     def _create_image_viewer_panel(self, title, viewer_id):
         """创建单个图像查看器面板
@@ -412,15 +395,6 @@ class PixelTimeSeriesViewerDialog(QDialog):
         
         # 连接鼠标移动信号，用于更新colorbar
         viewer.mouse_moved.connect(lambda x, y, val: self.on_viewer_mouse_moved(viewer_id, x, y, val))
-        
-        # 连接视图变换信号（用于同步缩放）
-        viewer.view_transformed.connect(lambda t: self.sync_other_viewer(viewer_id, t))
-        
-        # 连接鼠标样式变化信号（用于同步鼠标样式）
-        viewer.cursor_changed.connect(lambda c: self.sync_other_cursor(viewer_id, c))
-        
-        # 连接滚动条位置变化信号（用于同步拖动）
-        viewer.scroll_changed.connect(lambda h, v: self.sync_other_scroll(viewer_id, h, v))
         
         image_layout.addWidget(viewer)
         
@@ -481,10 +455,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
         jump_layout.addWidget(image_select_combo, 1)
         control_layout.addLayout(jump_layout)
         
-        # 图像信息标签
+        # 图像信息标签（迁移到右侧渲染侧边栏）
         image_info_label = QLabel("图像信息: 未加载")
         setattr(self, f'image_info_label_{viewer_id}', image_info_label)
-        control_layout.addWidget(image_info_label)
+        image_info_label.setVisible(False)
         
         # 像素信息标签（显示当前像素值）
         pixel_value_label = QLabel("像素值: -")
@@ -499,10 +473,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return panel
 
     def on_theme_mode_changed(self, _mode: str) -> None:
+        self._theme_mode = _mode
         for viewer_id in (1, 2):
             viewer = getattr(self, f"image_viewer_{viewer_id}", None)
             if viewer is not None:
                 viewer._apply_background_from_palette()
+        self._update_sidebar_toggle_icon()
 
     def _on_viewer_files_dropped(self, paths: list[str]) -> None:
         mode, target = self._classify_drop_target(paths)
@@ -681,13 +657,28 @@ class PixelTimeSeriesViewerDialog(QDialog):
     def _set_active_render_viewer(self, viewer_id: int) -> None:
         viewer_id = 1 if int(viewer_id) == 1 else 2
         if viewer_id == self._active_render_viewer_id:
+            if hasattr(self, "render_sidebar"):
+                self.render_sidebar.set_current_target(f"viewer_{viewer_id}")
             return
         self._store_active_render_state()
         self._active_render_viewer_id = viewer_id
         self._apply_render_state_to_controls(viewer_id)
+        if hasattr(self, "render_sidebar"):
+            self.render_sidebar.set_current_target(f"viewer_{viewer_id}")
+        if hasattr(self, "render_sidebar_controller"):
+            self.render_sidebar_controller.refresh()
+
+    def _on_sidebar_target_changed(self, target_id: str) -> None:
+        if target_id == "viewer_1":
+            self._set_active_render_viewer(1)
+        elif target_id == "viewer_2":
+            self._set_active_render_viewer(2)
     
     def on_colormap_changed(self, colormap_name):
         """Colormap变化时更新当前选中窗口"""
+        if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
+            # 侧边栏模式下由 RenderSidebarController 写回图层样式，避免旧链路覆盖
+            return
         # 跳过分隔符项（分隔符以"━"开头）
         if colormap_name.startswith('━'):
             return
@@ -710,14 +701,23 @@ class PixelTimeSeriesViewerDialog(QDialog):
     
     def on_render_settings_changed(self):
         """渲染设置变化时延迟更新两个窗口，避免频繁重绘。"""
+        if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
+            return
+        if not isValid(self):
+            return
         if self._loading_new_series:
             return
         if self.image_count > 0:
             self._show_loading_indicator("正在重新渲染图像...")
-        self._render_update_timer.start(150)
+        if hasattr(self, "_render_update_timer") and isValid(self._render_update_timer):
+            self._render_update_timer.start(150)
 
     def _apply_render_settings_update(self):
         """应用渲染设置更新。"""
+        if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
+            return
+        if not isValid(self):
+            return
         try:
             viewer_id = self._active_render_viewer_id
             if self.render_settings.is_auto_range():
@@ -736,6 +736,16 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._sync_selected_pixel_markers()
         finally:
             self._hide_loading_indicator()
+
+    def closeEvent(self, event):
+        try:
+            if hasattr(self, "_render_update_timer") and isValid(self._render_update_timer):
+                self._render_update_timer.stop()
+            if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
+                self.render_sidebar_controller.close()
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def _navigation_item_label(self, index):
         prefix = f"{index + 1:04d}"
@@ -777,17 +787,56 @@ class PixelTimeSeriesViewerDialog(QDialog):
 
     def _reset_render_controls_for_new_series(self, band_count=1, colormap='gray'):
         """新时序数据使用默认渲染参数，避免继承上一批影像的显示状态。"""
+        source_kind = "gdal"
+        has_color_table = False
+        nodata = self.nodata_value
+        custom_properties = {}
+        if self.data_source_type == 'h5':
+            source_kind = "h5_timeseries"
+            nodata = 0
+        elif self.data_source_type == 'gamma':
+            source_kind = "gamma"
+            nodata = 0
+        elif self.image_metadata:
+            first_metadata = self.image_metadata[0]
+            has_color_table = bool(first_metadata.get('has_color_table', False))
+            custom_properties["categorical"] = has_color_table
+        metadata = ImageSourceMetadata(
+            id="timeseries_preview",
+            path=self.h5_file_path or (self.image_files[0] if self.image_files else ""),
+            path_mode="absolute",
+            width=int(self.image_shape[1] if self.image_shape is not None and len(self.image_shape) >= 2 else 1),
+            height=int(self.image_shape[0] if self.image_shape is not None and len(self.image_shape) >= 2 else 1),
+            band_count=max(1, int(band_count or 1)),
+            dtype="float32",
+            nodata=nodata,
+            crs_wkt=None,
+            geotransform=None,
+            resolution=None,
+            has_georef=False,
+            has_color_table=has_color_table,
+            color_table=None,
+            custom_properties={"source_kind": source_kind, **custom_properties},
+        )
+        style = DefaultRenderStyleFactory.create(metadata)
+        if self.data_source_type == 'gamma' and self.gamma_format.startswith('cpx') and hasattr(style, "color_ramp"):
+            style = replace(style, color_ramp=replace(style.color_ramp, name="hsv"))
+        config = style_to_legacy_config(style, DefaultRenderStyleFactory.create_display_settings(metadata))
         self.render_settings.blockSignals(True)
         self.render_settings.reset_to_defaults(max(1, int(band_count or 1)))
-        if int(band_count or 1) >= 3:
-            self.render_settings.display_mode_combo.setCurrentText("RGB")
-            self.render_settings.set_stretch_mode(self.render_settings.STRETCH_NONE)
-            self.render_settings.auto_range_check.setChecked(False)
-        else:
-            self.render_settings.display_mode_combo.setCurrentText("灰度")
+        self.render_settings.display_mode_combo.setCurrentText(config.display_mode)
+        self.render_settings.gray_band_spin.setValue(int(config.gray_band))
+        self.render_settings.band_r_spin.setValue(int(config.rgb_bands[0]))
+        self.render_settings.band_g_spin.setValue(int(config.rgb_bands[1]))
+        self.render_settings.band_b_spin.setValue(int(config.rgb_bands[2]))
+        self.render_settings.stretch_combo.setCurrentText(config.stretch_mode)
+        self.render_settings.auto_range_check.setChecked(not bool(config.auto_range))
+        self.render_settings.min_spin.setValue(float(config.value_range[0]))
+        self.render_settings.max_spin.setValue(float(config.value_range[1]))
+        self.render_settings.gamma_spin.setValue(float(config.gamma))
         self.render_settings.blockSignals(False)
         self.colormap_combo.blockSignals(True)
-        self.colormap_combo.setCurrentText(colormap)
+        self.colormap_combo.setCurrentText(config.colormap_name or colormap)
         self.colormap_combo.blockSignals(False)
         settings = self._normalized_settings_for_band_count(
             self.render_settings.get_all_settings(),
@@ -795,8 +844,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         )
         self._viewer_render_settings[1] = copy.deepcopy(settings)
         self._viewer_render_settings[2] = copy.deepcopy(settings)
-        self._viewer_colormaps[1] = colormap
-        self._viewer_colormaps[2] = colormap
+        self._viewer_colormaps[1] = self.colormap_combo.currentText()
+        self._viewer_colormaps[2] = self.colormap_combo.currentText()
         self._active_render_viewer_id = 1
         self.colormap_combo.setEnabled(settings.get("display_mode") != "RGB")
     
@@ -929,23 +978,94 @@ class PixelTimeSeriesViewerDialog(QDialog):
 
     def _show_loading_indicator(self, message: str):
         self.setWindowTitle(f"{self._loading_title_text} - 加载中")
-        if hasattr(self, 'image_count_label'):
-            self.image_count_label.setText(message.replace("\n", " | "))
+        if hasattr(self, "operation_progress") and self.operation_progress is not None:
+            self.operation_progress.start_task(message.replace("\n", " | "), 0)
         QApplication.processEvents()
 
-    def _hide_loading_indicator(self):
-        self.setWindowTitle(self._loading_title_text)
+    def _set_series_status_text(self, text: str) -> None:
+        """将时序加载状态显示到底部进度日志区域。"""
+        if hasattr(self, "operation_progress") and self.operation_progress is not None:
+            self.operation_progress.progress_bar.setVisible(True)
+            self.operation_progress.progress_bar.setRange(0, 100)
+            self.operation_progress.progress_bar.setValue(0)
+            self.operation_progress.message_label.setText(text)
 
-        if not hasattr(self, 'image_count_label'):
+    def _hide_loading_indicator(self):
+        if not isValid(self):
             return
+        self.setWindowTitle(self._loading_title_text)
+        if hasattr(self, "operation_progress") and self.operation_progress is not None:
+            self.operation_progress.finish_task("完成")
         if self.image_count <= 0:
-            self.image_count_label.setText("未加载图像")
+            self._set_series_status_text("未加载图像")
         elif self.data_source_type == 'gamma':
-            self.image_count_label.setText(f"已加载 {self.image_count} 张GAMMA时序影像")
+            self._set_series_status_text(f"已加载 {self.image_count} 张GAMMA时序影像")
         elif self.data_source_type == 'h5':
-            self.image_count_label.setText(f"已加载 {self.image_count} 张时序影像")
+            self._set_series_status_text(f"已加载 {self.image_count} 张时序影像")
         else:
-            self.image_count_label.setText(f"已加载 {self.image_count} 张图像")
+            self._set_series_status_text(f"已加载 {self.image_count} 张图像")
+
+    def _toggle_sidebar(self):
+        if not hasattr(self, "render_sidebar") or not hasattr(self, "outer_splitter"):
+            return
+        if self._sidebar_visible:
+            self.render_sidebar.setVisible(False)
+            self.outer_splitter.setSizes([self.outer_splitter.width(), 0])
+            base_width = getattr(self, "_sidebar_base_width", 0)
+            if base_width > 0:
+                self.resize(base_width, self.height())
+            self._sidebar_visible = False
+        else:
+            sidebar_width = max(180, min(240, int(self.render_sidebar.sizeHint().width())))
+            self._sidebar_base_width = self.width()
+            self.resize(self._sidebar_base_width + sidebar_width, self.height())
+            self.render_sidebar.setVisible(True)
+            self.outer_splitter.setSizes([max(1, self._sidebar_base_width), sidebar_width])
+            self._sidebar_visible = True
+
+    def _load_material_icon_font(self) -> str | None:
+        font_path = Path(__file__).resolve().parents[2] / "resources" / "fonts" / "MaterialIcons-Regular.ttf"
+        if not font_path.exists():
+            return None
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        if font_id < 0:
+            return None
+        families = QFontDatabase.applicationFontFamilies(font_id)
+        return families[0] if families else None
+
+    def _material_icon(self, icon_name: str, *, size: int = 20) -> QIcon:
+        if not self._material_icon_family:
+            return QIcon()
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        font = QFont(self._material_icon_family)
+        font.setPixelSize(size - 2)
+        painter.setFont(font)
+        icon_color = QColor("#e6e6e6") if self._theme_mode == "dark" else QColor("#334155")
+        painter.setPen(icon_color)
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, icon_name)
+        painter.end()
+        return QIcon(pixmap)
+
+    def _update_sidebar_toggle_icon(self) -> None:
+        if hasattr(self, "toggle_sidebar_btn") and self.toggle_sidebar_btn is not None:
+            self.toggle_sidebar_btn.setIcon(self._material_icon("tune"))
+
+    def _on_db_toggled(self, enabled: bool) -> None:
+        if enabled == bool(self._converted_to_db):
+            return
+        if enabled:
+            self.convert_to_db(show_message=False, confirm=False)
+            return
+        self._converted_to_db = False
+        self._clear_cached_images()
+        if self.image_count > 0:
+            self.show_image(1, reset_view=True)
+            self.show_image(2, reset_view=True)
+            self._update_image_stats_to_render_settings()
+            self._apply_render_settings_update()
 
     def _get_image_metadata(self, index) -> Optional[dict]:
         """获取指定索引影像的元数据。"""
@@ -1378,7 +1498,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
     def _get_image_source(self, index):
         try:
             if self.data_source_type == 'h5':
-                source = H5DatasetRasterSource(
+                source = H5TimeSeriesRasterSource(
                     self.h5_file_path,
                     "timeseries",
                     index + self.h5_start_index,
@@ -1476,6 +1596,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 viewer.fit_in_view(delayed=True)
             else:
                 viewer.restore_view_state(previous_view_state)
+            if hasattr(self, "render_sidebar_controller"):
+                self.render_sidebar_controller.refresh()
             self._refresh_colorbar_range(viewer_id)
             self._sync_selected_pixel_markers()
             
@@ -1653,7 +1775,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     self.image_files.append(f"frame_{i + start_index:04d}.h5")
             
             # 更新UI
-            self.image_count_label.setText(f"已加载 {self.image_count} 张时序影像")
+            self._set_series_status_text(f"已加载 {self.image_count} 张时序影像")
             
             # 更新两个窗口的控件
             self._refresh_navigation_controls()
@@ -1678,7 +1800,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._apply_render_settings_update()
             
             # 启用转dB按钮
-            self.to_db_btn.setEnabled(True)
+            if hasattr(self, "render_sidebar"):
+                self.render_sidebar.set_db_checked(bool(self._converted_to_db))
             
             QMessageBox.information(self, "成功", 
                                   f"成功加载h5时序数据！\n" +
@@ -1830,7 +1953,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 self.date_list = []  # 没有提取到日期，使用空列表
             
             # 更新UI
-            self.image_count_label.setText(f"已加载 {self.image_count} 张图像")
+            self._set_series_status_text(f"已加载 {self.image_count} 张图像")
             
             # 更新两个窗口的控件
             self._refresh_navigation_controls()
@@ -1847,7 +1970,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._apply_render_settings_update()
             
             # 启用转dB按钮
-            self.to_db_btn.setEnabled(True)
+            if hasattr(self, "render_sidebar"):
+                self.render_sidebar.set_db_checked(bool(self._converted_to_db))
 
             if self.folder_sync_message:
                 if self.folder_sync_mode == 'unavailable':
@@ -2014,7 +2138,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.image_viewer_2.set_nodata_value(0)
             
             # 更新UI
-            self.image_count_label.setText(f"已加载 {self.image_count} 张GAMMA时序影像")
+            self._set_series_status_text(f"已加载 {self.image_count} 张GAMMA时序影像")
             
             # 更新两个窗口的控件
             self._refresh_navigation_controls()
@@ -2037,7 +2161,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._apply_render_settings_update()
             
             # 启用转dB按钮
-            self.to_db_btn.setEnabled(True)
+            if hasattr(self, "render_sidebar"):
+                self.render_sidebar.set_db_checked(bool(self._converted_to_db))
             
             QMessageBox.information(self, "成功", 
                 f"成功加载GAMMA时序数据！\n" +
@@ -2792,22 +2917,22 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 other_pixel_label.setText("像素值: 越界")
                 self._set_colorbar_current_value(other_colorbar, None)
     
-    def convert_to_db(self):
+    def convert_to_db(self, show_message: bool = True, confirm: bool = True):
         """将显示的图像转换为dB (10*log10)"""
         if self.image_count == 0:
             return
         
         try:
             # 确认操作
-            reply = QMessageBox.question(
-                self, "确认", 
-                "将所有图像转换为dB (10*log10)？\n注意：此操作会修改缓存的图像数据。",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            
-            if reply != QMessageBox.Yes:
-                return
+            if confirm:
+                reply = QMessageBox.question(
+                    self, "确认", 
+                    "将所有图像转换为dB (10*log10)？\n注意：此操作会修改缓存的图像数据。",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply != QMessageBox.Yes:
+                    return
             
             # 清空缓存，强制重新加载
             self._clear_cached_images()
@@ -2833,9 +2958,13 @@ class PixelTimeSeriesViewerDialog(QDialog):
             if self.selected_pixel:
                 self.update_time_series_plot()
             
-            QMessageBox.information(self, "成功", "已转换为dB (10*log10)")
+            if hasattr(self, "render_sidebar"):
+                self.render_sidebar.set_db_checked(True)
+            if show_message:
+                QMessageBox.information(self, "成功", "已转换为dB (10*log10)")
             
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"转换为dB失败: {str(e)}")
+            if show_message:
+                QMessageBox.critical(self, "错误", f"转换为dB失败: {str(e)}")
             traceback.print_exc()
 

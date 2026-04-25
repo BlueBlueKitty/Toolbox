@@ -1,5 +1,5 @@
 """
-通用栅格渲染配置与 RGB 渲染函数。
+通用栅格渲染配置与兼容渲染函数。
 """
 
 from __future__ import annotations
@@ -8,12 +8,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-try:
-    import matplotlib.cm as cm
-    from matplotlib import colormaps as mpl_colormaps
-except Exception:  # pragma: no cover
-    cm = None
-    mpl_colormaps = None
+from .models import ImageSourceMetadata, RawRasterBlock
+from .renderers import _apply_colormap_to_normalized
+from .styles import default_display_settings, legacy_config_to_style
 
 
 @dataclass
@@ -62,7 +59,7 @@ def default_raster_render_config(band_count: int = 1, has_color_table: bool = Fa
     if int(band_count or 1) >= 3:
         config.display_mode = "RGB"
         config.rgb_bands = (1, 2, 3)
-        config.stretch_mode = "无拉伸"
+        config.stretch_mode = "最大最小"
         config.auto_range = False
     else:
         config.display_mode = "灰度"
@@ -79,58 +76,47 @@ def render_raster_rgb(
     projection=None,
     downsample_factor=1,
 ) -> np.ndarray:
-    from src.widgets.render_settings_widget import apply_render_settings
-
-    if color_table and raw_array.ndim == 2:
-        values = np.asarray(raw_array)
-        rgba = np.zeros((values.shape[0], values.shape[1], 4), dtype=np.uint8)
-        table = np.asarray(color_table, dtype=np.uint8)
-        clamped = np.clip(values.astype(np.int64), 0, max(len(table) - 1, 0))
-        rgba = table[clamped]
-        rgb = rgba[:, :, :3]
-        alpha = rgba[:, :, 3].astype(np.float32) / 255.0
-        if nodata_value is not None:
-            try:
-                nodata_mask = np.isnan(values) if np.isnan(nodata_value) else (values == nodata_value)
-            except Exception:
-                nodata_mask = values == nodata_value
-            alpha[nodata_mask] = 0.0
-        if np.any(alpha < 1.0):
-            bg = np.zeros_like(rgb)
-            rgb = (rgb.astype(np.float32) * alpha[..., None] + bg * (1.0 - alpha[..., None])).astype(np.uint8)
-        return rgb
-    if (
-        config.display_mode == "RGB"
-        and raw_array.ndim == 3
-        and raw_array.dtype == np.uint8
-    ):
-        channels = raw_array.shape[2]
-        indices = [min(max(index, 1), channels) - 1 for index in config.rgb_bands]
-        rgb = raw_array[:, :, indices]
-        if config.gamma != 1.0:
-            normalized = np.clip(rgb.astype(np.float32) / 255.0, 0.0, 1.0)
-            rgb = np.clip(np.power(normalized, 1.0 / config.gamma) * 255.0, 0, 255).astype(np.uint8)
-        return rgb
-    processed = apply_render_settings(
-        raw_array,
-        config.to_settings(),
-        nodata_value=nodata_value,
+    metadata = ImageSourceMetadata(
+        id="legacy",
+        path="",
+        path_mode="memory",
+        width=int(raw_array.shape[1]),
+        height=int(raw_array.shape[0]),
+        band_count=1 if raw_array.ndim == 2 else int(raw_array.shape[2]),
+        dtype=str(raw_array.dtype),
+        nodata=nodata_value,
+        crs_wkt=projection,
         geotransform=geotransform,
-        projection=projection,
-        downsample_factor=downsample_factor,
+        resolution=None,
+        has_georef=bool(geotransform or projection),
+        has_color_table=bool(color_table),
+        color_table=color_table,
     )
-    if processed is None:
-        raise ValueError("渲染失败：输入数组为空")
-    if processed.ndim == 2:
-        return _apply_colormap_to_normalized(processed, config.colormap_name)
-    return np.clip(processed * 255.0, 0, 255).astype(np.uint8)
+    style = legacy_config_to_style(config, metadata)
+    display_settings = default_display_settings(nodata_value=nodata_value)
+    from .pipeline import DEFAULT_RENDER_PIPELINE
+    from .renderers import renderer_for_style
+
+    raw_block = RawRasterBlock(
+        data=raw_array,
+        image_rect=(0.0, 0.0, float(raw_array.shape[1]), float(raw_array.shape[0])),
+        source_window=(0, 0, int(raw_array.shape[1]), int(raw_array.shape[0])),
+        overview_level=None,
+        nodata_value=nodata_value,
+        metadata=metadata,
+        custom_properties={"downsample_factor": downsample_factor},
+    )
+    renderer = renderer_for_style(style)
+    rendered = renderer.render(raw_block, style, display_settings)
+    result = DEFAULT_RENDER_PIPELINE._apply_display_settings(rendered, raw_block, display_settings)  # noqa: SLF001
+    if result.ndim == 3 and result.shape[2] == 4 and np.all(result[:, :, 3] == 255):
+        return result[:, :, :3]
+    return result
 
 
-def _apply_colormap_to_normalized(normalized_arr: np.ndarray, colormap_name: str) -> np.ndarray:
-    normalized = np.clip(normalized_arr.astype(np.float32), 0.0, 1.0)
-    if colormap_name == "gray" or cm is None:
-        gray_uint8 = np.clip(normalized * 255.0, 0, 255).astype(np.uint8)
-        return np.stack([gray_uint8, gray_uint8, gray_uint8], axis=-1)
-    cmap = mpl_colormaps.get_cmap(colormap_name) if mpl_colormaps is not None else cm.get_cmap(colormap_name)
-    rgba = cmap(normalized)
-    return np.clip(rgba[:, :, :3] * 255.0, 0, 255).astype(np.uint8)
+__all__ = [
+    "RasterRenderConfig",
+    "default_raster_render_config",
+    "render_raster_rgb",
+    "_apply_colormap_to_normalized",
+]

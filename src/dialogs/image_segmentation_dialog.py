@@ -62,6 +62,8 @@ from src.segmentation.exporters import (
 )
 from src.segmentation.geometry_service import GeometryService
 from src.rendering.sources import GdalRasterSource, StandardImageSource
+from src.rendering.style_auto_selector import DefaultRenderStyleFactory
+from src.rendering.styles import style_to_legacy_config
 from src.rendering.config import default_raster_render_config, render_raster_rgb
 from src.rendering.layer_operations import is_layer_removable, nodata_to_text
 from src.rendering.layer_panel_controller import LayerPanelController
@@ -76,11 +78,10 @@ from src.utils.image_io import (
     transform_point,
 )
 from src.dialogs.segmentation_export_dialog import SegmentationExportDialog
-from src.widgets.colormap_combobox import ColormapComboBox
 from src.widgets.layer_panel_widget import LayerPanelWidget
 from src.widgets.label_panel_widget import LabelPanelWidget
 from src.widgets.magic_wand_panel import MagicWandPanel
-from src.widgets.render_settings_widget import RenderSettingsWidget
+from src.widgets.render_sidebar_widget import LayerManagerRenderBinding, RenderSidebarController, RenderSidebarWidget
 from src.widgets.operation_progress_widget import OperationProgressWidget
 from src.widgets.segmentation_canvas import SegmentationCanvas
 from src.widgets.segmentation_tool_controller import SegmentationToolController
@@ -203,6 +204,8 @@ class ImageSegmentationDialog(QDialog):
         self.undo_action.setIcon(self._make_tool_icon("undo"))
         self.redo_action.setIcon(self._make_tool_icon("redo"))
         self.actual_size_action = QAction(self._make_tool_icon("fit_screen"), "缩放到全图", self)
+        self.toggle_sidebar_action = QAction(self._make_tool_icon("tune"), "侧边栏", self)
+        self.toggle_sidebar_action.setToolTip("显示或隐藏渲染控制侧边栏")
         for action in [
             self.open_action,
             self.open_project_action,
@@ -239,32 +242,8 @@ class ImageSegmentationDialog(QDialog):
         ]:
             self.tool_action_group.addAction(action)
             self.toolbar.addAction(action)
-        render_controls = QWidget()
-        render_layout = QHBoxLayout(render_controls)
-        render_layout.setContentsMargins(0, 0, 0, 0)
-        render_layout.setSpacing(6)
-        self.render_settings = RenderSettingsWidget(compact=True)
-        self._remove_hillshade_mode()
-        self.render_settings.set_smooth_display(False)
-        render_layout.addWidget(self.render_settings.band_widget)
-        render_layout.addWidget(self.render_settings.reverse_check)
-        render_layout.addWidget(self.render_settings.stretch_combo)
-        render_layout.addWidget(self.render_settings.stretch_param_widget)
-        render_layout.addWidget(self.render_settings.auto_range_check)
-        render_layout.addWidget(self.render_settings.min_spin)
-        render_layout.addWidget(self.render_settings.range_dash_label)
-        render_layout.addWidget(self.render_settings.max_spin)
-        render_layout.addWidget(QLabel("Gamma:"))
-        render_layout.addWidget(self.render_settings.gamma_spin)
-        sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
-        sep.setFrameShadow(QFrame.Sunken)
-        render_layout.addWidget(sep)
-        render_layout.addWidget(QLabel("Colormap:"))
-        self.colormap_combo = ColormapComboBox()
-        render_layout.addWidget(self.colormap_combo)
-        render_layout.addStretch(1)
-        main_layout.addWidget(render_controls)
+        self.toolbar.addSeparator()
+        self.toolbar.addAction(self.toggle_sidebar_action)
 
         splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(splitter)
@@ -279,6 +258,7 @@ class ImageSegmentationDialog(QDialog):
         self.canvas.set_tool_color(self._active_label_color())
         splitter.addWidget(self.canvas)
 
+        right_splitter = QSplitter(Qt.Horizontal)
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(4, 0, 4, 0)
@@ -291,6 +271,13 @@ class ImageSegmentationDialog(QDialog):
             exclude_layer_ids={"draft", "snap", "preview_vector", "annotations"},
         )
         self.magic_panel = MagicWandPanel()
+        self.render_sidebar = RenderSidebarWidget(mode="layered_gis")
+        self.render_settings = self.render_sidebar.render_settings
+        self.colormap_combo = self.render_sidebar.colormap_combo
+        self._remove_hillshade_mode()
+        self.render_settings.set_smooth_display(False)
+        self.render_sidebar_binding = LayerManagerRenderBinding(self.canvas.layer_manager)
+        self.render_sidebar_controller = RenderSidebarController(self.render_sidebar, self.render_sidebar_binding)
         self.label_panel.setMinimumHeight(190)
         self.layer_panel.setMinimumHeight(150)
         self.layer_panel.setMaximumHeight(220)
@@ -298,7 +285,16 @@ class ImageSegmentationDialog(QDialog):
         right_layout.addWidget(self.label_panel, 1)
         right_layout.addWidget(self.layer_panel, 0)
         right_layout.addWidget(self.magic_panel, 0)
-        splitter.addWidget(right_panel)
+        right_splitter.addWidget(right_panel)
+        right_splitter.addWidget(self.render_sidebar)
+        right_splitter.setStretchFactor(0, 2)
+        right_splitter.setStretchFactor(1, 1)
+        right_splitter.setSizes([740, 0])
+        self.right_splitter = right_splitter
+        self._sidebar_visible = False
+        self._sidebar_base_width = self.width()
+        self.render_sidebar.setVisible(False)
+        splitter.addWidget(right_splitter)
         splitter.setStretchFactor(0, 4)
         splitter.setStretchFactor(1, 1)
 
@@ -315,6 +311,24 @@ class ImageSegmentationDialog(QDialog):
     def _rebuild_layer_panel_items(self) -> None:
         self.layer_controller.rebuild_panel_items()
 
+    def _toggle_sidebar(self) -> None:
+        if not hasattr(self, "render_sidebar") or not hasattr(self, "right_splitter"):
+            return
+        if self._sidebar_visible:
+            self.render_sidebar.setVisible(False)
+            self.right_splitter.setSizes([self.right_splitter.width(), 0])
+            base_width = getattr(self, "_sidebar_base_width", 0)
+            if base_width > 0:
+                self.resize(base_width, self.height())
+            self._sidebar_visible = False
+            return
+        sidebar_width = max(180, min(240, int(self.render_sidebar.sizeHint().width())))
+        self._sidebar_base_width = self.width()
+        self.resize(self._sidebar_base_width + sidebar_width, self.height())
+        self.render_sidebar.setVisible(True)
+        self.right_splitter.setSizes([max(1, self._sidebar_base_width), sidebar_width])
+        self._sidebar_visible = True
+
     def _bind_signals(self) -> None:
         self.open_action.triggered.connect(self.open_image)
         self.open_project_action.triggered.connect(self.open_project)
@@ -325,6 +339,7 @@ class ImageSegmentationDialog(QDialog):
         self.redo_action.triggered.connect(self.redo)
         self.clear_annotations_action.triggered.connect(self.clear_all_annotations)
         self.actual_size_action.triggered.connect(self.canvas.fit_image)
+        self.toggle_sidebar_action.triggered.connect(self._toggle_sidebar)
         self.tool_action_group.triggered.connect(self._on_tool_action_triggered)
 
         self.canvas.mouse_pressed.connect(self._handle_mouse_press)
@@ -786,20 +801,20 @@ class ImageSegmentationDialog(QDialog):
 
     def _configure_default_render_for_source(self, source) -> None:
         metadata = source.metadata()
+        style = DefaultRenderStyleFactory.create(metadata)
+        config = style_to_legacy_config(style, DefaultRenderStyleFactory.create_display_settings(metadata))
         self.render_settings.reset_to_defaults(metadata.band_count)
-        self.colormap_combo.setCurrentText("gray")
-        if getattr(metadata, "has_color_table", False):
-            self._set_display_mode("灰度")
-            self.render_settings.set_stretch_mode(self.render_settings.STRETCH_NONE)
-            self.render_settings.auto_range_check.setChecked(False)
-            self.colormap_combo.setCurrentText("gray")
-        elif metadata.band_count >= 3:
-            self._set_display_mode("RGB")
-            self.render_settings.set_stretch_mode(self.render_settings.STRETCH_NONE)
-            self.render_settings.auto_range_check.setChecked(False)
-            self.colormap_combo.setCurrentText("gray")
-        else:
-            self._set_display_mode("灰度")
+        self.render_settings.display_mode_combo.setCurrentText(config.display_mode)
+        self.render_settings.gray_band_spin.setValue(int(config.gray_band))
+        self.render_settings.band_r_spin.setValue(int(config.rgb_bands[0]))
+        self.render_settings.band_g_spin.setValue(int(config.rgb_bands[1]))
+        self.render_settings.band_b_spin.setValue(int(config.rgb_bands[2]))
+        self.render_settings.set_stretch_mode(config.stretch_mode)
+        self.render_settings.auto_range_check.setChecked(not bool(config.auto_range))
+        self.render_settings.min_spin.setValue(float(config.value_range[0]))
+        self.render_settings.max_spin.setValue(float(config.value_range[1]))
+        self.render_settings.gamma_spin.setValue(float(config.gamma))
+        self.colormap_combo.setCurrentText(config.colormap_name)
 
     def _current_global_range(self, settings: dict) -> tuple[float, float] | None:
         if self.current_source is None:
@@ -1289,6 +1304,8 @@ class ImageSegmentationDialog(QDialog):
             self.canvas.set_nodata_value(self._base_nodata_override)
         self.canvas.set_interaction_mode(self.tool_controller.active_tool)
         self.tool_controller.set_annotations(self.project.annotations)
+        if hasattr(self, "render_sidebar_controller"):
+            self.render_sidebar_controller.refresh()
         self.status_label.setText(f"{os.path.basename(meta.path)} | {meta.width} x {meta.height}")
         self._update_render_settings_bands()
         self._update_image_stats_to_render_settings()

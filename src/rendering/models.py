@@ -34,6 +34,8 @@ class ImageSourceMetadata:
     has_color_table: bool = False
     color_table: Optional[list[tuple[int, int, int, int]]] = None
     overview_levels: list[OverviewInfo] = field(default_factory=list)
+    color_interpretations: list[str] = field(default_factory=list)
+    custom_properties: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -55,6 +57,22 @@ class RenderRequest:
     screen_width: int
     screen_height: int
     bands: tuple[int, ...] | None = None
+    layer_id: str | None = None
+    device_pixel_ratio: float = 1.0
+
+
+@dataclass
+class RawRasterBlock:
+    data: Any
+    image_rect: tuple[float, float, float, float]
+    source_window: tuple[int, int, int, int]
+    overview_level: Optional[OverviewInfo] = None
+    nodata_value: Any = None
+    mask: Any = None
+    alpha: Any = None
+    metadata: ImageSourceMetadata | None = None
+    band_indices: tuple[int, ...] | None = None
+    custom_properties: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -64,6 +82,8 @@ class RenderTileResult:
     image_rect: tuple[float, float, float, float]
     overview_level: Optional[OverviewInfo]
     source_window: tuple[int, int, int, int]
+    layer_id: str | None = None
+    cache_key: tuple | None = None
 
 
 @dataclass
@@ -80,7 +100,23 @@ class LayerSpec:
 
 
 @dataclass
+class RasterLayer:
+    id: str
+    name: str
+    source: Any
+    metadata: ImageSourceMetadata
+    render_style: Any
+    display_settings: Any
+    visible: bool = True
+    selected: bool = False
+    locked: bool = False
+    revision: int = 0
+    custom_properties: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class LayerState:
     spec: LayerSpec
     z_order: int = 0
     item: Any = field(default=None, repr=False, compare=False)
+    layer: RasterLayer | None = None
