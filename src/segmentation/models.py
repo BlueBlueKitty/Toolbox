@@ -47,6 +47,7 @@ class AnnotationObject:
     holes: list[list[list[float]]] = field(default_factory=list)
     bbox: Optional[list[float]] = None
     source_tool: str = "polygon"
+    coord_ref: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
 
@@ -168,6 +169,8 @@ class SegmentationProject:
         }
     )
     export_prefs: dict[str, Any] = field(default_factory=dict)
+    coordinate_mode: str = "pixel"
+    primary_window_id: str = "viewer_1"
 
     def to_dict(self) -> dict[str, Any]:
         image_asset = asdict(self.image_asset) if self.image_asset else None
@@ -183,6 +186,8 @@ class SegmentationProject:
             "magic_panel_settings": dict(self.magic_panel_settings),
             "layer_visibility": dict(self.layer_visibility),
             "export_prefs": dict(self.export_prefs),
+            "coordinate_mode": self.coordinate_mode,
+            "primary_window_id": self.primary_window_id,
         }
 
     @classmethod
@@ -212,6 +217,8 @@ class SegmentationProject:
             magic_panel_settings=payload.get("magic_panel_settings", {}),
             layer_visibility=_normalize_layer_visibility(payload.get("layer_visibility", {})),
             export_prefs=payload.get("export_prefs", {}),
+            coordinate_mode=payload.get("coordinate_mode", "pixel"),
+            primary_window_id=payload.get("primary_window_id", "viewer_1"),
         )
 
 

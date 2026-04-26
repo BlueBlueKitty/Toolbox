@@ -31,6 +31,7 @@ class LayerPanelController:
         self.on_layer_property: Callable[[str], None] | None = None
         self.on_zoom_bbox: Callable[[str], tuple[float, float, float, float] | None] | None = None
         self.after_change: Callable[[], None] | None = None
+        self._active_layer_slot_connected = False
 
     def bind(self) -> None:
         self.layer_panel.visibility_changed.connect(self._handle_visibility_changed)
@@ -45,8 +46,33 @@ class LayerPanelController:
         self.layer_panel.nodata_alpha_changed.connect(self._handle_nodata_changed)
         self.layer_panel.style_edit_requested.connect(self._handle_style_requested)
         self.layer_panel.property_requested.connect(self._handle_property_requested)
-        if hasattr(self.canvas, "layer_manager"):
+        self._connect_canvas_layer_signal()
+
+    def _connect_canvas_layer_signal(self) -> None:
+        if not hasattr(self.canvas, "layer_manager"):
+            return
+        try:
             self.canvas.layer_manager.active_layer_changed.connect(self.layer_panel.set_current_layer)
+            self._active_layer_slot_connected = True
+        except Exception:
+            self._active_layer_slot_connected = False
+
+    def _disconnect_canvas_layer_signal(self, canvas) -> None:
+        if not self._active_layer_slot_connected or not hasattr(canvas, "layer_manager"):
+            return
+        try:
+            canvas.layer_manager.active_layer_changed.disconnect(self.layer_panel.set_current_layer)
+        except Exception:
+            pass
+        self._active_layer_slot_connected = False
+
+    def set_canvas(self, canvas) -> None:
+        if canvas is self.canvas:
+            return
+        old_canvas = self.canvas
+        self._disconnect_canvas_layer_signal(old_canvas)
+        self.canvas = canvas
+        self._connect_canvas_layer_signal()
 
     def rebuild_panel_items(self) -> None:
         states = [

@@ -107,10 +107,35 @@ class LegacyRenderSettingsAdapter:
         return style_to_legacy_config(layer.render_style, layer.display_settings)
 
     @staticmethod
+    def _resolved_value_range(layer, config: RasterRenderConfig) -> tuple[float, float]:
+        value_range = tuple(config.value_range or (0.0, 1.0))
+        if not bool(getattr(config, "auto_range", False)):
+            return float(value_range[0]), float(value_range[1])
+        source = getattr(layer, "source", None)
+        if source is None or not hasattr(source, "value_range_for_settings"):
+            return float(value_range[0]), float(value_range[1])
+        settings = {
+            "display_mode": config.display_mode,
+            "gray_band": int(config.gray_band),
+            "rgb_bands": tuple(config.rgb_bands or (1, 2, 3)),
+            "stretch_mode": config.stretch_mode,
+            "percent_clip": tuple(config.percent_clip or (2.0, 98.0)),
+            "std_dev_n": float(config.std_dev_n),
+        }
+        try:
+            resolved = source.value_range_for_settings(settings)
+        except Exception:
+            resolved = None
+        if resolved is None:
+            return float(value_range[0]), float(value_range[1])
+        return float(resolved[0]), float(resolved[1])
+
+    @staticmethod
     def apply_layer_to_widget(widget: "RenderSidebarWidget", layer) -> None:
         if layer is None:
             return
         config = LegacyRenderSettingsAdapter.layer_to_legacy_config(layer)
+        resolved_min, resolved_max = LegacyRenderSettingsAdapter._resolved_value_range(layer, config)
         widget._apply_render_mode_to_sidebar(_render_mode_from_layer(layer))
         widget.render_settings.blockSignals(True)
         widget.render_settings.set_num_bands(max(1, int(layer.metadata.band_count or 1)))
@@ -126,7 +151,7 @@ class LegacyRenderSettingsAdapter:
         widget.render_settings.std_dev_spin.setValue(float(config.std_dev_n))
         widget.render_settings.gamma_spin.setValue(float(config.gamma))
         widget.render_settings.auto_range_check.setChecked(not bool(config.auto_range))
-        widget.render_settings.set_value_range(float(config.value_range[0]), float(config.value_range[1]))
+        widget.render_settings.set_value_range(float(resolved_min), float(resolved_max))
         widget.render_settings.reverse_check.setChecked(bool(config.colormap_reversed))
         widget.render_settings.blockSignals(False)
         widget._categorical_block = True
@@ -229,7 +254,7 @@ class SingleCanvasRenderBinding(RenderBindingBase):
         self.canvas = canvas
         self._target_id = target_id
         self._target_label = target_label
-        self.canvas.layer_manager.active_layer_changed.connect(self.changed.emit)
+        self.canvas.layer_manager.active_layer_changed.connect(lambda *_: self.changed.emit())
         self.canvas.layer_manager.layer_style_changed.connect(lambda *_: self.changed.emit())
         self.canvas.layer_manager.layer_display_changed.connect(lambda *_: self.changed.emit())
 
@@ -258,23 +283,38 @@ class MultiCanvasRenderBinding(RenderBindingBase):
         self._target_canvases = dict(target_canvases)
         self._target_labels = dict(target_labels or {})
         self._current_target_id = next(iter(self._target_canvases.keys()), None)
+        self._available_target_ids = list(self._target_canvases.keys())
         for target_id, canvas in self._target_canvases.items():
             canvas.canvas_left_clicked.connect(lambda tid=target_id: self.set_current_target(tid))
-            canvas.layer_manager.active_layer_changed.connect(self.changed.emit)
+            canvas.layer_manager.active_layer_changed.connect(lambda *_: self.changed.emit())
             canvas.layer_manager.layer_style_changed.connect(lambda *_: self.changed.emit())
             canvas.layer_manager.layer_display_changed.connect(lambda *_: self.changed.emit())
 
     def available_targets(self) -> list[tuple[str, str]]:
         return [
             (target_id, self._target_labels.get(target_id, target_id))
-            for target_id in self._target_canvases.keys()
+            for target_id in self._available_target_ids
+            if target_id in self._target_canvases
         ]
 
     def current_target_id(self) -> str | None:
         return self._current_target_id
 
+    def set_available_targets(self, target_ids: list[str] | None) -> None:
+        if not target_ids:
+            self._available_target_ids = list(self._target_canvases.keys())
+        else:
+            self._available_target_ids = [
+                target_id
+                for target_id in target_ids
+                if target_id in self._target_canvases
+            ]
+        if self._current_target_id not in self._available_target_ids:
+            self._current_target_id = self._available_target_ids[0] if self._available_target_ids else None
+        self.changed.emit()
+
     def set_current_target(self, target_id: str) -> None:
-        if target_id not in self._target_canvases:
+        if target_id not in self._target_canvases or target_id not in self._available_target_ids:
             return
         self._current_target_id = target_id
         canvas = self._target_canvases[target_id]
@@ -297,10 +337,10 @@ class LayerManagerRenderBinding(RenderBindingBase):
     def __init__(self, layer_manager):
         super().__init__()
         self.layer_manager = layer_manager
-        self.layer_manager.active_layer_changed.connect(self.changed.emit)
+        self.layer_manager.active_layer_changed.connect(lambda *_: self.changed.emit())
         self.layer_manager.layer_style_changed.connect(lambda *_: self.changed.emit())
         self.layer_manager.layer_display_changed.connect(lambda *_: self.changed.emit())
-        self.layer_manager.layer_order_changed.connect(self.changed.emit)
+        self.layer_manager.layer_order_changed.connect(lambda *_: self.changed.emit())
 
     def current_target_id(self) -> str | None:
         return self.layer_manager.active_layer_id()

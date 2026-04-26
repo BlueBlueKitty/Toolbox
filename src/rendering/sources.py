@@ -31,6 +31,8 @@ from .pipeline import DEFAULT_RENDER_PIPELINE
 from .style_auto_selector import DefaultRenderStyleFactory
 from .styles import default_display_settings, legacy_config_to_style
 
+_ALIGN_EPS = 1e-6
+
 
 class RasterImageSource:
     def metadata(self) -> ImageSourceMetadata:
@@ -152,10 +154,11 @@ class GdalRasterSource(RasterImageSource):
         bands = self._select_bands(request, style)
         buf_x = max(1, int(request.screen_width))
         buf_y = max(1, int(request.screen_height))
-        dst_x = min(max(0, int(round((req_x - request.x) / target_pixel_x))), buf_x - 1)
-        dst_y = min(max(0, int(round((req_y - request.y) / target_pixel_y))), buf_y - 1)
-        read_buf_x = max(1, min(buf_x - dst_x, int(np.ceil(req_width / target_pixel_x - 1e-9))))
-        read_buf_y = max(1, min(buf_y - dst_y, int(np.ceil(req_height / target_pixel_y - 1e-9))))
+        # 使用稳定 floor/ceil 取整，避免 round 在 0.5 临界点造成缩放暂停后的像素相位抖动。
+        dst_x = min(max(0, int(np.floor((req_x - request.x) / target_pixel_x + _ALIGN_EPS))), buf_x - 1)
+        dst_y = min(max(0, int(np.floor((req_y - request.y) / target_pixel_y + _ALIGN_EPS))), buf_y - 1)
+        read_buf_x = max(1, min(buf_x - dst_x, int(np.ceil(req_width / target_pixel_x - _ALIGN_EPS))))
+        read_buf_y = max(1, min(buf_y - dst_y, int(np.ceil(req_height / target_pixel_y - _ALIGN_EPS))))
         image_rect = (float(request.x), float(request.y), float(request.width), float(request.height))
         source_window = (x0, y0, width, height)
         clipped_to_request = dst_x != 0 or dst_y != 0 or read_buf_x != buf_x or read_buf_y != buf_y
@@ -277,14 +280,23 @@ class GdalRasterSource(RasterImageSource):
         return arr[valid]
 
     def _clip_request(self, request: RenderRequest):
-        req_x0 = max(0.0, min(float(request.x), float(self._metadata.width - 1)))
-        req_y0 = max(0.0, min(float(request.y), float(self._metadata.height - 1)))
-        req_x1 = max(req_x0 + 1.0, min(float(request.x + request.width), float(self._metadata.width)))
-        req_y1 = max(req_y0 + 1.0, min(float(request.y + request.height), float(self._metadata.height)))
-        x0 = max(0, int(np.floor(req_x0)))
-        y0 = max(0, int(np.floor(req_y0)))
-        x1 = min(self._metadata.width, max(x0 + 1, int(np.ceil(req_x1))))
-        y1 = min(self._metadata.height, max(y0 + 1, int(np.ceil(req_y1))))
+        max_w = float(self._metadata.width)
+        max_h = float(self._metadata.height)
+        req_x0 = max(0.0, min(float(request.x), max_w))
+        req_y0 = max(0.0, min(float(request.y), max_h))
+        req_x1 = max(0.0, min(float(request.x + request.width), max_w))
+        req_y1 = max(0.0, min(float(request.y + request.height), max_h))
+        if req_x1 <= req_x0:
+            req_x1 = min(max_w, req_x0 + 1.0)
+            req_x0 = max(0.0, req_x1 - 1.0)
+        if req_y1 <= req_y0:
+            req_y1 = min(max_h, req_y0 + 1.0)
+            req_y0 = max(0.0, req_y1 - 1.0)
+
+        x0 = max(0, int(np.floor(req_x0 + _ALIGN_EPS)))
+        y0 = max(0, int(np.floor(req_y0 + _ALIGN_EPS)))
+        x1 = min(self._metadata.width, max(x0 + 1, int(np.ceil(req_x1 - _ALIGN_EPS))))
+        y1 = min(self._metadata.height, max(y0 + 1, int(np.ceil(req_y1 - _ALIGN_EPS))))
         return x0, y0, max(1, x1 - x0), max(1, y1 - y0), (req_x0, req_y0, req_x1 - req_x0, req_y1 - req_y0)
 
     def _select_bands(self, request: RenderRequest, style):

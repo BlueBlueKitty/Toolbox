@@ -240,3 +240,4 @@ ref_repos/
 AGENTS.md
 
 .omx/
+.pytest_tmp/

@@ -84,16 +84,24 @@ class LayeredRasterCanvas(QWidget):
         self._dynamic_source = False
         self._last_request_signature = None
         self._is_refresh_panning = False
-        self._dynamic_render_margin_ratio = 0.35
+        self._is_refresh_zooming = False
+        # 缩放/拖动/静止态使用同一渲染预取边距，避免交互停止时因采样窗口变化导致像素大小抖动。
+        self._dynamic_render_margin_ratio = 1.10
+        self._dynamic_zoom_margin_ratio = 1.10
+        self._dynamic_pan_margin_ratio = 1.10
         self._pan_axis_lock_ratio = 3.0
         self._pan_axis_lock_tolerance_px = 6.0
         self._coordinates_are_image_space = False
         self._overlay_items_by_layer: dict[str, list[object]] = {}
 
         self._refresh_timer = QTimer(self)
-        self._refresh_timer.setInterval(120)
+        self._refresh_timer.setInterval(80)
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.timeout.connect(self.refresh_view)
+        self._zoom_settle_timer = QTimer(self)
+        self._zoom_settle_timer.setInterval(140)
+        self._zoom_settle_timer.setSingleShot(True)
+        self._zoom_settle_timer.timeout.connect(self._on_zoom_settled)
 
         self.graphics.viewport().installEventFilter(self)
         self.graphics.viewport().setMouseTracking(True)
@@ -481,34 +489,35 @@ class LayeredRasterCanvas(QWidget):
             self.current_zoom = next_zoom
         else:
             return
+        zooming_source = self.source is not None
+        if zooming_source:
+            # 先标记缩放态，再更新视图范围，确保 rangeChanged 期间不会按“静止态”去调度延迟重绘。
+            self._is_refresh_zooming = True
         self.view_box.setRange(
             xRange=(anchor.x() - (anchor.x() - x0) * scale, anchor.x() + (x1 - anchor.x()) * scale),
             yRange=(anchor.y() - (anchor.y() - y0) * scale, anchor.y() + (y1 - anchor.y()) * scale),
             padding=0,
         )
-        if self.source is not None:
+        if zooming_source:
+            # 缩放时旧瓦片会先按视图变换被放大/缩小，等定时器刷新时再替换成新的采样网格，
+            # 用户就会看到“暂停后像素块突然变大/变小”。这里直接同步刷新当前视图，
+            # 让缩放结束时屏幕上看到的就是目标采样结果，而不是旧瓦片的临时缩放预览。
             self._refresh_timer.stop()
             self.refresh_view()
+            self._zoom_settle_timer.start()
 
     def refresh_view(self):
         if self.source is None or not isValid(self):
+            self._is_refresh_zooming = False
             return
         request = self.current_render_request()
         if request is None:
+            self._is_refresh_zooming = False
             return
         request.layer_id = self.BASE_LAYER_ID
-        signature = (
-            int(request.x),
-            int(request.y),
-            int(request.width),
-            int(request.height),
-            int(request.screen_width),
-            int(request.screen_height),
-            tuple(request.bands or ()),
-            self._render_config_signature(),
-            self._base_layer_revision(),
-        )
+        signature = self._request_signature(request)
         if signature == self._last_request_signature and self.last_render is not None:
+            self._is_refresh_zooming = False
             return
         self._last_request_signature = signature
         render_config = self._render_config_from_state()
@@ -550,6 +559,20 @@ class LayeredRasterCanvas(QWidget):
         self._image_rect = QRectF(0, 0, self.original_width, self.original_height)
         self._rebuild_selected_pixel_marker()
 
+    def _request_signature(self, request: RenderRequest) -> tuple:
+        # 不再用 int 截断请求范围，避免亚像素缩放被错误去重导致“暂停时跳变”。
+        return (
+            round(float(request.x), 4),
+            round(float(request.y), 4),
+            round(float(request.width), 4),
+            round(float(request.height), 4),
+            int(request.screen_width),
+            int(request.screen_height),
+            tuple(request.bands or ()),
+            self._render_config_signature(),
+            self._base_layer_revision(),
+        )
+
     def current_render_request(self) -> RenderRequest:
         if not all(
             isValid(obj) for obj in (self, self.graphics, self.view_box)
@@ -569,8 +592,14 @@ class LayeredRasterCanvas(QWidget):
         height = max(y1 - y0, 1)
         scale_x = width / viewport_width
         scale_y = height / viewport_height
-        margin_px_x = max(0, int(np.ceil(viewport_width * self._dynamic_render_margin_ratio)))
-        margin_px_y = max(0, int(np.ceil(viewport_height * self._dynamic_render_margin_ratio)))
+        if self._is_refresh_zooming:
+            margin_ratio = self._dynamic_zoom_margin_ratio
+        elif self._is_refresh_panning:
+            margin_ratio = self._dynamic_pan_margin_ratio
+        else:
+            margin_ratio = self._dynamic_render_margin_ratio
+        margin_px_x = max(0, int(np.ceil(viewport_width * margin_ratio)))
+        margin_px_y = max(0, int(np.ceil(viewport_height * margin_ratio)))
         margin_x = margin_px_x * scale_x
         margin_y = margin_px_y * scale_y
         screen_width = viewport_width + margin_px_x * 2
@@ -583,6 +612,12 @@ class LayeredRasterCanvas(QWidget):
             screen_width=screen_width,
             screen_height=screen_height,
         )
+
+    def _on_zoom_settled(self) -> None:
+        self._is_refresh_zooming = False
+        if self.source is not None:
+            self._refresh_timer.stop()
+            self.refresh_view()
 
     def current_view_state(self) -> ViewportState:
         ((x0, x1), (y0, y1)) = self.view_box.viewRange()
@@ -1061,7 +1096,11 @@ class LayeredRasterCanvas(QWidget):
             if self._is_refresh_panning:
                 self._emit_view_changed()
                 return
-            self._refresh_timer.start()
+            if self._is_refresh_zooming:
+                if not self._refresh_timer.isActive():
+                    self._refresh_timer.start(35)
+            else:
+                self._refresh_timer.start()
         self._emit_view_changed()
 
     def _update_current_zoom_from_view_range(self) -> None:

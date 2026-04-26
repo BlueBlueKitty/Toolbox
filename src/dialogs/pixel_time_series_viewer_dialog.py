@@ -8,6 +8,7 @@ Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 import os
 import re
 import copy
+import json
 import numpy as np
 from dataclasses import replace
 from pathlib import Path
@@ -98,13 +99,11 @@ from src.rendering.canvas import LayeredRasterCanvas
 from src.rendering.models import ImageSourceMetadata
 from src.rendering.style_auto_selector import DefaultRenderStyleFactory
 from src.rendering.styles import style_to_legacy_config
-from src.rendering.sync import MultiCanvasSyncController, SyncOptions
+from src.rendering.sync import SyncOptions
 from src.widgets import (
     ColorbarWidget,
-    MultiCanvasRenderBinding,
+    MultiCanvasWorkspace,
     OperationProgressWidget,
-    RenderSidebarController,
-    RenderSidebarWidget,
 )
 from src.utils.gamma_file_process import (
     GAMMA_FORMATS,
@@ -262,11 +261,18 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.sort_order_combo.addItems(["正序", "倒序"])
         self.sort_order_combo.currentIndexChanged.connect(self.sort_images)
         control_layout1.addWidget(self.sort_order_combo)
+        self.toggle_window_layout_btn = QToolButton()
+        self.toggle_window_layout_btn.setToolTip("单窗口/双窗口切换")
+        self.toggle_window_layout_btn.setAutoRaise(True)
+        self.toggle_window_layout_btn.setIcon(self._material_icon("splitscreen"))
+        self.toggle_window_layout_btn.setIconSize(QSize(20, 20))
+        self.toggle_window_layout_btn.clicked.connect(self._toggle_window_layout)
+        control_layout1.addWidget(self.toggle_window_layout_btn)
         
         control_layout1.addStretch()
         
         self.toggle_sidebar_btn = QToolButton()
-        self.toggle_sidebar_btn.setToolTip("侧边栏")
+        self.toggle_sidebar_btn.setToolTip("渲染控制侧边栏")
         self.toggle_sidebar_btn.setAutoRaise(True)
         self._update_sidebar_toggle_icon()
         self.toggle_sidebar_btn.setIconSize(QSize(20, 20))
@@ -283,22 +289,16 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 创建主分割器：上方图像查看区，下方时序曲线
         main_splitter = QSplitter(Qt.Vertical)
         
-        # ============ 上方：双图像查看区（左右排列）============
-        images_splitter = QSplitter(Qt.Horizontal)
-        
-        # 图像窗口1（左侧）
-        viewer1_widget = self._create_image_viewer_panel("窗口1", 1)
-        images_splitter.addWidget(viewer1_widget)
-        
-        # 图像窗口2（右侧）
-        viewer2_widget = self._create_image_viewer_panel("窗口2", 2)
-        images_splitter.addWidget(viewer2_widget)
-        
-        # 设置两个图像窗口等宽
-        images_splitter.setStretchFactor(0, 1)
-        images_splitter.setStretchFactor(1, 1)
-        
-        main_splitter.addWidget(images_splitter)
+        # ============ 上方：多窗口画布工作区（单/双窗）============
+        self.workspace = MultiCanvasWorkspace(
+            canvas_factory=lambda _wid: LayeredRasterCanvas(),
+            window_ids=["viewer_1", "viewer_2"],
+            window_labels={"viewer_1": "窗口1", "viewer_2": "窗口2"},
+            panel_factory=self._create_viewer_panel_for_workspace,
+            sync_options=SyncOptions(sync_pan=True, sync_zoom=True, sync_geographic_extent=True, sync_cursor=True),
+        )
+        self.workspace.active_window_changed.connect(self._on_workspace_active_window_changed)
+        main_splitter.addWidget(self.workspace)
         
         # ============ 下方：时序曲线图 ============
         curve_widget = QGroupBox("时序曲线")
@@ -333,7 +333,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         content_layout.addWidget(main_splitter)
         outer_splitter.addWidget(content_widget)
 
-        self.render_sidebar = RenderSidebarWidget(mode="multi_target")
+        self.render_sidebar = self.workspace.render_sidebar
         self.render_settings = self.render_sidebar.render_settings
         self.colormap_combo = self.render_sidebar.colormap_combo
         self.render_settings.settings_changed.connect(self.on_render_settings_changed)
@@ -343,22 +343,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
         smooth_display = settings.value("display/smooth_display", False, type=bool)
         self.render_settings.set_smooth_display(smooth_display)
         self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
-        self.render_sidebar_binding = MultiCanvasRenderBinding(
-            {
-                "viewer_1": self.image_viewer_1,
-                "viewer_2": self.image_viewer_2,
-            },
-            {
-                "viewer_1": "窗口1",
-                "viewer_2": "窗口2",
-            },
-        )
-        self.render_sidebar_controller = RenderSidebarController(self.render_sidebar, self.render_sidebar_binding)
+        self.render_sidebar_binding = self.workspace.render_sidebar_binding
+        self.render_sidebar_controller = self.workspace.render_sidebar_controller
         self.render_sidebar.target_changed.connect(self._on_sidebar_target_changed)
-        self.viewport_sync_controller = MultiCanvasSyncController(
-            [self.image_viewer_1, self.image_viewer_2],
-            options=SyncOptions(sync_pan=True, sync_zoom=True, sync_geographic_extent=True, sync_cursor=True),
-        )
+        self.viewport_sync_controller = self.workspace.viewport_sync_controller
         outer_splitter.addWidget(self.render_sidebar)
         outer_splitter.setStretchFactor(0, 4)
         outer_splitter.setStretchFactor(1, 1)
@@ -370,8 +358,14 @@ class PixelTimeSeriesViewerDialog(QDialog):
         main_layout.addWidget(outer_splitter)
         self.operation_progress = OperationProgressWidget()
         main_layout.addWidget(self.operation_progress)
-    
-    def _create_image_viewer_panel(self, title, viewer_id):
+        self._load_workspace_preferences()
+
+    def _create_viewer_panel_for_workspace(self, window_id: str, viewer) -> QWidget:
+        if window_id == "viewer_1":
+            return self._create_image_viewer_panel("窗口1", 1, viewer=viewer)
+        return self._create_image_viewer_panel("窗口2", 2, viewer=viewer)
+
+    def _create_image_viewer_panel(self, title, viewer_id, viewer=None):
         """创建单个图像查看器面板
         
         Args:
@@ -385,7 +379,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         image_layout = QHBoxLayout()
         
         # 图像查看器
-        viewer = LayeredRasterCanvas()
+        viewer = viewer or LayeredRasterCanvas()
         setattr(self, f'image_viewer_{viewer_id}', viewer)
         viewer.files_dropped.connect(self._on_viewer_files_dropped)
         
@@ -471,6 +465,42 @@ class PixelTimeSeriesViewerDialog(QDialog):
         viewer.mouse_moved.connect(lambda x, y, val: self.on_viewer_mouse_moved(viewer_id, x, y, val))
         
         return panel
+
+    def _load_workspace_preferences(self) -> None:
+        settings = get_settings()
+        window_count = settings.value("workspace/window_count", 2, type=int)
+        active_window = settings.value("workspace/active_window", "viewer_1", type=str)
+        sync_options_raw = settings.value("workspace/sync_options", "", type=str)
+        sync_options = {}
+        if isinstance(sync_options_raw, str) and sync_options_raw.strip():
+            try:
+                parsed = json.loads(sync_options_raw)
+                if isinstance(parsed, dict):
+                    sync_options = parsed
+            except Exception:
+                sync_options = {}
+        self.workspace.set_window_count(window_count)
+        self.workspace.apply_sync_options(sync_options)
+        self.workspace.set_active_window(active_window)
+        self._active_render_viewer_id = 1 if self.workspace.current_target_id() == "viewer_1" else 2
+
+    def _save_workspace_preferences(self) -> None:
+        settings = get_settings()
+        settings.setValue("workspace/window_count", int(self.workspace.window_count()))
+        settings.setValue("workspace/active_window", self.workspace.current_target_id())
+        settings.setValue("workspace/sync_options", json.dumps(self.workspace.sync_options_dict(), ensure_ascii=False))
+
+    def _toggle_window_layout(self) -> None:
+        target = 1 if self.workspace.window_count() == 2 else 2
+        self.workspace.set_window_count(target)
+        if target == 1:
+            self._set_active_render_viewer(1)
+        self._save_workspace_preferences()
+
+    def _on_workspace_active_window_changed(self, target_id: str) -> None:
+        target_viewer_id = 1 if target_id == "viewer_1" else 2
+        if target_viewer_id != self._active_render_viewer_id:
+            self._set_active_render_viewer(target_viewer_id)
 
     def on_theme_mode_changed(self, _mode: str) -> None:
         self._theme_mode = _mode
@@ -656,6 +686,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
 
     def _set_active_render_viewer(self, viewer_id: int) -> None:
         viewer_id = 1 if int(viewer_id) == 1 else 2
+        if hasattr(self, "workspace") and self.workspace.window_count() == 1:
+            viewer_id = 1
         if viewer_id == self._active_render_viewer_id:
             if hasattr(self, "render_sidebar"):
                 self.render_sidebar.set_current_target(f"viewer_{viewer_id}")
@@ -663,10 +695,19 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._store_active_render_state()
         self._active_render_viewer_id = viewer_id
         self._apply_render_state_to_controls(viewer_id)
+        self._update_image_stats_to_render_settings(viewer_id=viewer_id)
+        self._viewer_render_settings[viewer_id] = self._normalized_settings_for_band_count(
+            self.render_settings.get_all_settings(),
+            self._viewer_band_count(viewer_id),
+        )
+        self._refresh_colorbar_range(viewer_id)
+        if hasattr(self, "workspace"):
+            self.workspace.set_active_window(f"viewer_{viewer_id}")
         if hasattr(self, "render_sidebar"):
             self.render_sidebar.set_current_target(f"viewer_{viewer_id}")
         if hasattr(self, "render_sidebar_controller"):
             self.render_sidebar_controller.refresh()
+        self._save_workspace_preferences()
 
     def _on_sidebar_target_changed(self, target_id: str) -> None:
         if target_id == "viewer_1":
@@ -677,7 +718,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
     def on_colormap_changed(self, colormap_name):
         """Colormap变化时更新当前选中窗口"""
         if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
-            # 侧边栏模式下由 RenderSidebarController 写回图层样式，避免旧链路覆盖
+            viewer_id = self._active_render_viewer_id
+            self._viewer_colormaps[viewer_id] = colormap_name
+            self._refresh_colorbar_range(viewer_id)
             return
         # 跳过分隔符项（分隔符以"━"开头）
         if colormap_name.startswith('━'):
@@ -702,6 +745,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
     def on_render_settings_changed(self):
         """渲染设置变化时延迟更新两个窗口，避免频繁重绘。"""
         if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
+            if hasattr(self, "_render_update_timer") and isValid(self._render_update_timer):
+                self._render_update_timer.start(60)
             return
         if not isValid(self):
             return
@@ -715,6 +760,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
     def _apply_render_settings_update(self):
         """应用渲染设置更新。"""
         if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
+            self._refresh_colorbar_range(self._active_render_viewer_id)
             return
         if not isValid(self):
             return
@@ -743,6 +789,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 self._render_update_timer.stop()
             if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
                 self.render_sidebar_controller.close()
+            self._save_workspace_preferences()
         except Exception:
             pass
         super().closeEvent(event)
@@ -915,14 +962,23 @@ class PixelTimeSeriesViewerDialog(QDialog):
 
     def _get_colorbar_data_range(self, viewer_id):
         """获取指定窗口当前图像的有效数据范围。"""
+        settings = self._normalized_settings_for_band_count(
+            self._viewer_render_settings.get(viewer_id) or self.render_settings.get_all_settings(),
+            self._viewer_band_count(viewer_id),
+        )
+        source = getattr(self, f'_cached_source_{viewer_id}', None)
+        if source is not None:
+            try:
+                value_range = source.value_range_for_settings(settings)
+                if value_range is not None:
+                    return float(value_range[0]), float(value_range[1])
+            except Exception:
+                pass
+
         data = getattr(self, f'_cached_image_{viewer_id}', None)
         if data is None:
             return None
 
-        settings = self._normalized_settings_for_band_count(
-            self._viewer_render_settings.get(viewer_id),
-            self._viewer_band_count(viewer_id),
-        )
         display_mode = settings.get('display_mode', '灰度')
 
         if data.ndim == 3:
@@ -951,19 +1007,22 @@ class PixelTimeSeriesViewerDialog(QDialog):
         if colorbar is None:
             return
 
-        settings = self._normalized_settings_for_band_count(
-            self._viewer_render_settings.get(viewer_id),
-            self._viewer_band_count(viewer_id),
-        )
+        if int(viewer_id) == int(self._active_render_viewer_id):
+            base_settings = self.render_settings.get_all_settings()
+        else:
+            base_settings = self._viewer_render_settings.get(viewer_id) or self.render_settings.get_all_settings()
+        settings = self._normalized_settings_for_band_count(base_settings, self._viewer_band_count(viewer_id))
         data_range = self._get_colorbar_data_range(viewer_id)
         if settings.get('auto_range', True) and data_range is not None:
             vmin, vmax = data_range
         else:
-            vmin = settings['value_min']
-            vmax = settings['value_max']
+            value_range = settings.get('value_range') or (settings.get('value_min', 0.0), settings.get('value_max', 1.0))
+            vmin = float(value_range[0])
+            vmax = float(value_range[1])
 
         colorbar.set_range(vmin, vmax)
-        colorbar.set_colormap(self._viewer_colormaps.get(viewer_id, "gray"), settings['colormap_reversed'])
+        cmap_name = self._viewer_colormaps.get(viewer_id, self.colormap_combo.currentText())
+        colorbar.set_colormap(cmap_name, bool(settings.get('colormap_reversed', False)))
 
     def _clear_cached_images(self):
         """清空两个窗口的图像缓存。"""
@@ -1554,6 +1613,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         info_label = getattr(self, f'image_info_label_{viewer_id}')
         
         previous_view_state = None if reset_view else viewer.capture_view_state()
+        previous_sync_state = bool(getattr(viewer, "is_syncing", False))
+        viewer.is_syncing = True
 
         try:
             # 按需获取图像数据（包含原始尺寸）
@@ -1654,11 +1715,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
             if self._converted_to_db:
                 info += " | dB"
             info_label.setText(info)
-            
+        finally:
+            viewer.is_syncing = previous_sync_state
             # 如果已选择像素，更新曲线高亮
             if self.selected_pixel:
                 self.update_time_series_plot()
-        finally:
             self._hide_loading_indicator()
     
     def open_folder(self, folder: str | None = None):

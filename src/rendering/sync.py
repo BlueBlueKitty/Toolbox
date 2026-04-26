@@ -52,11 +52,18 @@ class MultiCanvasSyncController:
         canvas.scroll_changed.connect(lambda h, v, source=canvas: self._on_scroll_changed(source, h, v))
 
     def _on_view_transformed(self, source, _transform):
+        if not (self.group.options.sync_pan or self.group.options.sync_zoom or self.group.options.sync_geographic_extent):
+            return
         if self._updating:
             return
         self._updating = True
         try:
-            state = source.current_view_state() if hasattr(source, "current_view_state") else None
+            # 优先使用事件携带的精确视窗范围（x_range/y_range），避免不同窗口尺寸下的缩放偏差。
+            state = _transform if isinstance(_transform, dict) else None
+            if state is None and hasattr(source, "capture_view_state"):
+                state = source.capture_view_state()
+            if state is None and hasattr(source, "current_view_state"):
+                state = source.current_view_state()
             for canvas in self.group.canvases():
                 if canvas is source:
                     continue

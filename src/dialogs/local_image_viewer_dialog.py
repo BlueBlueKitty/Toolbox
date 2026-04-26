@@ -402,7 +402,7 @@ class LocalImageViewerDialog(QDialog):
         
         control_layout1.addStretch()
         self.toggle_sidebar_btn = QToolButton()
-        self.toggle_sidebar_btn.setToolTip("侧边栏")
+        self.toggle_sidebar_btn.setToolTip("渲染控制侧边栏")
         self.toggle_sidebar_btn.setAutoRaise(True)
         self._update_sidebar_toggle_icon()
         self.toggle_sidebar_btn.setIconSize(QSize(20, 20))
@@ -863,7 +863,7 @@ class LocalImageViewerDialog(QDialog):
     def on_colormap_changed(self, colormap_name):
         """颜色映射改变"""
         if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
-            # 侧边栏模式下由 RenderSidebarController -> LayerManager 驱动，不走旧全局设置链路
+            self._refresh_colorbar_from_controls()
             return
         # 跳过分隔符项（分隔符以"━"开头）
         if colormap_name.startswith('━'):
@@ -883,6 +883,8 @@ class LocalImageViewerDialog(QDialog):
     def on_render_settings_changed(self):
         """渲染设置变化时延迟更新图像显示，避免频繁重绘。"""
         if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
+            if hasattr(self, "_render_update_timer") and isValid(self._render_update_timer):
+                self._render_update_timer.start(60)
             return
         if not isValid(self):
             return
@@ -893,6 +895,7 @@ class LocalImageViewerDialog(QDialog):
 
     def _apply_render_settings_update(self):
         if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
+            self._refresh_colorbar_from_controls()
             return
         if not isValid(self):
             return
@@ -915,6 +918,14 @@ class LocalImageViewerDialog(QDialog):
                 self.colorbar.set_colormap(self.colormap_combo.currentText(), settings['colormap_reversed'])
         finally:
             self._hide_loading_indicator()
+
+    def _refresh_colorbar_from_controls(self) -> None:
+        if not hasattr(self, 'colorbar') or self.colorbar is None:
+            return
+        settings = self.render_settings.get_all_settings() if hasattr(self, 'render_settings') else {}
+        value_range = settings.get('value_range') or (settings.get('value_min', 0.0), settings.get('value_max', 1.0))
+        self.colorbar.set_range(float(value_range[0]), float(value_range[1]))
+        self.colorbar.set_colormap(self.colormap_combo.currentText(), bool(settings.get('colormap_reversed', False)))
 
     def closeEvent(self, event):
         try:

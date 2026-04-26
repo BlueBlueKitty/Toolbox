@@ -19,6 +19,7 @@ from .render_sidebar_widget import (
 )
 from .colorbar_widget import ColorbarWidget
 from .operation_progress_widget import OperationProgressWidget
+from .multi_canvas_workspace import CanvasFactoryProtocol, MultiCanvasWorkspace
 
 __all__ = [
     'LayeredRasterCanvas', 
@@ -37,4 +38,6 @@ __all__ = [
     'RasterCanvasSynchronizer',
     'ColorbarWidget',
     'OperationProgressWidget',
+    'MultiCanvasWorkspace',
+    'CanvasFactoryProtocol',
 ]
