@@ -187,11 +187,14 @@ class MultiCanvasWorkspace(QWidget):
         if resolved not in self._window_widgets or resolved in self._detached_dialogs:
             return
         widget = self._window_widgets[resolved]
+        current_width = max(480, int(widget.width()) or int(widget.sizeHint().width()) or max(480, self.width() // 2))
+        current_height = max(360, int(widget.height()) or int(widget.sizeHint().height()) or max(360, self.height() // 2))
         widget.setParent(None)
         dialog = QDialog(self)
         dialog.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinMaxButtonsHint)
         dialog.setWindowTitle(title or self._window_labels.get(resolved, resolved))
-        dialog.resize(max(900, self.width() // 2), max(700, self.height() // 2))
+        # 保持分离前的画布尺寸，避免独立窗口一创建就把渲染开销瞬间放大。
+        dialog.resize(current_width, current_height)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(widget)

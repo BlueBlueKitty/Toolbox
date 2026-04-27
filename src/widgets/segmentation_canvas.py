@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from PySide6.QtCore import QEvent, QPointF, Qt, Signal
@@ -43,6 +43,7 @@ class SegmentationCanvas(LayeredRasterCanvas):
 
     _CURSOR_HOTSPOT_X = 7
     _CURSOR_HOTSPOT_Y = 7
+    _MAX_RENDER_TARGET_PIXELS = 3_000_000
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -157,6 +158,21 @@ class SegmentationCanvas(LayeredRasterCanvas):
     def refresh_view(self):
         super().refresh_view()
         self.view_state_changed.emit(self.current_view_state())
+
+    def current_render_request(self):
+        request = super().current_render_request()
+        if request is None:
+            return None
+        pixel_budget = int(self._MAX_RENDER_TARGET_PIXELS)
+        target_pixels = int(request.screen_width) * int(request.screen_height)
+        if pixel_budget <= 0 or target_pixels <= pixel_budget:
+            return request
+        scale = float(np.sqrt(pixel_budget / max(target_pixels, 1)))
+        screen_width = max(1, int(round(float(request.screen_width) * scale)))
+        screen_height = max(1, int(round(float(request.screen_height) * scale)))
+        # 独立窗口会让画布变大，同视野下采样请求会随窗口像素线性膨胀。
+        # 这里限制分割画布的实时渲染像素预算，优先保证拖动/缩放流畅度。
+        return replace(request, screen_width=screen_width, screen_height=screen_height)
 
     def eventFilter(self, obj, event):
         if obj is self.graphics.viewport():
