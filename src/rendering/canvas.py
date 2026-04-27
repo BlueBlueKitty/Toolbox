@@ -1196,6 +1196,8 @@ class LayeredRasterCanvas(QWidget):
             yMax=limit_rect.bottom() + limit_rect.height() * 4,
             minXRange=min_x_range,
             minYRange=min_y_range,
+            maxXRange=max(limit_rect.width() * 9, min_x_range),
+            maxYRange=max(limit_rect.height() * 9, min_y_range),
         )
         self._update_zoom_limits()
 
