@@ -110,9 +110,13 @@ class LayeredRasterCanvas(QWidget):
         self._zoom_settle_timer.timeout.connect(self._on_zoom_settled)
 
         self.graphics.viewport().installEventFilter(self)
+        self.graphics.installEventFilter(self)
         self.graphics.viewport().setMouseTracking(True)
         self.graphics.viewport().setCursor(Qt.ArrowCursor)
         self.setAcceptDrops(True)
+        # 统一在 viewport 层处理拖拽，避免 GraphicsView 与 viewport 双方同时接收时
+        # 出现 Qt 的 "drag leave received before drag enter" 警告。
+        self.graphics.setAcceptDrops(False)
         self.graphics.viewport().setAcceptDrops(True)
         self.view_box.sigRangeChanged.connect(self._on_range_changed)
         self._apply_background_from_palette()
@@ -494,16 +498,21 @@ class LayeredRasterCanvas(QWidget):
         return 0 <= point.x() < self.original_width and 0 <= point.y() < self.original_height
 
     def eventFilter(self, obj, event):
-        if obj is self.graphics.viewport():
+        if obj is self.graphics or obj is self.graphics.viewport():
             if event.type() == QEvent.DragEnter:
                 if self._accept_drag_event(event):
                     return True
             if event.type() == QEvent.DragMove:
                 if self._accept_drag_event(event):
                     return True
+            if event.type() == QEvent.DragLeave:
+                event.accept()
+                return True
             if event.type() == QEvent.Drop:
                 if self._handle_drop_event(event):
                     return True
+            if obj is self.graphics:
+                return super().eventFilter(obj, event)
             if event.type() == QEvent.MouseButtonPress:
                 return self._handle_mouse_press(event)
             if event.type() == QEvent.MouseMove:
@@ -691,8 +700,8 @@ class LayeredRasterCanvas(QWidget):
             return None
         viewport_width = max(int(view_rect.width()), 1)
         viewport_height = max(int(view_rect.height()), 1)
-        width = max(x1 - x0, 1)
-        height = max(y1 - y0, 1)
+        width = max(float(x1 - x0), 1e-6)
+        height = max(float(y1 - y0), 1e-6)
         scale_x = width / viewport_width
         scale_y = height / viewport_height
         if self._is_refresh_zooming:
@@ -709,8 +718,22 @@ class LayeredRasterCanvas(QWidget):
         screen_height = viewport_height + margin_px_y * 2
         if self.source is not None and self.image_world_rect is not None:
             image_rect = QRectF(*self.image_world_rect)
-            scene_rect = QRectF(x0 - margin_x, y0 - margin_y, screen_width * scale_x, screen_height * scale_y)
-            request_rect = scene_rect.intersected(image_rect)
+            visible_rect = QRectF(x0, y0, width, height).intersected(image_rect)
+            if visible_rect.isNull() or visible_rect.width() <= 0 or visible_rect.height() <= 0:
+                self._last_scene_request_rect = None
+                return None
+            visible_screen_width = max(1, int(round(visible_rect.width() / max(scale_x, 1e-9))))
+            visible_screen_height = max(1, int(round(visible_rect.height() / max(scale_y, 1e-9))))
+            margin_px_x = max(0, int(np.ceil(visible_screen_width * margin_ratio)))
+            margin_px_y = max(0, int(np.ceil(visible_screen_height * margin_ratio)))
+            margin_x = margin_px_x * scale_x
+            margin_y = margin_px_y * scale_y
+            request_rect = QRectF(
+                visible_rect.left() - margin_x,
+                visible_rect.top() - margin_y,
+                visible_rect.width() + margin_x * 2.0,
+                visible_rect.height() + margin_y * 2.0,
+            ).intersected(image_rect)
             if request_rect.isNull() or request_rect.width() <= 0 or request_rect.height() <= 0:
                 self._last_scene_request_rect = None
                 return None
@@ -1342,8 +1365,23 @@ class LayeredRasterCanvas(QWidget):
             self.current_zoom = 1.0
             return
         ((x0, x1), (y0, y1)) = self.view_box.viewRange()
-        view_width = max(float(x1 - x0), 1e-6)
-        view_height = max(float(y1 - y0), 1e-6)
+        if self._coordinates_are_image_space and not self._image_rect.isNull():
+            image_rect = QRectF(self._image_rect)
+            view_rect = QRectF(float(x0), float(y0), float(x1 - x0), float(y1 - y0))
+            mapped_rect = view_rect.intersected(image_rect)
+            if mapped_rect.isNull() or mapped_rect.width() <= 0 or mapped_rect.height() <= 0:
+                mapped_rect = view_rect
+            view_width = max(
+                float(mapped_rect.width()) * float(self.original_width) / max(abs(float(image_rect.width())), 1e-9),
+                1e-6,
+            )
+            view_height = max(
+                float(mapped_rect.height()) * float(self.original_height) / max(abs(float(image_rect.height())), 1e-9),
+                1e-6,
+            )
+        else:
+            view_width = max(float(x1 - x0), 1e-6)
+            view_height = max(float(y1 - y0), 1e-6)
         image_diag = float(np.hypot(self.original_width, self.original_height))
         view_diag = float(np.hypot(view_width, view_height))
         if view_diag <= 0:
