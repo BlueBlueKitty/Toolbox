@@ -33,6 +33,7 @@ class LayeredRasterCanvas(QWidget):
     files_dropped = Signal(list)
 
     BASE_LAYER_ID = "base_raster"
+    SYNC_POINTER_Z_VALUE = 30_000
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1331,6 +1332,8 @@ class LayeredRasterCanvas(QWidget):
             ):
                 item.setPen(pen)
                 item.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+                # 同步十字丝应始终显示在最上层，避免被辅助栅格等叠加图层遮挡。
+                item.setZValue(self.SYNC_POINTER_Z_VALUE)
                 self.view_box.addItem(item)
             self._synced_pointer_items = [h_outer, v_outer, h_inner, v_inner]
         for item in self._synced_pointer_items:

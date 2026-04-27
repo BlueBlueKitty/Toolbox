@@ -163,6 +163,10 @@ class SegmentationCanvas(LayeredRasterCanvas):
             if event.type() == QEvent.Wheel and self._handle_tool_wheel_adjust(event):
                 return True
             if event.type() == QEvent.MouseButtonPress:
+                if hasattr(event, "button") and event.button() == Qt.LeftButton:
+                    # 分割画布在此处自行消费左键事件，需主动通知工作区切换活动窗口，
+                    # 否则双窗模式下窗口2点击不会被设为活动窗口，后续工具事件仍发往窗口1。
+                    self.canvas_left_clicked.emit()
                 if hasattr(event, "button") and event.button() == Qt.MiddleButton:
                     self._begin_pan_interaction()
                 if self._should_forward_mouse_event(event):

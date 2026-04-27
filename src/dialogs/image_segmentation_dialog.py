@@ -442,6 +442,10 @@ class ImageSegmentationDialog(QDialog):
         self._active_window_id = window_id
         self.workspace.set_active_window(window_id)
         self.project_manager.settings.setValue("workspace/active_window", window_id)
+        # 新活动窗口需要立即同步当前工具对应的自定义光标状态。
+        self.canvas.set_interaction_mode(self.tool_controller.active_tool)
+        self.canvas.set_tool_color(self._active_label_color())
+        self.canvas.set_brush_radius(max(0.2, float(self.magic_panel.brush_size())))
         if self.current_source is not None:
             self.canvas.set_render_config(self.render_config)
             self._refresh_canvas()
@@ -1388,7 +1392,8 @@ class ImageSegmentationDialog(QDialog):
         if self.project.active_label_id not in label_ids:
             self.project.active_label_id = labels[0].id if labels else None
         self._refresh_label_ui()
-        self.canvas.set_tool_color(self._active_label_color())
+        for canvas in self._all_canvases():
+            canvas.set_tool_color(self._active_label_color())
         self._refresh_canvas()
         self._set_dirty(True)
 
@@ -1411,10 +1416,13 @@ class ImageSegmentationDialog(QDialog):
             self._refresh_canvas()
         self.project.active_label_id = int(label_id)
         self._refresh_label_ui()
-        self.canvas.set_tool_color(self._active_label_color())
+        for canvas in self._all_canvases():
+            canvas.set_tool_color(self._active_label_color())
 
     def _on_brush_size_changed(self, radius: float) -> None:
-        self.canvas.set_brush_radius(max(0.2, float(radius)))
+        value = max(0.2, float(radius))
+        for canvas in self._all_canvases():
+            canvas.set_brush_radius(value)
 
     def _refresh_label_ui(self) -> None:
         self.label_panel.blockSignals(True)
@@ -2533,7 +2541,8 @@ class ImageSegmentationDialog(QDialog):
                     break
             return
         self.tool_controller.set_tool(target)
-        self.canvas.set_interaction_mode(target)
+        for canvas in self._all_canvases():
+            canvas.set_interaction_mode(target)
         if target != SegmentationToolController.TOOL_MAGIC_WAND:
             self._clear_magic_preview()
 
