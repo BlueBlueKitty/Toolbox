@@ -30,8 +30,27 @@ class SegmentationProjectManager:
         payload = project.to_dict()
         image_asset = payload.get("image_asset")
         if image_asset and image_asset.get("path"):
+            # 为了兼容旧版本读取，输出精简后的基础字段集合。
+            legacy_image_asset = {
+                "id": image_asset.get("id"),
+                "path": image_asset.get("path"),
+                "path_mode": image_asset.get("path_mode", "absolute"),
+                "width": image_asset.get("width"),
+                "height": image_asset.get("height"),
+                "band_count": image_asset.get("band_count"),
+                "dtype": image_asset.get("dtype"),
+                "nodata": image_asset.get("nodata"),
+                "crs_wkt": image_asset.get("crs_wkt"),
+                "geotransform": image_asset.get("geotransform"),
+                "resolution": image_asset.get("resolution"),
+                "has_georef": image_asset.get("has_georef", False),
+                "overview_levels": image_asset.get("overview_levels", []),
+            }
             image_asset["path_mode"] = "absolute"
             image_asset["path"] = str(Path(image_asset["path"]).resolve())
+            legacy_image_asset["path_mode"] = "absolute"
+            legacy_image_asset["path"] = image_asset["path"]
+            payload["image_asset"] = legacy_image_asset
         if project_path:
             # 运行时矢量自动保存入口暂时关闭，仅保留代码路径以便后续恢复。
             # vector_path = self.vector_sidecar_path(project_path)

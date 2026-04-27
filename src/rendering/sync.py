@@ -42,6 +42,7 @@ class MultiCanvasSyncController:
     def __init__(self, canvases=None, options: SyncOptions | None = None):
         self.group = ViewportSyncGroup(options=options)
         self._updating = False
+        self._enabled = True
         for canvas in canvases or []:
             self.add_canvas(canvas)
 
@@ -51,7 +52,15 @@ class MultiCanvasSyncController:
         canvas.cursor_changed.connect(lambda cursor, source=canvas: self._on_cursor_changed(source, cursor))
         canvas.scroll_changed.connect(lambda h, v, source=canvas: self._on_scroll_changed(source, h, v))
 
+    def set_active_canvases(self, canvases) -> None:
+        self.group._canvases = list(canvases or [])
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._enabled = bool(enabled)
+
     def _on_view_transformed(self, source, _transform):
+        if not self._enabled:
+            return
         if not (self.group.options.sync_pan or self.group.options.sync_zoom or self.group.options.sync_geographic_extent):
             return
         if self._updating:
@@ -75,6 +84,8 @@ class MultiCanvasSyncController:
             self._updating = False
 
     def _on_cursor_changed(self, source, cursor):
+        if not self._enabled:
+            return
         if self._updating or not self.group.options.sync_cursor:
             return
         self._updating = True
@@ -86,6 +97,8 @@ class MultiCanvasSyncController:
             self._updating = False
 
     def _on_scroll_changed(self, source, h_value, v_value):
+        if not self._enabled:
+            return
         if self._updating:
             return
         self._updating = True

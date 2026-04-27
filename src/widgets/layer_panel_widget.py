@@ -34,11 +34,14 @@ class LayerPanelWidget(QGroupBox):
     nodata_alpha_changed = Signal(str, object)
     style_edit_requested = Signal(str)
     property_requested = Signal(str)
+    files_dropped = Signal(list)
 
     def __init__(self, parent=None):
         super().__init__("图层", parent)
+        self.setAcceptDrops(True)
         layout = QVBoxLayout(self)
         self.layer_tree = QTreeWidget()
+        self.layer_tree.setAcceptDrops(True)
         self.layer_tree.setColumnCount(3)
         self.layer_tree.setHeaderLabels(["图层", "窗口1", "窗口2"])
         self.layer_tree.setRootIsDecorated(False)
@@ -253,3 +256,29 @@ class LayerPanelWidget(QGroupBox):
         if mode:
             item.setData(0, Qt.UserRole + 4, mode)
             self.blend_mode_changed.emit(layer_id, mode)
+
+    def dragEnterEvent(self, event) -> None:
+        mime = event.mimeData()
+        if mime is not None and mime.hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        mime = event.mimeData()
+        if mime is not None and mime.hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        mime = event.mimeData()
+        if mime is None or not mime.hasUrls():
+            super().dropEvent(event)
+            return
+        local_paths = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+        if local_paths:
+            self.files_dropped.emit(local_paths)
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)

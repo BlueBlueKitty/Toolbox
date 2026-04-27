@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                                 QDialogButtonBox, QInputDialog, QFrame, QWidget,
                                 QApplication, QSizePolicy, QToolButton)
 from PySide6.QtCore import Qt, QSettings, QTimer, QSize
-from PySide6.QtGui import QFontDatabase, QFont, QPainter, QPixmap, QIcon, QColor
+from PySide6.QtGui import QFontDatabase, QFont, QPainter, QPixmap, QIcon, QColor, QTransform
 
 # 导入共享的GAMMA对话框
 from src.dialogs.gamma_dialogs import GammaTimeSeriesDialog
@@ -264,7 +264,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.toggle_window_layout_btn = QToolButton()
         self.toggle_window_layout_btn.setToolTip("单窗口/双窗口切换")
         self.toggle_window_layout_btn.setAutoRaise(True)
-        self.toggle_window_layout_btn.setIcon(self._material_icon("splitscreen"))
+        self.toggle_window_layout_btn.setIcon(self._material_icon("splitscreen", rotation_angle=90))
         self.toggle_window_layout_btn.setIconSize(QSize(20, 20))
         self.toggle_window_layout_btn.clicked.connect(self._toggle_window_layout)
         control_layout1.addWidget(self.toggle_window_layout_btn)
@@ -296,6 +296,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             window_labels={"viewer_1": "窗口1", "viewer_2": "窗口2"},
             panel_factory=self._create_viewer_panel_for_workspace,
             sync_options=SyncOptions(sync_pan=True, sync_zoom=True, sync_geographic_extent=True, sync_cursor=True),
+            pointer_sync=True,
         )
         self.workspace.active_window_changed.connect(self._on_workspace_active_window_changed)
         main_splitter.addWidget(self.workspace)
@@ -1092,7 +1093,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         families = QFontDatabase.applicationFontFamilies(font_id)
         return families[0] if families else None
 
-    def _material_icon(self, icon_name: str, *, size: int = 20) -> QIcon:
+    def _material_icon(self, icon_name: str, *, size: int = 20, rotation_angle: float = 0.0) -> QIcon:
         if not self._material_icon_family:
             return QIcon()
         pixmap = QPixmap(size, size)
@@ -1106,6 +1107,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         painter.setPen(icon_color)
         painter.drawText(pixmap.rect(), Qt.AlignCenter, icon_name)
         painter.end()
+        if rotation_angle:
+            pixmap = pixmap.transformed(QTransform().rotate(float(rotation_angle)), Qt.SmoothTransformation)
         return QIcon(pixmap)
 
     def _update_sidebar_toggle_icon(self) -> None:

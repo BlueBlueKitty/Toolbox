@@ -169,15 +169,17 @@ class SegmentationCanvas(LayeredRasterCanvas):
                 if self._should_consume_left_mouse(event):
                     return True
             elif event.type() == QEvent.MouseMove:
+                if self.is_panning:
+                    return LayeredRasterCanvas.eventFilter(self, obj, event)
                 payload = self._payload_from_event(event)
                 self._last_pointer_payload = payload
                 self.mouse_moved.emit(payload)
                 self._update_brush_range_indicator(payload)
-                if self.is_panning:
-                    return LayeredRasterCanvas.eventFilter(self, obj, event)
                 if self._should_consume_left_drag(event):
                     return True
                 return True
+            elif event.type() == QEvent.Leave:
+                self.update_synced_pointer(None, None, visible=False)
             elif event.type() == QEvent.MouseButtonRelease:
                 if hasattr(event, "button") and event.button() == Qt.MiddleButton:
                     handled = LayeredRasterCanvas.eventFilter(self, obj, event)
@@ -194,7 +196,9 @@ class SegmentationCanvas(LayeredRasterCanvas):
 
     def restore_view_state(self, state) -> bool:
         result = super().restore_view_state(state)
-        self.refresh_view()
+        # 对动态源交由 rangeChanged 定时刷新，避免双窗同步时“立即刷新 + 定时刷新”双重开销。
+        if result and self.source is None:
+            self.refresh_view()
         return result
 
     def update_annotations(
@@ -277,8 +281,7 @@ class SegmentationCanvas(LayeredRasterCanvas):
         was_panning = self._is_panning
         self._is_panning = False
         if was_panning:
-            self._refresh_timer.stop()
-            self.refresh_view()
+            self._refresh_timer.start(1)
         self.graphics.viewport().setCursor(self._cursor_for_tool(self._interaction_mode))
 
     def _should_forward_mouse_event(self, event) -> bool:
@@ -395,6 +398,21 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self._brush_range_item.update()
         self.graphics.viewport().update()
 
+    def _emit_mouse_moved(self, x: int, y: int, _value, event=None) -> None:
+        if event is not None:
+            payload = self._payload_from_event(event)
+        else:
+            payload = CanvasMousePayload(
+                x=float(x),
+                y=float(y),
+                button=Qt.NoButton,
+                buttons=Qt.NoButton,
+                modifiers=Qt.NoModifier,
+            )
+        self._last_pointer_payload = payload
+        self.mouse_moved.emit(payload)
+        self._update_brush_range_indicator(payload)
+
     def _handle_tool_wheel_adjust(self, event) -> bool:
         if self._interaction_mode not in {"magic_wand", "brush", "eraser"}:
             return False
@@ -407,9 +425,14 @@ class SegmentationCanvas(LayeredRasterCanvas):
         return True
 
     def _on_view_range_changed(self, *_args) -> None:
+        self._update_current_zoom_from_view_range()
         if self.source is not None:
             if self._is_panning:
-                self.view_state_changed.emit(self.current_view_state())
+                if not self.is_syncing:
+                    self.view_transformed.emit(self.capture_view_state())
                 return
             self._refresh_timer.start()
-        self.view_state_changed.emit(self.current_view_state())
+        if not self.is_syncing:
+            self.view_transformed.emit(self.capture_view_state())
+        if self.source is None:
+            self.view_state_changed.emit(self.current_view_state())

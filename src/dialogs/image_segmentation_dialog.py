@@ -9,6 +9,7 @@ import json
 import os
 import re
 import time
+from dataclasses import replace
 from collections import OrderedDict
 from pathlib import Path
 import numpy as np
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSplitter,
     QSpinBox,
+    QSizePolicy,
     QStyle,
     QToolBar,
     QVBoxLayout,
@@ -64,7 +66,7 @@ from src.segmentation.exporters import (
 from src.segmentation.geometry_service import GeometryService
 from src.rendering.sources import GdalRasterSource, StandardImageSource
 from src.rendering.style_auto_selector import DefaultRenderStyleFactory
-from src.rendering.styles import style_to_legacy_config
+from src.rendering.styles import default_display_settings, legacy_config_to_style, style_to_legacy_config
 from src.rendering.config import default_raster_render_config, render_raster_rgb
 from src.rendering.layer_operations import is_layer_removable, nodata_to_text
 from src.rendering.layer_panel_controller import LayerPanelController
@@ -170,6 +172,17 @@ class ImageSegmentationDialog(QDialog):
         self._render_update_timer.setInterval(100)
         self._render_update_timer.setSingleShot(True)
         self._render_update_timer.timeout.connect(self._apply_render_settings_update)
+        self._view_overlay_update_timer = QTimer(self)
+        self._view_overlay_update_timer.setSingleShot(True)
+        self._view_overlay_update_timer.setInterval(240)
+        self._view_overlay_update_timer.timeout.connect(self._apply_view_overlay_update)
+        self._updating_view_overlays = False
+        self._mask_nonzero_revision = -1
+        self._mask_has_nonzero_cached = False
+        self._synced_pointer_clear_timer = QTimer(self)
+        self._synced_pointer_clear_timer.setSingleShot(True)
+        self._synced_pointer_clear_timer.setInterval(1200)
+        self._synced_pointer_clear_timer.timeout.connect(self._clear_synced_pointers)
         self._material_icon_family = self._load_material_icon_font()
         self._last_image_dir = self.project_manager.settings.value("last_image_dir", "", type=str)
         self._last_project_dir = self.project_manager.settings.value("last_project_dir", "", type=str)
@@ -194,7 +207,7 @@ class ImageSegmentationDialog(QDialog):
         self.open_action = QAction(self.style().standardIcon(QStyle.SP_DialogOpenButton), "打开图像", self)
         self.open_project_action = QAction(self.style().standardIcon(QStyle.SP_FileDialogContentsView), "打开项目", self)
         self.save_project_action = QAction(self.style().standardIcon(QStyle.SP_DialogSaveButton), "保存项目", self)
-        self.import_aux_action = QAction(self._make_tool_icon("layers"), "导入辅助数据", self)
+        self.import_aux_action = QAction(self._make_tool_icon("layers"), "导入辅助数据，可直接将辅助数据拖入图层管理窗口中", self)
         self.export_action = QAction(self.style().standardIcon(QStyle.SP_DialogApplyButton), "导出...", self)
         self.undo_action = QAction(self.style().standardIcon(QStyle.SP_ArrowBack), "撤销", self)
         self.redo_action = QAction(self.style().standardIcon(QStyle.SP_ArrowForward), "重做", self)
@@ -207,7 +220,7 @@ class ImageSegmentationDialog(QDialog):
         self.undo_action.setIcon(self._make_tool_icon("undo"))
         self.redo_action.setIcon(self._make_tool_icon("redo"))
         self.actual_size_action = QAction(self._make_tool_icon("fit_screen"), "缩放到全图", self)
-        self.toggle_window_count_action = QAction(self._make_tool_icon("splitscreen"), "单窗/双窗切换", self)
+        self.toggle_window_count_action = QAction(self._make_tool_icon("splitscreen", 90), "单窗/双窗切换", self)
         self.toggle_detach_window2_action = QAction(self._make_tool_icon("open_in_new"), "窗口2独立窗口", self)
         self.toggle_sidebar_action = QAction(self._make_tool_icon("tune"), "渲染控制侧边栏", self)
         self.toggle_sidebar_action.setToolTip("显示或隐藏渲染控制侧边栏")
@@ -250,6 +263,10 @@ class ImageSegmentationDialog(QDialog):
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.toggle_window_count_action)
         self.toolbar.addAction(self.toggle_detach_window2_action)
+        self.toolbar.addSeparator()
+        self._toolbar_spacer = QWidget(self)
+        self._toolbar_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.toolbar.addWidget(self._toolbar_spacer)
         self.toolbar.addAction(self.toggle_sidebar_action)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -259,6 +276,8 @@ class ImageSegmentationDialog(QDialog):
             canvas_factory=lambda _wid: SegmentationCanvas(),
             window_ids=["viewer_1", "viewer_2"],
             window_labels={"viewer_1": "窗口1", "viewer_2": "窗口2"},
+            render_binding_layer_mode="active",
+            pointer_sync=True,
         )
         self.canvas = self.workspace.window_canvas("viewer_1")
         for window_id in self.workspace.window_ids:
@@ -294,6 +313,13 @@ class ImageSegmentationDialog(QDialog):
         self.render_settings.set_smooth_display(False)
         self.render_sidebar_binding = self.workspace.render_sidebar_binding
         self.render_sidebar_controller = self.workspace.render_sidebar_controller
+        self.render_sidebar.mode = "simple"
+        self.render_sidebar.target_combo.setVisible(False)
+        renderer_layout = self.render_sidebar.renderer_group.layout()
+        if renderer_layout is not None and hasattr(renderer_layout, "labelForField"):
+            target_label = renderer_layout.labelForField(self.render_sidebar.target_combo)
+            if target_label is not None:
+                target_label.setVisible(False)
         self.label_panel.setMinimumHeight(190)
         self.layer_panel.setMinimumHeight(150)
         self.layer_panel.setMaximumHeight(220)
@@ -310,11 +336,10 @@ class ImageSegmentationDialog(QDialog):
         self._sidebar_visible = False
         self._sidebar_base_width = self.width()
         self.render_sidebar.setVisible(False)
-        initial_window_count = self.project_manager.settings.value("workspace/window_count", 1, type=int)
-        self.workspace.set_window_count(initial_window_count)
-        initial_active_window = self.project_manager.settings.value("workspace/active_window", "viewer_1", type=str)
-        self._active_window_id = initial_active_window if initial_active_window in {"viewer_1", "viewer_2"} else "viewer_1"
-        self.workspace.set_active_window(self._active_window_id)
+        # 分割工具默认单窗口启动，避免上次状态残留造成初始活动窗口异常。
+        self.workspace.set_window_count(1)
+        self.workspace.set_active_window("viewer_1")
+        self._active_window_id = self.workspace.current_target_id()
         self.canvas = self.workspace.window_canvas(self._active_window_id) or self.workspace.window_canvas("viewer_1")
         self.layer_controller.set_canvas(self.canvas)
         self._rebuild_layer_panel_items()
@@ -371,7 +396,7 @@ class ImageSegmentationDialog(QDialog):
         canvas.mouse_moved.connect(self._handle_mouse_move)
         canvas.mouse_moved.connect(self.tool_controller.handle_move)
         canvas.mouse_released.connect(self._handle_mouse_release)
-        canvas.view_state_changed.connect(self._on_view_state_changed)
+        canvas.view_transformed.connect(self._on_canvas_view_transformed)
         canvas.tool_wheel_adjust_requested.connect(self._adjust_active_tool_slider)
 
     def _unbind_canvas_signals(self, canvas) -> None:
@@ -381,13 +406,21 @@ class ImageSegmentationDialog(QDialog):
             (canvas.mouse_moved, self._handle_mouse_move),
             (canvas.mouse_moved, self.tool_controller.handle_move),
             (canvas.mouse_released, self._handle_mouse_release),
-            (canvas.view_state_changed, self._on_view_state_changed),
+            (canvas.view_transformed, self._on_canvas_view_transformed),
             (canvas.tool_wheel_adjust_requested, self._adjust_active_tool_slider),
         ]:
             try:
                 signal.disconnect(slot)
             except Exception:
                 pass
+
+    def _on_canvas_view_transformed(self, _state) -> None:
+        if self.project.image_asset is None:
+            return
+        try:
+            self.tool_controller.set_view_state(self.canvas.current_view_state())
+        except Exception:
+            pass
 
     def _on_workspace_active_window_changed(self, window_id: str) -> None:
         self._set_active_window(window_id)
@@ -414,19 +447,41 @@ class ImageSegmentationDialog(QDialog):
             self.render_sidebar_controller.refresh()
 
     def _toggle_window_count(self) -> None:
+        viewer1 = self._canvas_for_window("viewer_1")
+        active_canvas = self.canvas
+        preserved_state = None
+        if viewer1 is not None:
+            preserved_state = viewer1.capture_view_state()
+        elif active_canvas is not None:
+            preserved_state = active_canvas.capture_view_state()
         target_count = 1 if self.workspace.window_count() == 2 else 2
+        self.workspace.windows_splitter.setUpdatesEnabled(False)
         self.workspace.set_window_count(target_count)
+        self.workspace.windows_splitter.setUpdatesEnabled(True)
         if target_count == 1:
             self._set_active_window("viewer_1")
+        else:
+            self._ensure_window2_ready()
+        if preserved_state is not None:
+            self._restore_workspace_view_state_after_toggle(preserved_state, target_count)
         self.project_manager.settings.setValue("workspace/window_count", int(target_count))
 
     def _toggle_detach_window2(self) -> None:
         if self.workspace.is_window_detached("viewer_2"):
             self.workspace.attach_window("viewer_2")
-            self.toggle_detach_window2_action.setText("窗口2独立窗口")
         else:
+            if self.workspace.window_count() < 2:
+                self.workspace.set_window_count(2)
+                self.project_manager.settings.setValue("workspace/window_count", 2)
+                self._ensure_window2_ready()
             self.workspace.detach_window("viewer_2", title="图像分割工具 - 窗口2")
-            self.toggle_detach_window2_action.setText("窗口2回嵌")
+
+    def _on_workspace_window_detached_changed(self, window_id: str, detached: bool) -> None:
+        if window_id != "viewer_2":
+            return
+        self.toggle_detach_window2_action.setText("窗口2回嵌" if detached else "窗口2独立窗口")
+        if not detached and self.workspace.window_count() >= 2:
+            self._ensure_window2_ready()
 
     def _toggle_sidebar(self) -> None:
         if not hasattr(self, "render_sidebar") or not hasattr(self, "right_splitter"):
@@ -461,6 +516,7 @@ class ImageSegmentationDialog(QDialog):
         self.toggle_sidebar_action.triggered.connect(self._toggle_sidebar)
         self.tool_action_group.triggered.connect(self._on_tool_action_triggered)
         self.workspace.active_window_changed.connect(self._on_workspace_active_window_changed)
+        self.workspace.window_detached_changed.connect(self._on_workspace_window_detached_changed)
         self.render_sidebar.target_changed.connect(self._on_workspace_active_window_changed)
 
         self._bind_canvas_signals(self.canvas)
@@ -490,6 +546,7 @@ class ImageSegmentationDialog(QDialog):
         self.layer_controller.after_change = self._on_layer_controller_changed
         self.layer_controller.bind()
         self.layer_panel.window_visibility_changed.connect(self._on_layer_window_visibility_changed)
+        self.layer_panel.files_dropped.connect(self._on_layer_panel_files_dropped)
         self.magic_panel.params_changed.connect(self._schedule_magic_preview)
         self.magic_panel.params_changed.connect(lambda *_: self._sync_magic_panel_state_to_project(mark_dirty=True))
         self.magic_panel.merge_preview_changed.connect(self._on_merge_preview_changed)
@@ -539,17 +596,21 @@ class ImageSegmentationDialog(QDialog):
         self.redo_action.setIcon(self._make_tool_icon("redo"))
         self.clear_annotations_action.setIcon(self._make_tool_icon("delete_sweep"))
         self.actual_size_action.setIcon(self._make_tool_icon("fit_screen"))
+        self.toggle_window_count_action.setIcon(self._make_tool_icon("splitscreen", 90))
+        self.toggle_detach_window2_action.setIcon(self._make_tool_icon("open_in_new"))
+        self.toggle_sidebar_action.setIcon(self._make_tool_icon("tune"))
         self.browse_tool_action.setIcon(self._make_tool_icon("pan_tool"))
         self.rectangle_tool_action.setIcon(self._make_tool_icon("crop_square"))
         self.polygon_tool_action.setIcon(self._make_tool_icon("gesture"))
         self.magic_tool_action.setIcon(self._make_tool_icon("auto_fix_high", -90))
         self.brush_tool_action.setIcon(self._make_tool_icon("brush", 90))
         self.eraser_tool_action.setIcon(self._make_tool_icon("ink_eraser", 0))
-        self.canvas.set_tool_icons({
-            SegmentationToolController.TOOL_MAGIC_WAND: self._make_tool_icon("auto_fix_high"),
-            SegmentationToolController.TOOL_BRUSH: self._make_tool_icon("brush"),
-            SegmentationToolController.TOOL_ERASER: self._make_tool_icon("ink_eraser"),
-        })
+        for canvas in self._all_canvases():
+            canvas.set_tool_icons({
+                SegmentationToolController.TOOL_MAGIC_WAND: self._make_tool_icon("auto_fix_high"),
+                SegmentationToolController.TOOL_BRUSH: self._make_tool_icon("brush"),
+                SegmentationToolController.TOOL_ERASER: self._make_tool_icon("ink_eraser"),
+            })
 
     def _on_magic_slider_config_changed(self, _key: str, configs: dict) -> None:
         state = self.project.magic_panel_settings if isinstance(self.project.magic_panel_settings, dict) else {}
@@ -711,6 +772,15 @@ class ImageSegmentationDialog(QDialog):
                     self.workspace.apply_sync_options(parsed)
             except Exception:
                 pass
+        # 分割工具默认开启双窗联动，避免历史配置关闭后看起来“无法同步”。
+        self.workspace.apply_sync_options(
+            {
+                "sync_pan": True,
+                "sync_zoom": True,
+                "sync_geographic_extent": True,
+                "sync_cursor": True,
+            }
+        )
         self.on_render_settings_changed()
 
     def _save_render_preferences(self) -> None:
@@ -1001,6 +1071,15 @@ class ImageSegmentationDialog(QDialog):
         self._mask_overlay_revision += 1
         self._raster_overlay_cache_key = None
         self._raster_overlay_cache_value = (None, None)
+
+    def _project_mask_has_foreground(self) -> bool:
+        mask = self.project.mask_data
+        if mask is None:
+            return False
+        if self._mask_nonzero_revision != self._mask_overlay_revision:
+            self._mask_has_nonzero_cached = bool(np.any(mask))
+            self._mask_nonzero_revision = self._mask_overlay_revision
+        return bool(self._mask_has_nonzero_cached)
 
     def _start_progress(self, message: str, maximum: int = 0) -> None:
         self.operation_progress.start_task(message, maximum)
@@ -1382,7 +1461,8 @@ class ImageSegmentationDialog(QDialog):
         self._save_render_preferences()
         self._clear_analysis_cache()
         if self.current_source is not None:
-            self.canvas.set_render_config(self.render_config)
+            for canvas in self._all_canvases():
+                canvas.set_render_config(self.render_config)
             self._refresh_canvas()
 
     def _update_render_settings_bands(self) -> None:
@@ -1503,11 +1583,13 @@ class ImageSegmentationDialog(QDialog):
             layer_id = layer.get("id")
             if not layer_id:
                 continue
-            try:
-                self.canvas.remove_layer(layer_id)
-            except Exception:
-                pass
+            for canvas in self._all_canvases():
+                try:
+                    canvas.remove_layer(layer_id)
+                except Exception:
+                    pass
             self.project.layer_visibility.pop(layer_id, None)
+            self._layer_window_visibility.pop(str(layer_id), None)
             if isinstance(self.project.export_prefs, dict):
                 self.project.export_prefs.get("layer_opacity", {}).pop(layer_id, None)
                 self.project.export_prefs.get("layer_blend_mode", {}).pop(layer_id, None)
@@ -1717,17 +1799,39 @@ class ImageSegmentationDialog(QDialog):
             return
         self._last_aux_dir = str(Path(file_path).parent)
         self.project_manager.settings.setValue("last_aux_dir", self._last_aux_dir)
-        lower = file_path.lower()
         try:
+            self._import_auxiliary_paths([file_path])
+        except Exception as exc:
+            QMessageBox.warning(self, "导入失败", str(exc))
+
+    def _on_layer_panel_files_dropped(self, paths: list[str]) -> None:
+        if self.project.image_asset is None:
+            QMessageBox.warning(self, "提示", "请先打开待分割影像，再导入辅助数据。")
+            return
+        valid_paths = [item for item in (paths or []) if os.path.isfile(item)]
+        if not valid_paths:
+            return
+        try:
+            self._import_auxiliary_paths(valid_paths)
+        except Exception as exc:
+            QMessageBox.warning(self, "导入失败", str(exc))
+
+    def _import_auxiliary_paths(self, file_paths: list[str]) -> None:
+        imported_any = False
+        for file_path in file_paths:
+            lower = str(file_path).lower()
             if lower.endswith((".shp", ".geojson", ".json", ".gpkg", ".kml", ".kmz", ".gml")):
                 self._import_aux_vector(file_path)
-            else:
+                imported_any = True
+                continue
+            if lower.endswith((".tif", ".tiff", ".img", ".jpg", ".jpeg", ".png")):
                 self._import_aux_raster(file_path)
+                imported_any = True
+                continue
+        if imported_any:
             self._rebuild_layer_panel_items()
             self._refresh_canvas()
             self._set_dirty(True)
-        except Exception as exc:
-            QMessageBox.warning(self, "导入失败", str(exc))
 
     def _next_aux_layer_id(self, prefix: str) -> str:
         self._auxiliary_layer_counter += 1
@@ -1795,7 +1899,8 @@ class ImageSegmentationDialog(QDialog):
             render_cfg.rgb_bands = (1, 2, 3)
         nodata_override = (reuse or {}).get("nodata_override")
 
-        self.canvas.set_raster_overlay(layer_id, None, None, name=layer_name, opacity=1.0)
+        for canvas in self._all_canvases():
+            canvas.set_raster_overlay(layer_id, None, None, name=layer_name, opacity=1.0)
         self.project.layer_visibility[layer_id] = True
         self._auxiliary_layers.append(
             {
@@ -1901,7 +2006,8 @@ class ImageSegmentationDialog(QDialog):
         layer_name = str((reuse or {}).get("name") or f"辅助矢量-{Path(file_path).name}")
         vector_style = dict((reuse or {}).get("vector_style") or {})
         color = vector_style.get("color", "#22c55e")
-        self.canvas.set_vector_overlay(layer_id, annotations, color, name=layer_name)
+        for canvas in self._all_canvases():
+            canvas.set_vector_overlay(layer_id, annotations, color, name=layer_name)
         bbox = GeometryService.affected_bbox_from_annotations(annotations)
         self.project.layer_visibility[layer_id] = True
         self._auxiliary_layers.append(
@@ -3047,6 +3153,11 @@ class ImageSegmentationDialog(QDialog):
                 continue
             final_visible = bool(visible and self._layer_visible_in_window(layer_name, window_id))
             canvas.set_layer_visible(layer_name, final_visible)
+            self.layer_panel.set_window_visibility(
+                layer_name,
+                window_id,
+                self._layer_visible_in_window(layer_name, window_id) if visible else False,
+            )
         if layer_name == "preview_vector" and visible:
             self._refresh_preview_vector(force=True)
 
@@ -3086,6 +3197,8 @@ class ImageSegmentationDialog(QDialog):
         if not isinstance(self.project.export_prefs, dict):
             self.project.export_prefs = {}
         self.project.export_prefs["selected_layer"] = layer_id
+        if hasattr(self, "render_sidebar_controller"):
+            self.render_sidebar_controller.refresh()
 
     def _layer_bbox(self, layer_name: str) -> tuple[float, float, float, float] | None:
         if self.project.image_asset is None:
@@ -3120,12 +3233,14 @@ class ImageSegmentationDialog(QDialog):
         target = next((item for item in self._auxiliary_layers if item.get("id") == layer_id), None)
         if target is None:
             return False
-        try:
-            self.canvas.remove_layer(layer_id)
-        except Exception:
-            pass
+        for canvas in self._all_canvases():
+            try:
+                canvas.remove_layer(layer_id)
+            except Exception:
+                pass
         self._auxiliary_layers = [item for item in self._auxiliary_layers if item.get("id") != layer_id]
         self.project.layer_visibility.pop(layer_id, None)
+        self._layer_window_visibility.pop(str(layer_id), None)
         if isinstance(self.project.export_prefs, dict):
             self.project.export_prefs.get("layer_opacity", {}).pop(layer_id, None)
             self.project.export_prefs.get("layer_blend_mode", {}).pop(layer_id, None)
@@ -3138,7 +3253,8 @@ class ImageSegmentationDialog(QDialog):
             if not isinstance(self.project.export_prefs, dict):
                 self.project.export_prefs = {}
             self.project.export_prefs["base_nodata_override"] = value
-            self.canvas.set_nodata_value(value)
+            for canvas in self._all_canvases():
+                canvas.set_nodata_value(value)
             self._refresh_canvas()
             self._set_dirty(True)
             return
@@ -3481,11 +3597,48 @@ class ImageSegmentationDialog(QDialog):
             screen_height=max(1, sample_h),
         )
         render_cfg = layer.get("render_config") or default_raster_render_config(meta.band_count, bool(meta.has_color_table))
+        try:
+            style = legacy_config_to_style(render_cfg, meta)
+            display_settings = default_display_settings(nodata_value=layer.get("nodata_override", meta.nodata))
+            display_settings = replace(
+                display_settings,
+                visible=bool(self.project.layer_visibility.get(str(layer.get("id")), True)),
+                opacity=1.0,
+            )
+            canvas.layer_manager.update_raster_layer(
+                str(layer.get("id")),
+                source=source,
+                metadata=meta,
+                render_style=style,
+                display_settings=display_settings,
+                custom_properties={"auxiliary_layer": True},
+            )
+        except Exception:
+            pass
         result = source.render(layer_request, render_cfg)
-        rgb = result.display_rgb
+        rgb = np.asarray(result.display_rgb)
+        if rgb.ndim == 2:
+            rgb = np.repeat(rgb[:, :, None], 3, axis=2)
+            intrinsic_alpha = None
+        elif rgb.ndim == 3 and rgb.shape[2] == 1:
+            rgb = np.repeat(rgb, 3, axis=2)
+            intrinsic_alpha = None
+        elif rgb.ndim == 3 and rgb.shape[2] >= 4:
+            intrinsic_alpha = np.asarray(rgb[:, :, 3], dtype=np.uint8)
+            rgb = rgb[:, :, :3]
+        elif rgb.ndim == 3 and rgb.shape[2] >= 3:
+            intrinsic_alpha = None
+            rgb = rgb[:, :, :3]
+        else:
+            canvas.set_raster_overlay(layer.get("id"), None, None, name=layer.get("name"))
+            return
+        if rgb.dtype != np.uint8:
+            rgb = np.clip(rgb, 0, 255).astype(np.uint8, copy=False)
         raw = result.raw_array
         nodata_value = layer.get("nodata_override", meta.nodata)
         alpha = np.full((rgb.shape[0], rgb.shape[1], 1), 255, dtype=np.uint8)
+        if intrinsic_alpha is not None:
+            alpha[:, :, 0] = intrinsic_alpha
         if nodata_value is not None and raw is not None:
             arr = np.asarray(raw)
             if arr.ndim == 3:
@@ -3494,7 +3647,8 @@ class ImageSegmentationDialog(QDialog):
                 mask = np.isnan(arr) if np.isnan(nodata_value) else (arr == nodata_value)
             except Exception:
                 mask = arr == nodata_value
-            alpha[mask] = 0
+            if mask.shape == alpha[:, :, 0].shape:
+                alpha[mask] = 0
         rgba = np.concatenate([np.asarray(rgb, dtype=np.uint8), alpha], axis=2)
         canvas.set_raster_overlay(
             layer.get("id"),
@@ -3546,6 +3700,10 @@ class ImageSegmentationDialog(QDialog):
             self._mask_overlay_revision,
             label_signature,
         )
+        if not self._project_mask_has_foreground():
+            self._raster_overlay_cache_key = cache_key
+            self._raster_overlay_cache_value = (None, None)
+            return None, None
         if cache_key == self._raster_overlay_cache_key:
             cached_rgba, cached_bbox = self._raster_overlay_cache_value
             if cached_rgba is None:
@@ -3567,6 +3725,8 @@ class ImageSegmentationDialog(QDialog):
         self.tool_controller.set_view_state(state)
         if self.project.image_asset is None:
             return
+        if self._updating_view_overlays:
+            return
         self.project.display_state = DisplayState(
             zoom=self.project.display_state.zoom,
             center=(float(state.center_x), float(state.center_y)),
@@ -3583,16 +3743,58 @@ class ImageSegmentationDialog(QDialog):
             show_preview_vector=self.project.display_state.show_preview_vector,
             show_preview_mask=self.project.display_state.show_preview_mask,
         )
-        self._update_image_stats_to_render_settings()
-        label_lookup = {label.id: label for label in self.project.labels}
-        raster_rgba, raster_bbox = self._current_raster_overlay(label_lookup)
-        self.canvas.update_raster_mask(raster_rgba, raster_bbox)
-        self._update_preview_display()
+        # 合并连续缩放/平移事件，避免视图变化时高频重算叠加层造成交互卡顿。
+        self._view_overlay_update_timer.start()
+
+    def _apply_view_overlay_update(self) -> None:
+        if self.project.image_asset is None:
+            return
+        if self._updating_view_overlays:
+            return
+        self._updating_view_overlays = True
+        try:
+            label_lookup = {label.id: label for label in self.project.labels}
+            raster_rgba, raster_bbox = self._current_raster_overlay(label_lookup)
+            self.canvas.update_raster_mask(raster_rgba, raster_bbox)
+            self._update_preview_display()
+        finally:
+            self._updating_view_overlays = False
+
+    def _ensure_window2_ready(self) -> None:
+        viewer1 = self._canvas_for_window("viewer_1")
+        viewer2 = self._canvas_for_window("viewer_2")
+        if viewer1 is None or viewer2 is None:
+            return
+        viewer2.restore_view_state(viewer1.capture_view_state())
+        viewer1.refresh_view()
+        viewer2.refresh_view()
+
+    def _restore_workspace_view_state_after_toggle(self, state: dict, window_count: int) -> None:
+        # 切换 splitter 后会经历一次异步布局，做“立即 + 稍后”两次恢复，防止视图范围被二次挤压。
+        QTimer.singleShot(0, lambda s=state, count=window_count: self._restore_workspace_view_state_after_layout(s, count))
+        QTimer.singleShot(90, lambda s=state, count=window_count: self._restore_workspace_view_state_after_layout(s, count))
+        QTimer.singleShot(220, lambda s=state, count=window_count: self._restore_workspace_view_state_after_layout(s, count))
+
+    def _clear_synced_pointers(self) -> None:
+        if hasattr(self, "workspace"):
+            self.workspace.clear_synced_pointers()
+
+    def _restore_workspace_view_state_after_layout(self, state: dict, window_count: int) -> None:
+        if not isinstance(state, dict):
+            return
+        viewer1 = self._canvas_for_window("viewer_1")
+        if viewer1 is not None:
+            viewer1.restore_view_state(state)
+        if int(window_count) >= 2:
+            viewer2 = self._canvas_for_window("viewer_2")
+            if viewer2 is not None:
+                viewer2.restore_view_state(state)
 
     def _sync_display_state_from_canvas(self) -> None:
         if self.project.image_asset is None:
             return
         self._on_view_state_changed(self.canvas.current_view_state())
+        self._apply_view_overlay_update()
 
     def _save_canvas_view_state(self) -> None:
         if not isinstance(self.project.export_prefs, dict):
@@ -3686,6 +3888,8 @@ class ImageSegmentationDialog(QDialog):
         return commands, GeometryService.affected_bbox_from_annotations(clipped_annotations)
 
     def _update_mouse_position(self, payload) -> None:
+        if bool(payload.buttons & (Qt.LeftButton | Qt.MiddleButton | Qt.RightButton)):
+            return
         if not self.project.image_asset:
             self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: - | Mask 标签: 无标签")
             return

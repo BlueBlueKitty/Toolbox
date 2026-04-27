@@ -278,10 +278,17 @@ class SingleCanvasRenderBinding(RenderBindingBase):
 
 
 class MultiCanvasRenderBinding(RenderBindingBase):
-    def __init__(self, target_canvases: dict[str, object], target_labels: dict[str, str] | None = None):
+    def __init__(
+        self,
+        target_canvases: dict[str, object],
+        target_labels: dict[str, str] | None = None,
+        *,
+        layer_mode: str = "base",
+    ):
         super().__init__()
         self._target_canvases = dict(target_canvases)
         self._target_labels = dict(target_labels or {})
+        self._layer_mode = "active" if str(layer_mode).lower() == "active" else "base"
         self._current_target_id = next(iter(self._target_canvases.keys()), None)
         self._available_target_ids = list(self._target_canvases.keys())
         for target_id, canvas in self._target_canvases.items():
@@ -318,14 +325,20 @@ class MultiCanvasRenderBinding(RenderBindingBase):
             return
         self._current_target_id = target_id
         canvas = self._target_canvases[target_id]
-        canvas.layer_manager.set_active_layer(canvas.BASE_LAYER_ID)
+        if self._layer_mode == "base":
+            canvas.layer_manager.set_active_layer(canvas.BASE_LAYER_ID)
+        elif canvas.layer_manager.active_layer_id() is None:
+            canvas.layer_manager.set_active_layer(canvas.BASE_LAYER_ID)
         self.changed.emit()
 
     def current_layer(self):
         canvas = self._target_canvases.get(self._current_target_id)
         if canvas is None:
             return None
-        state = canvas.layer_manager.layer(canvas.BASE_LAYER_ID)
+        layer_id = canvas.BASE_LAYER_ID
+        if self._layer_mode == "active":
+            layer_id = canvas.layer_manager.active_layer_id() or canvas.BASE_LAYER_ID
+        state = canvas.layer_manager.layer(layer_id)
         return None if state is None else state.layer
 
     def current_layer_manager(self):

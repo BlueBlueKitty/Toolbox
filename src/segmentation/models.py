@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields as dataclass_fields
 from datetime import datetime
 from typing import Any, Optional
 import uuid
@@ -88,7 +88,7 @@ class AnnotationObject:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "AnnotationObject":
-        return cls(**payload)
+        return cls(**_filter_dataclass_payload(cls, payload))
 
 
 @dataclass
@@ -143,7 +143,7 @@ class DisplayState:
             float(payload.get("center_x", 0.0)),
             float(payload.get("center_y", 0.0)),
         )
-        return cls(**payload)
+        return cls(**_filter_dataclass_payload(cls, payload))
 
 
 @dataclass
@@ -195,35 +195,42 @@ class SegmentationProject:
         image_asset = payload.get("image_asset")
         overview_levels = []
         if image_asset:
+            image_asset = dict(image_asset)
             overview_levels = [
-                OverviewInfo(**item) for item in image_asset.get("overview_levels", [])
+                OverviewInfo(**_filter_dataclass_payload(OverviewInfo, item))
+                for item in image_asset.get("overview_levels", [])
+                if isinstance(item, dict)
             ]
-            image_asset = ImageSourceMetadata(
-                **{
-                    **image_asset,
-                    "overview_levels": overview_levels,
-                }
-            )
+            image_asset["overview_levels"] = overview_levels
+            if isinstance(image_asset.get("geotransform"), list):
+                image_asset["geotransform"] = tuple(image_asset["geotransform"])
+            if isinstance(image_asset.get("resolution"), list):
+                image_asset["resolution"] = tuple(image_asset["resolution"])
+            image_asset = ImageSourceMetadata(**_filter_dataclass_payload(ImageSourceMetadata, image_asset))
         return cls(
             project_version=payload.get("project_version", "1.0"),
             image_asset=image_asset,
-            labels=[LabelClass(**item) for item in payload.get("labels", [])],
+            labels=[
+                LabelClass(**_filter_dataclass_payload(LabelClass, item))
+                for item in payload.get("labels", [])
+                if isinstance(item, dict)
+            ],
             annotations=[],
-            annotations_asset=payload.get("annotations_asset", {}),
-            mask_asset=payload.get("mask_asset", {}),
+            annotations_asset=payload.get("annotations_asset", {}) if isinstance(payload.get("annotations_asset", {}), dict) else {},
+            mask_asset=payload.get("mask_asset", {}) if isinstance(payload.get("mask_asset", {}), dict) else {},
             display_state=DisplayState.from_dict(payload.get("display_state", {})),
             active_tool=payload.get("active_tool", "browse"),
             active_label_id=payload.get("active_label_id"),
-            magic_panel_settings=payload.get("magic_panel_settings", {}),
+            magic_panel_settings=payload.get("magic_panel_settings", {}) if isinstance(payload.get("magic_panel_settings", {}), dict) else {},
             layer_visibility=_normalize_layer_visibility(payload.get("layer_visibility", {})),
-            export_prefs=payload.get("export_prefs", {}),
+            export_prefs=payload.get("export_prefs", {}) if isinstance(payload.get("export_prefs", {}), dict) else {},
             coordinate_mode=payload.get("coordinate_mode", "pixel"),
             primary_window_id=payload.get("primary_window_id", "viewer_1"),
         )
 
 
 def _normalize_layer_visibility(payload: dict[str, Any]) -> dict[str, bool]:
-    values = dict(payload or {})
+    values = dict(payload or {}) if isinstance(payload, dict) else {}
     if "image" in values and "base_raster" not in values:
         values["base_raster"] = values.pop("image")
     if "raster" in values and "mask" not in values:
@@ -237,3 +244,9 @@ def _normalize_layer_visibility(payload: dict[str, Any]) -> dict[str, bool]:
         "preview_mask": True,
     }
     return {**defaults, **values}
+
+
+def _filter_dataclass_payload(dataclass_type, payload: dict[str, Any] | None) -> dict[str, Any]:
+    source = dict(payload or {})
+    allowed = {item.name for item in dataclass_fields(dataclass_type)}
+    return {key: value for key, value in source.items() if key in allowed}

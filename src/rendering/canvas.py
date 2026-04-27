@@ -93,6 +93,7 @@ class LayeredRasterCanvas(QWidget):
         self._pan_axis_lock_tolerance_px = 6.0
         self._coordinates_are_image_space = False
         self._overlay_items_by_layer: dict[str, list[object]] = {}
+        self._synced_pointer_items: list[object] = []
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(80)
@@ -696,6 +697,14 @@ class LayeredRasterCanvas(QWidget):
                 yRange=(y0 - dy, y1 - dy),
                 padding=0,
             )
+            pos = self.image_pos_from_event(event)
+            if pos is not None and self.image_contains_pos(pos):
+                if self.source is not None:
+                    x, y = int(pos.x()), int(pos.y())
+                else:
+                    x = int(pos.x() * self.downsample_factor)
+                    y = int(pos.y() * self.downsample_factor)
+                self._emit_mouse_moved(x, y, self.get_pixel_value(x, y), event)
             if not self.is_syncing:
                 self.scroll_changed.emit(0, 0)
             return True
@@ -706,7 +715,7 @@ class LayeredRasterCanvas(QWidget):
             else:
                 x = int(pos.x() * self.downsample_factor)
                 y = int(pos.y() * self.downsample_factor)
-            self.mouse_moved.emit(x, y, self.get_pixel_value(x, y))
+            self._emit_mouse_moved(x, y, self.get_pixel_value(x, y), event)
         return False
 
     def _handle_mouse_release(self, event) -> bool:
@@ -720,8 +729,8 @@ class LayeredRasterCanvas(QWidget):
             if not self.is_syncing:
                 self.cursor_changed.emit(Qt.ArrowCursor)
             if self.source is not None and was_refresh_panning:
-                self._refresh_timer.stop()
-                self.refresh_view()
+                # 避免在 mouse release 事件里同步重绘阻塞后续 move 事件，导致跨窗十字丝“跟手慢半拍”。
+                self._refresh_timer.start(1)
             return True
         return False
 
@@ -739,6 +748,9 @@ class LayeredRasterCanvas(QWidget):
         ):
             return 0.0, float(round(dy))
         return float(round(dx)), float(round(dy))
+
+    def _emit_mouse_moved(self, x: int, y: int, value, _event=None) -> None:
+        self.mouse_moved.emit(x, y, value)
 
     def _update_display(self):
         if self.image_array is None:
@@ -1089,6 +1101,46 @@ class LayeredRasterCanvas(QWidget):
         if self.is_syncing or self._suspend_range_signal:
             return
         self.view_transformed.emit(self.capture_view_state())
+
+    def update_synced_pointer(self, x: float | None, y: float | None, visible: bool = True) -> None:
+        if not visible or x is None or y is None:
+            self._clear_synced_pointer()
+            return
+        if not (0 <= float(x) < max(1, int(self.original_width)) and 0 <= float(y) < max(1, int(self.original_height))):
+            self._clear_synced_pointer()
+            return
+        center = self.image_to_view_point(float(x) + 0.5, float(y) + 0.5)
+        if len(self._synced_pointer_items) != 4:
+            self._clear_synced_pointer()
+            outer_pen = QPen(QColor(255, 255, 255, 230), 3.8)
+            outer_pen.setCosmetic(True)
+            inner_pen = QPen(QColor(0, 245, 255, 255), 1.8)
+            inner_pen.setCosmetic(True)
+            h_outer = QGraphicsLineItem(-12.0, 0.0, 12.0, 0.0)
+            v_outer = QGraphicsLineItem(0.0, -12.0, 0.0, 12.0)
+            h_inner = QGraphicsLineItem(-12.0, 0.0, 12.0, 0.0)
+            v_inner = QGraphicsLineItem(0.0, -12.0, 0.0, 12.0)
+            for item, pen in (
+                (h_outer, outer_pen),
+                (v_outer, outer_pen),
+                (h_inner, inner_pen),
+                (v_inner, inner_pen),
+            ):
+                item.setPen(pen)
+                item.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+                self.view_box.addItem(item)
+            self._synced_pointer_items = [h_outer, v_outer, h_inner, v_inner]
+        for item in self._synced_pointer_items:
+            item.setPos(center)
+            item.setVisible(True)
+
+    def _clear_synced_pointer(self) -> None:
+        for item in self._synced_pointer_items:
+            try:
+                self.view_box.removeItem(item)
+            except Exception:
+                pass
+        self._synced_pointer_items = []
 
     def _on_range_changed(self, *_args):
         self._update_current_zoom_from_view_range()
