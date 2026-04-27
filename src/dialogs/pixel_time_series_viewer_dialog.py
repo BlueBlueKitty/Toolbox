@@ -98,6 +98,7 @@ import traceback
 from src.rendering.canvas import LayeredRasterCanvas
 from src.rendering.models import ImageSourceMetadata
 from src.rendering.style_auto_selector import DefaultRenderStyleFactory
+from src.rendering.raster_source_utils import open_raster_source
 from src.rendering.styles import style_to_legacy_config
 from src.rendering.sync import SyncOptions
 from src.widgets import (
@@ -141,7 +142,6 @@ from src.utils.display_pyramid import (
     write_derived_raster_cache,
 )
 from src.rendering.sources import GdalRasterSource, GammaVrtRasterSource, H5TimeSeriesRasterSource
-from src.rendering.sources import StandardImageSource
 from src.rendering.config import default_raster_render_config
 
 
@@ -168,6 +168,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._active_render_viewer_id = 1
         self._viewer_render_settings = {1: None, 2: None}
         self._viewer_colormaps = {1: "gray", 2: "gray"}
+        self._viewer_has_image = {1: False, 2: False}
         self.nodata_value = None  # Nodata值
         self._nodata_user_locked = False  # 是否使用用户手动指定的Nodata
         
@@ -382,7 +383,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 图像查看器
         viewer = viewer or LayeredRasterCanvas()
         setattr(self, f'image_viewer_{viewer_id}', viewer)
-        viewer.files_dropped.connect(self._on_viewer_files_dropped)
+        viewer.files_dropped.connect(lambda paths, vid=viewer_id: self._on_viewer_files_dropped(vid, paths))
         
         # 连接像素点击信号
         viewer.pixel_clicked.connect(lambda x, y: self.on_pixel_clicked(viewer_id, x, y))
@@ -469,7 +470,6 @@ class PixelTimeSeriesViewerDialog(QDialog):
 
     def _load_workspace_preferences(self) -> None:
         settings = get_settings()
-        window_count = settings.value("workspace/window_count", 2, type=int)
         active_window = settings.value("workspace/active_window", "viewer_1", type=str)
         sync_options_raw = settings.value("workspace/sync_options", "", type=str)
         sync_options = {}
@@ -480,14 +480,14 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     sync_options = parsed
             except Exception:
                 sync_options = {}
-        self.workspace.set_window_count(window_count)
+        self.workspace.set_window_count(2)
         self.workspace.apply_sync_options(sync_options)
         self.workspace.set_active_window(active_window)
         self._active_render_viewer_id = 1 if self.workspace.current_target_id() == "viewer_1" else 2
 
     def _save_workspace_preferences(self) -> None:
         settings = get_settings()
-        settings.setValue("workspace/window_count", int(self.workspace.window_count()))
+        settings.setValue("workspace/window_count", 2)
         settings.setValue("workspace/active_window", self.workspace.current_target_id())
         settings.setValue("workspace/sync_options", json.dumps(self.workspace.sync_options_dict(), ensure_ascii=False))
 
@@ -511,10 +511,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 viewer._apply_background_from_palette()
         self._update_sidebar_toggle_icon()
 
-    def _on_viewer_files_dropped(self, paths: list[str]) -> None:
+    def _on_viewer_files_dropped(self, viewer_id: int, paths: list[str]) -> None:
         mode, target = self._classify_drop_target(paths)
         if mode == "files":
-            self.load_images(target)
+            self.load_images(target, target_viewer_id=viewer_id, append=True)
             return
         if mode == "folder":
             self.open_folder(target)
@@ -944,7 +944,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
             viewer = getattr(self, f'image_viewer_{viewer_id}', None)
             if viewer is None:
                 continue
-            if self.selected_pixel is None:
+            if not self._viewer_has_image.get(viewer_id, False):
+                viewer.clear_selected_pixel()
+            elif self.selected_pixel is None:
                 viewer.clear_selected_pixel()
             elif self.data_source_type == 'folder' and self.folder_sync_mode == 'unavailable':
                 if viewer_id == self.selected_viewer_id:
@@ -1035,6 +1037,59 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._cached_index_2 = -1
         self._cached_original_size_2 = None
         self._cached_source_2 = None
+
+    def _set_viewer_has_image(self, viewer_id: int, has_image: bool, *, index: Optional[int] = None) -> None:
+        viewer_id = 1 if int(viewer_id) == 1 else 2
+        self._viewer_has_image[viewer_id] = bool(has_image)
+        if index is not None:
+            setattr(self, f'current_image_index_{viewer_id}', int(index))
+
+    def _clear_viewer_display(self, viewer_id: int) -> None:
+        viewer = getattr(self, f'image_viewer_{viewer_id}', None)
+        if viewer is not None:
+            viewer.clear_raster()
+            viewer.set_scene_mapping(None, None)
+            viewer.set_geotransform(None, None)
+        setattr(self, f'_cached_image_{viewer_id}', None)
+        setattr(self, f'_cached_index_{viewer_id}', -1)
+        setattr(self, f'_cached_original_size_{viewer_id}', None)
+        setattr(self, f'_cached_source_{viewer_id}', None)
+        image_index_label = getattr(self, f'image_index_label_{viewer_id}', None)
+        if image_index_label is not None:
+            image_index_label.setText("0/0")
+        image_info_label = getattr(self, f'image_info_label_{viewer_id}', None)
+        if image_info_label is not None:
+            image_info_label.setText("图像信息: 未加载")
+        pixel_value_label = getattr(self, f'pixel_value_label_{viewer_id}', None)
+        if pixel_value_label is not None:
+            pixel_value_label.setText("像素值: -")
+        colorbar = getattr(self, f'colorbar_{viewer_id}', None)
+        if colorbar is not None:
+            colorbar.set_current_value(None)
+
+    @staticmethod
+    def _normalized_full_path(file_path: str) -> str:
+        return os.path.normcase(os.path.abspath(file_path))
+
+    def _dedupe_file_paths(self, file_paths: list[str], *, existing_paths: list[str] | None = None) -> tuple[list[str], int]:
+        """按完整路径去重，保留首次出现的路径顺序。"""
+        seen = {
+            self._normalized_full_path(item)
+            for item in (existing_paths or [])
+            if item
+        }
+        deduped: list[str] = []
+        duplicate_count = 0
+        for item in file_paths or []:
+            if not item:
+                continue
+            normalized = self._normalized_full_path(item)
+            if normalized in seen:
+                duplicate_count += 1
+                continue
+            seen.add(normalized)
+            deduped.append(os.path.abspath(item))
+        return deduped, duplicate_count
 
     def _show_loading_indicator(self, message: str):
         self.setWindowTitle(f"{self._loading_title_text} - 加载中")
@@ -1362,6 +1417,238 @@ class PixelTimeSeriesViewerDialog(QDialog):
         max_y = max(rect[1] + rect[3] for rect in scene_rects)
         self.folder_scene_rect = (min_x, min_y, max_x - min_x, max_y - min_y)
 
+    def _validate_folder_series_metadata(self, metadata_list: list[dict]) -> tuple[bool, str, str, str]:
+        """校验普通图像组成时序后的同步可用性。"""
+        if not metadata_list:
+            return False, "没有可用图像元数据。", "rowcol", ""
+
+        for i in range(len(metadata_list)):
+            for j in range(i + 1, len(metadata_list)):
+                left = metadata_list[i]
+                right = metadata_list[j]
+                same_size = (left['width'], left['height']) == (right['width'], right['height'])
+                left_has_geo = bool(left.get('has_geo') and left.get('bounds_wgs84') is not None)
+                right_has_geo = bool(right.get('has_geo') and right.get('bounds_wgs84') is not None)
+
+                if left_has_geo and right_has_geo and not bounds_overlap(left['bounds_wgs84'], right['bounds_wgs84']):
+                    return False, "存在带地理信息但无重叠区域的图像，无法组成时序数据。", "rowcol", ""
+
+                if not left_has_geo and not right_has_geo and not same_size:
+                    return False, "存在不带地理信息且尺寸不一致的图像，无法组成时序数据。", "rowcol", ""
+
+        size_set = {(m['width'], m['height']) for m in metadata_list}
+        has_size_mismatch = len(size_set) > 1
+        geo_metadata = [m for m in metadata_list if m.get('has_geo') and m.get('bounds_wgs84') is not None]
+        all_have_geo = len(geo_metadata) == len(metadata_list) and len(metadata_list) > 0
+        has_overlap = False
+
+        for i in range(len(geo_metadata)):
+            for j in range(i + 1, len(geo_metadata)):
+                if bounds_overlap(geo_metadata[i]['bounds_wgs84'], geo_metadata[j]['bounds_wgs84']):
+                    has_overlap = True
+                    break
+            if has_overlap:
+                break
+
+        if all_have_geo and has_size_mismatch:
+            if has_overlap:
+                return True, "", "geo", (
+                    "检测到时序影像行列数不一致，已改为“地理坐标同步”。\n"
+                    "跨影像像素值会按屏幕坐标反算到各自影像的最近邻像素，结果可能略有偏差。"
+                )
+            return True, "", "geo", (
+                "检测到时序影像行列数不一致，已改为“地理坐标同步”。\n"
+                "但这些影像之间缺少明显重叠范围，边缘或大部分位置可能显示“越界”。"
+            )
+
+        if has_size_mismatch:
+            return True, "", "unavailable", (
+                "检测到时序影像行列数不一致，但部分影像缺少可用地理范围，当前无法跨影像同步。"
+            )
+
+        if len(geo_metadata) != len(metadata_list) and len(geo_metadata) > 0:
+            return True, "", "rowcol", "部分影像缺少地理范围，当前文件夹仍按同行列号同步。"
+
+        return True, "", "rowcol", ""
+
+    def _apply_folder_series_state(
+        self,
+        valid_files: list[str],
+        metadata_list: list[dict],
+        *,
+        clear_selection: bool,
+        reset_render: bool,
+    ) -> bool:
+        is_valid, error_message, sync_mode, sync_message = self._validate_folder_series_metadata(metadata_list)
+        if not is_valid:
+            QMessageBox.critical(self, "错误", error_message)
+            return False
+
+        self.data_source_type = 'folder'
+        self.h5_file_path = None
+        self.h5_start_index = 0
+        self.image_files = valid_files
+        self.image_metadata = metadata_list
+        self.image_count = len(valid_files)
+        self.folder_sync_mode = sync_mode
+        self.folder_sync_message = sync_message
+
+        first_metadata = metadata_list[0]
+        self.nodata_value = first_metadata.get('nodata_value')
+        band_count = first_metadata.get('band_count') or 1
+        if band_count > 1:
+            self.image_shape = (first_metadata['height'], first_metadata['width'], band_count)
+        else:
+            self.image_shape = (first_metadata['height'], first_metadata['width'])
+
+        self.geotransform = first_metadata.get('geotransform')
+        self.projection = first_metadata.get('projection')
+
+        extracted_dates = extract_dates_from_filenames(valid_files)
+        self.date_list = extracted_dates if extracted_dates else []
+        self._update_folder_scene_rect()
+
+        if clear_selection:
+            self._clear_selected_pixel_state()
+            self.selected_geo = None
+            self.selected_viewer_id = None
+
+        self._clear_cached_images()
+        self._refresh_navigation_controls()
+        self._set_series_status_text(f"已加载 {self.image_count} 张图像")
+
+        if reset_render:
+            self._reset_render_controls_for_new_series(band_count, 'gray')
+
+        return True
+
+    def _refresh_viewers_after_series_change(self, *, reset_view: bool) -> None:
+        shown_any = False
+        for viewer_id in (1, 2):
+            if self._viewer_has_image.get(viewer_id, False) and self.image_count > 0:
+                current_index = getattr(self, f'current_image_index_{viewer_id}', 0)
+                current_index = max(0, min(current_index, self.image_count - 1))
+                setattr(self, f'current_image_index_{viewer_id}', current_index)
+                self.show_image(viewer_id, reset_view=reset_view)
+                shown_any = True
+            else:
+                self._clear_viewer_display(viewer_id)
+
+        if shown_any:
+            active_id = self._active_render_viewer_id
+            if not self._viewer_has_image.get(active_id, False):
+                active_id = 1 if self._viewer_has_image.get(1, False) else 2
+                if self._viewer_has_image.get(active_id, False):
+                    self._set_active_render_viewer(active_id)
+            self._update_image_stats_to_render_settings(viewer_id=self._active_render_viewer_id)
+            self._apply_render_settings_update()
+        else:
+            self._sync_selected_pixel_markers()
+
+        if self.selected_pixel:
+            self.update_time_series_plot()
+
+    def _append_dropped_images(self, file_list: list[str], target_viewer_id: int) -> None:
+        """将拖入的普通图像追加到当前时序。"""
+        target_previously_had_image = self._viewer_has_image.get(target_viewer_id, False)
+        file_list, duplicate_count = self._dedupe_file_paths(
+            file_list,
+            existing_paths=self.image_files if self.data_source_type == 'folder' else None,
+        )
+        if duplicate_count > 0 and not file_list:
+            QMessageBox.information(self, "提示", "拖入的数据都已存在，未重复导入。")
+            return
+        unreadable_files = []
+        new_files = []
+        new_metadata = []
+
+        for file_path in file_list:
+            if not os.path.exists(file_path):
+                unreadable_files.append(f"{os.path.basename(file_path)}: 文件不存在")
+                continue
+            try:
+                metadata = self._build_folder_image_metadata(file_path)
+                if metadata is None:
+                    unreadable_files.append(f"{os.path.basename(file_path)}: 元数据读取失败")
+                    continue
+                new_files.append(file_path)
+                new_metadata.append(metadata)
+            except Exception as e:
+                unreadable_files.append(f"{os.path.basename(file_path)}: {str(e)}")
+
+        if unreadable_files:
+            message = "以下文件读取失败，已跳过：\n" + "\n".join(unreadable_files[:10])
+            if len(unreadable_files) > 10:
+                message += f"\n... 还有 {len(unreadable_files) - 10} 个文件"
+            QMessageBox.warning(self, "警告", message)
+
+        if duplicate_count > 0:
+            QMessageBox.information(self, "提示", f"已按完整路径去重，跳过 {duplicate_count} 个重复文件。")
+
+        if not new_files:
+            return
+
+        if self.data_source_type == 'folder' and self.image_files:
+            valid_files = list(self.image_files) + new_files
+            metadata_list = list(self.image_metadata) + new_metadata
+            clear_selection = False
+            reset_render = False
+        else:
+            valid_files = list(new_files)
+            metadata_list = list(new_metadata)
+            clear_selection = True
+            reset_render = True
+
+        reverse = self.sort_order_combo.currentIndex() == 1
+        ordered = sorted(
+            zip(valid_files, metadata_list),
+            key=lambda item: os.path.basename(item[0]),
+            reverse=reverse,
+        )
+        valid_files = [item[0] for item in ordered]
+        metadata_list = [item[1] for item in ordered]
+
+        target_file = new_files[-1]
+        target_index = next(
+            (idx for idx in range(len(valid_files) - 1, -1, -1) if valid_files[idx] == target_file),
+            len(valid_files) - 1,
+        )
+
+        if not self._apply_folder_series_state(
+            valid_files,
+            metadata_list,
+            clear_selection=clear_selection,
+            reset_render=reset_render,
+        ):
+            return
+
+        if reset_render:
+            self._converted_to_db = False
+            self._nodata_user_locked = False
+            self.is_gamma_timeseries = False
+
+        if hasattr(self, "render_sidebar"):
+            self.render_sidebar.set_db_checked(bool(self._converted_to_db))
+
+        if len(valid_files) == len(new_files) and len(new_files) == 1:
+            other_viewer_id = 2 if int(target_viewer_id) == 1 else 1
+            self._set_viewer_has_image(target_viewer_id, True, index=target_index)
+            self._set_viewer_has_image(other_viewer_id, False)
+        else:
+            self._set_viewer_has_image(target_viewer_id, True, index=target_index)
+            for viewer_id in (1, 2):
+                if self._viewer_has_image.get(viewer_id, False):
+                    current_index = getattr(self, f'current_image_index_{viewer_id}', 0)
+                    setattr(self, f'current_image_index_{viewer_id}', max(0, min(current_index, self.image_count - 1)))
+
+        self._refresh_viewers_after_series_change(reset_view=clear_selection or not target_previously_had_image)
+
+        if self.folder_sync_message:
+            if self.folder_sync_mode == 'unavailable':
+                QMessageBox.warning(self, "提示", self.folder_sync_message)
+            elif self.folder_sync_mode != 'geo':
+                QMessageBox.information(self, "提示", self.folder_sync_message)
+
     def _configure_viewer_scene_mapping(self, viewer, index):
         """配置查看器的统一场景范围和当前图像摆放范围。"""
         if self._uses_geo_sync():
@@ -1380,6 +1667,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
             viewer_id: 查看器ID（1或2）
             direction: 方向（-1表示上一张，1表示下一张）
         """
+        if not self._viewer_has_image.get(viewer_id, False):
+            if self.image_count <= 0:
+                return
+            self._set_viewer_has_image(viewer_id, True, index=0)
         current_index = getattr(self, f'current_image_index_{viewer_id}')
         new_index = current_index + direction
         
@@ -1394,6 +1685,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
             viewer_id: 查看器ID（1或2）
             value: 滑块值
         """
+        if not self._viewer_has_image.get(viewer_id, False):
+            self._set_viewer_has_image(viewer_id, True, index=value)
         current_index = getattr(self, f'current_image_index_{viewer_id}')
         if value != current_index:
             setattr(self, f'current_image_index_{viewer_id}', value)
@@ -1424,6 +1717,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         )
         if ok:
             target_index = value - 1
+            self._set_viewer_has_image(viewer_id, True, index=target_index)
             setattr(self, f'current_image_index_{viewer_id}', target_index)
             slider = getattr(self, f'image_slider_{viewer_id}')
             slider.blockSignals(True)
@@ -1442,6 +1736,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         current_index = getattr(self, f'current_image_index_{viewer_id}')
         if target_index == current_index:
             return
+        self._set_viewer_has_image(viewer_id, True, index=target_index)
         setattr(self, f'current_image_index_{viewer_id}', target_index)
         slider = getattr(self, f'image_slider_{viewer_id}')
         slider.blockSignals(True)
@@ -1528,7 +1823,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             return cached_image, cached_size
         
         image_source = self._get_image_source(index)
-        if image_source is not None and not self._uses_geo_sync():
+        if image_source is not None:
             image_data = image_source.read_window_native(0, 0, 1, 1)
             original_size = None
         else:
@@ -1577,10 +1872,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 )
             elif index < len(self.image_files):
                 file_path = self.image_files[index]
-                try:
-                    source = GdalRasterSource(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
-                except Exception:
-                    source = StandardImageSource(file_path)
+                source = open_raster_source(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
             else:
                 return None
             if self._converted_to_db:
@@ -1603,7 +1895,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             viewer_id: 查看器ID（1或2）
             reset_view: 是否重置为适配全图视角
         """
-        if self.image_count == 0:
+        if self.image_count == 0 or not self._viewer_has_image.get(viewer_id, False):
             return
         
         current_index = getattr(self, f'current_image_index_{viewer_id}')
@@ -1649,7 +1941,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             viewer.prime_render_settings(settings_for_viewer)
             viewer.set_colormap(self._viewer_colormaps.get(viewer_id, "gray"))
 
-            if image_source is not None and not self._uses_geo_sync():
+            if image_source is not None:
                 viewer.set_raster_source(image_source, reset_view=reset_view, nodata_value=current_nodata)
             else:
                 # 更新图像查看器（传递原始尺寸用于坐标映射）
@@ -1682,7 +1974,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             # 更新图像信息（显示原始尺寸）
             file_name = os.path.basename(self.image_files[current_index])
             display_shape = current_data.shape
-            if image_source is not None and not self._uses_geo_sync():
+            if image_source is not None:
                 meta = image_source.metadata()
                 if meta.band_count == 1:
                     info = f"{file_name} | 尺寸: {meta.width}x{meta.height} | 单波段"
@@ -1822,6 +2114,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.folder_sync_message = ""
             self.folder_scene_rect = None
             self._nodata_user_locked = False
+            self.is_gamma_timeseries = False
             
             # 重置转换标志
             self._converted_to_db = False
@@ -1857,6 +2150,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._show_loading_indicator(f"正在加载 h5 时序图像...\n{os.path.basename(file_path)}")
             self.current_image_index_1 = 0
             self.current_image_index_2 = min(1, self.image_count - 1)
+            self._set_viewer_has_image(1, True, index=self.current_image_index_1)
+            self._set_viewer_has_image(2, True, index=self.current_image_index_2)
             self._get_cached_image(1, self.current_image_index_1)
             self._update_image_stats_to_render_settings()
             self.show_image(1, reset_view=True)
@@ -1880,9 +2175,19 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._loading_new_series = False
             self._hide_loading_indicator()
     
-    def load_images(self, file_list):
+    def load_images(self, file_list, *, target_viewer_id: int | None = None, append: bool = False):
         """加载图像列表（按需加载模式，只读取第一张获取元信息）"""
         if not file_list:
+            return
+
+        if append:
+            self._append_dropped_images(file_list, target_viewer_id or 1)
+            return
+
+        file_list, duplicate_count = self._dedupe_file_paths(file_list)
+        if not file_list:
+            if duplicate_count > 0:
+                QMessageBox.information(self, "提示", "导入的数据都已存在，未重复导入。")
             return
         
         try:
@@ -1899,6 +2204,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.folder_sync_mode = 'rowcol'
             self.folder_sync_message = ""
             self.folder_scene_rect = None
+            self.is_gamma_timeseries = False
             
             # 重置转换标志
             self._converted_to_db = False
@@ -1939,6 +2245,9 @@ class PixelTimeSeriesViewerDialog(QDialog):
                     message += f"\n... 还有 {len(unreadable_files) - 10} 个文件"
                 QMessageBox.warning(self, "警告", message)
 
+            if duplicate_count > 0:
+                QMessageBox.information(self, "提示", f"已按完整路径去重，跳过 {duplicate_count} 个重复文件。")
+
             if not valid_files:
                 QMessageBox.critical(self, "错误", "没有成功加载任何图像！")
                 return
@@ -1951,70 +2260,14 @@ class PixelTimeSeriesViewerDialog(QDialog):
             )
             valid_files = [item[0] for item in ordered]
             metadata_list = [item[1] for item in ordered]
-
-            first_metadata = metadata_list[0]
-            self.nodata_value = first_metadata.get('nodata_value')
-            band_count = first_metadata.get('band_count') or 1
-            if band_count > 1:
-                self.image_shape = (first_metadata['height'], first_metadata['width'], band_count)
-            else:
-                self.image_shape = (first_metadata['height'], first_metadata['width'])
-
-            # 保留第一张影像的地理信息以兼容旧逻辑，实际显示改为逐张设置
-            self.geotransform = first_metadata.get('geotransform')
-            self.projection = first_metadata.get('projection')
-
-            self.image_files = valid_files
-            self.image_metadata = metadata_list
-            self.image_count = len(valid_files)
-            self._update_folder_scene_rect()
-
-            size_set = {(m['width'], m['height']) for m in metadata_list}
-            has_size_mismatch = len(size_set) > 1
-            geo_metadata = [m for m in metadata_list if m.get('has_geo') and m.get('bounds_wgs84') is not None]
-            all_have_geo = len(geo_metadata) == len(metadata_list) and len(metadata_list) > 0
-
-            has_overlap = False
-            for i in range(len(geo_metadata)):
-                for j in range(i + 1, len(geo_metadata)):
-                    if bounds_overlap(geo_metadata[i]['bounds_wgs84'], geo_metadata[j]['bounds_wgs84']):
-                        has_overlap = True
-                        break
-                if has_overlap:
-                    break
-
-            if all_have_geo and has_size_mismatch:
-                self.folder_sync_mode = 'geo'
-                if has_size_mismatch:
-                    if has_overlap:
-                        self.folder_sync_message = (
-                            "检测到时序影像行列数不一致，已改为“地理坐标同步”。\n"
-                            "跨影像像素值会按屏幕坐标反算到各自影像的最近邻像素，结果可能略有偏差。"
-                        )
-                    else:
-                        self.folder_sync_message = (
-                            "检测到时序影像行列数不一致，已改为“地理坐标同步”。\n"
-                            "但这些影像之间缺少明显重叠范围，边缘或大部分位置可能显示“越界”。"
-                        )
-            else:
-                if has_size_mismatch:
-                    self.folder_sync_mode = 'unavailable'
-                    self.folder_sync_message = (
-                        "检测到时序影像行列数不一致，但部分影像缺少可用地理范围，当前无法跨影像同步。"
-                    )
-                else:
-                    self.folder_sync_mode = 'rowcol'
-                    if len(geo_metadata) != len(metadata_list) and len(geo_metadata) > 0:
-                        self.folder_sync_message = (
-                            "部分影像缺少地理范围，当前文件夹仍按同行列号同步。"
-                        )
-            
-            # 尝试从文件名中提取日期
-            extracted_dates = extract_dates_from_filenames(valid_files)
-            if extracted_dates:
-                self.date_list = extracted_dates
-            else:
-                self.date_list = []  # 没有提取到日期，使用空列表
+            if not self._apply_folder_series_state(
+                valid_files,
+                metadata_list,
+                clear_selection=False,
+                reset_render=False,
+            ):
+                return
+            band_count = metadata_list[0].get('band_count') or 1
             
             # 更新UI
             self._set_series_status_text(f"已加载 {self.image_count} 张图像")
@@ -2027,6 +2280,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
             # 显示第一张和第二张图像
             self.current_image_index_1 = 0
             self.current_image_index_2 = min(1, self.image_count - 1)  # 如果只有一张图像，两个窗口都显示第一张
+            self._set_viewer_has_image(1, True, index=self.current_image_index_1)
+            self._set_viewer_has_image(2, True, index=self.current_image_index_2)
             self._get_cached_image(1, self.current_image_index_1)
             self._update_image_stats_to_render_settings()
             self.show_image(1, reset_view=True)
@@ -2040,7 +2295,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             if self.folder_sync_message:
                 if self.folder_sync_mode == 'unavailable':
                     QMessageBox.warning(self, "提示", self.folder_sync_message)
-                else:
+                elif self.folder_sync_mode != 'geo':
                     QMessageBox.information(self, "提示", self.folder_sync_message)
             
         except Exception as e:
@@ -2218,6 +2473,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._show_loading_indicator(f"正在加载 GAMMA 时序图像...\n{os.path.basename(folder)}")
             self.current_image_index_1 = 0
             self.current_image_index_2 = min(1, self.image_count - 1)
+            self._set_viewer_has_image(1, True, index=self.current_image_index_1)
+            self._set_viewer_has_image(2, True, index=self.current_image_index_2)
             self._get_cached_image(1, self.current_image_index_1)
             self._update_image_stats_to_render_settings()
             self.show_image(1, reset_view=True)
@@ -2359,6 +2616,13 @@ class PixelTimeSeriesViewerDialog(QDialog):
         """排序图像"""
         if not self.image_files:
             return
+
+        current_paths = {}
+        for viewer_id in (1, 2):
+            if self._viewer_has_image.get(viewer_id, False):
+                current_index = getattr(self, f'current_image_index_{viewer_id}', 0)
+                if 0 <= current_index < len(self.image_files):
+                    current_paths[viewer_id] = self.image_files[current_index]
         
         # 获取排序方式
         reverse = (self.sort_order_combo.currentIndex() == 1)
@@ -2380,19 +2644,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         # 清空缓存（因为索引顺序改变了）
         self._clear_cached_images()
         
-        # 重置当前索引
-        self.current_image_index_1 = 0
-        self.current_image_index_2 = min(1, self.image_count - 1)  # 如果只有一张图像，两个窗口都显示第一张
+        for viewer_id in (1, 2):
+            target_path = current_paths.get(viewer_id)
+            if target_path is not None and target_path in self.image_files:
+                setattr(self, f'current_image_index_{viewer_id}', self.image_files.index(target_path))
+            elif self._viewer_has_image.get(viewer_id, False):
+                fallback_index = 0 if viewer_id == 1 else min(1, self.image_count - 1)
+                setattr(self, f'current_image_index_{viewer_id}', fallback_index)
         self._refresh_navigation_controls()
-        self._get_cached_image(1, self.current_image_index_1)
-        self._update_image_stats_to_render_settings()
-        self.show_image(1, reset_view=True)
-        self.show_image(2, reset_view=True)
-        self._apply_render_settings_update()
-        
-        # 如果已选择像素，更新曲线
-        if self.selected_pixel:
-            self.update_time_series_plot()
+        if self._viewer_has_image.get(1, False):
+            self._get_cached_image(1, self.current_image_index_1)
+        self._refresh_viewers_after_series_change(reset_view=True)
     
     def on_pixel_clicked(self, viewer_id, x, y):
         """像素点击事件处理"""
@@ -2619,10 +2881,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 self._plot_data_points.append((i, v, i))  # (x坐标, y坐标, 图像索引)
             
             # 高亮两个窗口当前图像的点，用不同颜色
-            ax.plot(self.current_image_index_1, values[self.current_image_index_1], 
-                   'ro', markersize=6, label='窗口1', zorder=10)
-            ax.plot(self.current_image_index_2, values[self.current_image_index_2], 
-                   'go', markersize=6, label='窗口2', zorder=10)
+            if self._viewer_has_image.get(1, False):
+                ax.plot(self.current_image_index_1, values[self.current_image_index_1],
+                       'ro', markersize=6, label='窗口1', zorder=10)
+            if self._viewer_has_image.get(2, False):
+                ax.plot(self.current_image_index_2, values[self.current_image_index_2],
+                       'go', markersize=6, label='窗口2', zorder=10)
             
             # 如果有日期列表，使用日期作为x轴标签
             if self.date_list:
@@ -2660,10 +2924,12 @@ class PixelTimeSeriesViewerDialog(QDialog):
                         self._plot_data_points.append((i, v, i))
             
             # 高亮两个窗口当前图像的位置（用竖线）
-            ax.axvline(x=self.current_image_index_1, color='red', linestyle='--', 
-                      linewidth=2, label='窗口1', alpha=0.8)
-            ax.axvline(x=self.current_image_index_2, color='darkgreen', linestyle='--', 
-                      linewidth=2, label='窗口2', alpha=0.8)
+            if self._viewer_has_image.get(1, False):
+                ax.axvline(x=self.current_image_index_1, color='red', linestyle='--',
+                          linewidth=2, label='窗口1', alpha=0.8)
+            if self._viewer_has_image.get(2, False):
+                ax.axvline(x=self.current_image_index_2, color='darkgreen', linestyle='--',
+                          linewidth=2, label='窗口2', alpha=0.8)
             
             # 如果是RGB图像（3波段），计算并绘制灰度值
             if num_bands == 3:
@@ -2917,6 +3183,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
         other_viewer_id = 2 if viewer_id == 1 else 1
         other_pixel_label = getattr(self, f'pixel_value_label_{other_viewer_id}')
         other_colorbar = getattr(self, f'colorbar_{other_viewer_id}', None)
+
+        if not self._viewer_has_image.get(other_viewer_id, False):
+            other_pixel_label.setText("像素值: -")
+            self._set_colorbar_current_value(other_colorbar, None)
+            return
 
         other_index = getattr(self, f'current_image_index_{other_viewer_id}', 0)
         other_nodata = self._get_effective_nodata_for_index(other_index)

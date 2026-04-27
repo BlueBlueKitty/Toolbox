@@ -65,6 +65,7 @@ from src.segmentation.exporters import (
 )
 from src.segmentation.geometry_service import GeometryService
 from src.rendering.sources import GdalRasterSource, StandardImageSource
+from src.rendering.raster_source_utils import open_raster_source
 from src.rendering.style_auto_selector import DefaultRenderStyleFactory
 from src.rendering.styles import default_display_settings, legacy_config_to_style, style_to_legacy_config
 from src.rendering.config import default_raster_render_config, render_raster_rgb
@@ -1525,11 +1526,7 @@ class ImageSegmentationDialog(QDialog):
         self._load_image(file_path)
 
     def _load_image(self, file_path: str) -> None:
-        lower = file_path.lower()
-        if lower.endswith((".tif", ".tiff")):
-            source = GdalRasterSource(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
-        else:
-            source = StandardImageSource(file_path)
+        source = open_raster_source(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
         self._configure_default_render_for_source(source)
         self._apply_source(
             source,
@@ -1651,7 +1648,7 @@ class ImageSegmentationDialog(QDialog):
         if not image_path:
             QMessageBox.warning(self, "错误", "项目文件中缺少图像路径。")
             return
-        source = GdalRasterSource(image_path, pyramid_threshold_mb=self.pyramid_threshold_mb) if image_path.lower().endswith((".tif", ".tiff")) else StandardImageSource(image_path)
+        source = open_raster_source(image_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
         self._configure_default_render_for_source(source)
         self._apply_source(
             source,
@@ -1888,7 +1885,7 @@ class ImageSegmentationDialog(QDialog):
         )
 
     def _import_aux_raster(self, file_path: str, reuse: dict | None = None) -> None:
-        source = GdalRasterSource(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb) if file_path.lower().endswith((".tif", ".tiff", ".img")) else StandardImageSource(file_path)
+        source = open_raster_source(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
         meta = source.metadata()
         aux_has_geo = bool(meta.has_georef and meta.geotransform and meta.crs_wkt)
         base_has_geo = self._base_has_georef()

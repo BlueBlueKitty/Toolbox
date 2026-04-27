@@ -242,14 +242,31 @@ class MultiCanvasWorkspace(QWidget):
         if x is None or y is None:
             return
         source_canvas = self._window_canvases.get(source_window_id)
+        sync_point = None
+        if source_canvas is not None and hasattr(source_canvas, "sync_pointer_coordinates"):
+            try:
+                sync_point = source_canvas.sync_pointer_coordinates(x, y)
+            except Exception:
+                sync_point = None
         if source_canvas is not None and hasattr(source_canvas, "update_synced_pointer"):
             source_canvas.update_synced_pointer(None, None, visible=False)
         for window_id in self._window_ids[: self._window_count]:
             if window_id == source_window_id:
                 continue
             canvas = self._window_canvases.get(window_id)
-            if canvas is not None and hasattr(canvas, "update_synced_pointer"):
-                canvas.update_synced_pointer(x, y, visible=True)
+            if canvas is None or not hasattr(canvas, "update_synced_pointer"):
+                continue
+            target_x, target_y = x, y
+            if sync_point is not None and hasattr(canvas, "image_coordinates_from_sync_point"):
+                try:
+                    mapped = canvas.image_coordinates_from_sync_point(*sync_point)
+                except Exception:
+                    mapped = None
+                if mapped is None:
+                    canvas.update_synced_pointer(None, None, visible=False)
+                    continue
+                target_x, target_y = mapped
+            canvas.update_synced_pointer(target_x, target_y, visible=True)
 
     @staticmethod
     def _extract_pointer_xy(*args) -> tuple[float | None, float | None]:

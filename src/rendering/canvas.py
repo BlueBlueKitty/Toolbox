@@ -98,6 +98,7 @@ class LayeredRasterCanvas(QWidget):
         self._pending_sync_refresh = False
         self._pending_sync_refresh_delay_ms = 80
         self._background_color_override: QColor | None = None
+        self._last_scene_request_rect: QRectF | None = None
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(80)
@@ -148,28 +149,59 @@ class LayeredRasterCanvas(QWidget):
         self.geotransform = metadata.geotransform
         self.projection = metadata.crs_wkt
         self._sync_base_layer_from_source(source, metadata)
-        self._image_rect = QRectF(0, 0, self.original_width, self.original_height)
-        margin_x = max(self.original_width * 4, 1)
-        margin_y = max(self.original_height * 4, 1)
+        if self.image_world_rect is not None:
+            self._image_rect = QRectF(*self.image_world_rect)
+        else:
+            self._image_rect = QRectF(0, 0, self.original_width, self.original_height)
+        limit_rect = self._current_scene_rect()
+        if limit_rect.isNull():
+            limit_rect = QRectF(self._image_rect)
+        margin_x = max(limit_rect.width() * 4, 1)
+        margin_y = max(limit_rect.height() * 4, 1)
+        min_x_range, min_y_range = self._min_scene_ranges()
         self.view_box.setLimits(
-            xMin=-margin_x,
-            yMin=-margin_y,
-            xMax=self.original_width + margin_x,
-            yMax=self.original_height + margin_y,
-            minXRange=1,
-            minYRange=1,
-            maxXRange=self.original_width + margin_x * 2,
-            maxYRange=self.original_height + margin_y * 2,
+            xMin=limit_rect.left() - margin_x,
+            yMin=limit_rect.top() - margin_y,
+            xMax=limit_rect.right() + margin_x,
+            yMax=limit_rect.bottom() + margin_y,
+            minXRange=min_x_range,
+            minYRange=min_y_range,
+            maxXRange=max(limit_rect.width() + margin_x * 2, 1),
+            maxYRange=max(limit_rect.height() + margin_y * 2, 1),
         )
+        self._update_zoom_limits()
         if reset_view:
-            self.view_box.setRange(xRange=(0, self.original_width), yRange=(0, self.original_height), padding=0.02)
+            self.view_box.setRange(
+                xRange=(limit_rect.left(), limit_rect.right()),
+                yRange=(limit_rect.top(), limit_rect.bottom()),
+                padding=0.02,
+            )
         if refresh:
             self.refresh_view()
 
     def set_scene_mapping(self, scene_world_rect=None, image_world_rect=None):
         self.scene_world_rect = scene_world_rect
         self.image_world_rect = image_world_rect
-        if self.image_array is not None:
+        if self.source is not None:
+            if self.image_world_rect is not None:
+                self._image_rect = QRectF(*self.image_world_rect)
+            limit_rect = self._current_scene_rect()
+            if limit_rect.isNull():
+                limit_rect = QRectF(self._image_rect)
+            min_x_range, min_y_range = self._min_scene_ranges()
+            self.view_box.setLimits(
+                xMin=limit_rect.left() - limit_rect.width() * 4,
+                xMax=limit_rect.right() + limit_rect.width() * 4,
+                yMin=limit_rect.top() - limit_rect.height() * 4,
+                yMax=limit_rect.bottom() + limit_rect.height() * 4,
+                minXRange=min_x_range,
+                minYRange=min_y_range,
+                maxXRange=max(limit_rect.width() * 9, min_x_range),
+                maxYRange=max(limit_rect.height() * 9, min_y_range),
+            )
+            self._update_zoom_limits()
+            self._rebuild_selected_pixel_marker()
+        elif self.image_array is not None:
             self._update_image_rect()
 
     def capture_view_state(self):
@@ -232,6 +264,7 @@ class LayeredRasterCanvas(QWidget):
         self.view_box.setRange(xRange=(rect.left(), rect.right()), yRange=(rect.top(), rect.bottom()), padding=0.02)
         self._suspend_range_signal = False
         self.current_zoom = 1.0
+        self._update_zoom_limits()
 
     def set_one_to_one(self) -> None:
         state = self.current_view_state()
@@ -298,6 +331,29 @@ class LayeredRasterCanvas(QWidget):
         self.nodata_value = nodata_value
         self._sync_base_layer_nodata(nodata_value)
         self.refresh_view() if self.source is not None else self._update_display()
+
+    def clear_raster(self) -> None:
+        """清空当前栅格显示。"""
+        self.source = None
+        self.last_render = None
+        self.image_array = None
+        self.display_array = None
+        self.original_width = 0
+        self.original_height = 0
+        self.downsample_factor = 1.0
+        self.nodata_value = None
+        self.geotransform = None
+        self.projection = None
+        self.scene_world_rect = None
+        self.image_world_rect = None
+        self._coordinates_are_image_space = False
+        self._dynamic_source = False
+        self._last_request_signature = None
+        self._last_scene_request_rect = None
+        self._image_rect = QRectF(0, 0, 0, 0)
+        self.image_item.clear()
+        self.clear_selected_pixel()
+        self._clear_synced_pointer()
 
     def set_geotransform(self, geotransform, projection=None):
         self.geotransform = geotransform
@@ -543,6 +599,11 @@ class LayeredRasterCanvas(QWidget):
             return
         request = self.current_render_request()
         if request is None:
+            self.last_render = None
+            self.image_array = None
+            self.display_array = None
+            self.image_item.clear()
+            self._clear_selected_pixel_marker()
             self._is_refresh_zooming = False
             return
         request.layer_id = self.BASE_LAYER_ID
@@ -593,8 +654,12 @@ class LayeredRasterCanvas(QWidget):
             display = np.dstack([display, alpha])
         self.display_array = np.ascontiguousarray(display)
         self.image_item.setImage(self.display_array, autoLevels=False)
-        self.image_item.setRect(QRectF(*result.image_rect))
-        self._image_rect = QRectF(0, 0, self.original_width, self.original_height)
+        if self.image_world_rect is not None and self._last_scene_request_rect is not None:
+            self.image_item.setRect(QRectF(self._last_scene_request_rect))
+            self._image_rect = QRectF(*self.image_world_rect)
+        else:
+            self.image_item.setRect(QRectF(*result.image_rect))
+            self._image_rect = QRectF(0, 0, self.original_width, self.original_height)
         self._rebuild_selected_pixel_marker()
 
     def _request_signature(self, request: RenderRequest) -> tuple:
@@ -642,6 +707,29 @@ class LayeredRasterCanvas(QWidget):
         margin_y = margin_px_y * scale_y
         screen_width = viewport_width + margin_px_x * 2
         screen_height = viewport_height + margin_px_y * 2
+        if self.source is not None and self.image_world_rect is not None:
+            image_rect = QRectF(*self.image_world_rect)
+            scene_rect = QRectF(x0 - margin_x, y0 - margin_y, screen_width * scale_x, screen_height * scale_y)
+            request_rect = scene_rect.intersected(image_rect)
+            if request_rect.isNull() or request_rect.width() <= 0 or request_rect.height() <= 0:
+                self._last_scene_request_rect = None
+                return None
+            self._last_scene_request_rect = QRectF(request_rect)
+            img_x = (request_rect.left() - image_rect.left()) * self.original_width / max(image_rect.width(), 1e-9)
+            img_y = (request_rect.top() - image_rect.top()) * self.original_height / max(image_rect.height(), 1e-9)
+            img_width = request_rect.width() * self.original_width / max(image_rect.width(), 1e-9)
+            img_height = request_rect.height() * self.original_height / max(image_rect.height(), 1e-9)
+            req_screen_width = max(1, int(round(request_rect.width() / max(scale_x, 1e-9))))
+            req_screen_height = max(1, int(round(request_rect.height() / max(scale_y, 1e-9))))
+            return RenderRequest(
+                x=img_x,
+                y=img_y,
+                width=max(img_width, 1e-6),
+                height=max(img_height, 1e-6),
+                screen_width=req_screen_width,
+                screen_height=req_screen_height,
+            )
+        self._last_scene_request_rect = None
         return RenderRequest(
             x=x0 - margin_x,
             y=y0 - margin_y,
@@ -1076,8 +1164,7 @@ class LayeredRasterCanvas(QWidget):
         limit_rect = self._current_scene_rect()
         if limit_rect.isNull():
             limit_rect = QRectF(self._image_rect)
-        min_x_range = max(limit_rect.width() / 4000.0, 1e-6)
-        min_y_range = max(limit_rect.height() / 4000.0, 1e-6)
+        min_x_range, min_y_range = self._min_scene_ranges()
         self.view_box.setLimits(
             xMin=limit_rect.left() - limit_rect.width() * 4,
             xMax=limit_rect.right() + limit_rect.width() * 4,
@@ -1086,6 +1173,7 @@ class LayeredRasterCanvas(QWidget):
             minXRange=min_x_range,
             minYRange=min_y_range,
         )
+        self._update_zoom_limits()
 
     def _current_scene_rect(self) -> QRectF:
         if self.scene_world_rect is not None:
@@ -1093,9 +1181,35 @@ class LayeredRasterCanvas(QWidget):
             return QRectF(x, y, width, height)
         return QRectF(self._image_rect)
 
+    def _min_scene_ranges(self) -> tuple[float, float]:
+        width_ref = float(self.original_width or (self.image_array.shape[1] if self.image_array is not None else 1))
+        height_ref = float(self.original_height or (self.image_array.shape[0] if self.image_array is not None else 1))
+        if self._image_rect.isNull():
+            return 1e-6, 1e-6
+        pixel_w = abs(self._image_rect.width()) / max(width_ref, 1.0)
+        pixel_h = abs(self._image_rect.height()) / max(height_ref, 1.0)
+        return max(pixel_w, 1e-9), max(pixel_h, 1e-9)
+
+    def _update_zoom_limits(self) -> None:
+        scene_rect = self._current_scene_rect()
+        if scene_rect.isNull():
+            self.max_zoom = 1000.0
+            return
+        min_x_range, min_y_range = self._min_scene_ranges()
+        scene_w = max(abs(scene_rect.width()), min_x_range)
+        scene_h = max(abs(scene_rect.height()), min_y_range)
+        needed_x = scene_w / max(min_x_range, 1e-9)
+        needed_y = scene_h / max(min_y_range, 1e-9)
+        needed_zoom = max(needed_x, needed_y)
+        self.max_zoom = max(1000.0, float(needed_zoom) * 4.0)
+
     def _view_to_image_pos(self, view_pos: QPointF):
         if self._coordinates_are_image_space:
-            return QPointF(view_pos.x(), view_pos.y())
+            if self.image_world_rect is None:
+                return QPointF(view_pos.x(), view_pos.y())
+            x = (view_pos.x() - self._image_rect.left()) * self.original_width / max(self._image_rect.width(), 1e-9)
+            y = (view_pos.y() - self._image_rect.top()) * self.original_height / max(self._image_rect.height(), 1e-9)
+            return QPointF(x, y)
         if self.image_array is None or self._image_rect.isNull():
             return None
         x = (view_pos.x() - self._image_rect.left()) * self.image_array.shape[1] / max(self._image_rect.width(), 1e-9)
@@ -1104,12 +1218,26 @@ class LayeredRasterCanvas(QWidget):
 
     def image_to_view_point(self, x: float, y: float) -> QPointF:
         if self._coordinates_are_image_space:
-            return QPointF(x, y)
+            if self.image_world_rect is None:
+                return QPointF(x, y)
+            vx = self._image_rect.left() + x * self._image_rect.width() / max(float(self.original_width), 1.0)
+            vy = self._image_rect.top() + y * self._image_rect.height() / max(float(self.original_height), 1.0)
+            return QPointF(vx, vy)
         if self.image_array is None or self._image_rect.isNull():
             return QPointF(x, y)
         vx = self._image_rect.left() + x * self._image_rect.width() / max(self.image_array.shape[1], 1)
         vy = self._image_rect.top() + y * self._image_rect.height() / max(self.image_array.shape[0], 1)
         return QPointF(vx, vy)
+
+    def sync_pointer_coordinates(self, x: float, y: float) -> tuple[float, float] | None:
+        point = self.image_to_view_point(float(x) + 0.5, float(y) + 0.5)
+        return float(point.x()), float(point.y())
+
+    def image_coordinates_from_sync_point(self, sync_x: float, sync_y: float) -> tuple[int, int] | None:
+        pos = self._view_to_image_pos(QPointF(float(sync_x), float(sync_y)))
+        if pos is None or not self.image_contains_pos(pos):
+            return None
+        return int(pos.x()), int(pos.y())
 
     def _clear_selected_pixel_marker(self):
         for item in self._selected_pixel_items:
