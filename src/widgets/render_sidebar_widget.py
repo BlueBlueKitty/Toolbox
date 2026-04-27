@@ -8,7 +8,7 @@ import json
 from dataclasses import replace
 
 import numpy as np
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, Signal, QSize
 from PySide6.QtGui import QColor
 from shiboken6 import isValid
 from PySide6.QtWidgets import (
@@ -21,12 +21,14 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QHeaderView,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -415,6 +417,10 @@ class RenderSidebarWidget(QWidget):
         self.nodata_edit.setMinimumWidth(56)
         self.nodata_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.nodata_edit.editingFinished.connect(lambda: self.display_settings_changed.emit())
+        self.background_color_button = QPushButton("")
+        self.background_color_button.setToolTip("调整画布背景色")
+        self.background_color_button.setFixedWidth(26)
+        self.background_color_button.clicked.connect(self._choose_background_color)
         nodata_row = QWidget()
         nodata_row_layout = QHBoxLayout(nodata_row)
         nodata_row_layout.setContentsMargins(0, 0, 0, 0)
@@ -423,6 +429,7 @@ class RenderSidebarWidget(QWidget):
         nodata_row_layout.addWidget(self.nodata_override_check, 0, Qt.AlignLeft)
         nodata_row_layout.addWidget(nodata_label, 0, Qt.AlignLeft)
         nodata_row_layout.addWidget(self.nodata_edit, 1)
+        nodata_row_layout.addWidget(self.background_color_button, 0, Qt.AlignRight)
         renderer_layout.addRow(nodata_row)
         layout.addWidget(self.renderer_group)
 
@@ -637,14 +644,26 @@ class RenderSidebarWidget(QWidget):
         categorical_toolbar = QHBoxLayout()
         self.auto_scan_button = QPushButton("自动扫描")
         self.auto_scan_button.clicked.connect(self.auto_scan_unique_requested.emit)
-        self.undefined_color_button = QPushButton("未定义颜色")
-        self.undefined_color_button.clicked.connect(self._choose_undefined_color)
+        self.add_category_button = QPushButton("+")
+        self.add_category_button.setToolTip("为指定值添加或更新颜色")
+        self.add_category_button.clicked.connect(self._add_categorical_row)
+        self.remove_category_button = QPushButton("-")
+        self.remove_category_button.setToolTip("删除当前选中的分类行")
+        self.remove_category_button.clicked.connect(self._remove_selected_categorical_rows)
         categorical_toolbar.addWidget(self.auto_scan_button)
-        categorical_toolbar.addWidget(self.undefined_color_button)
+        categorical_toolbar.addWidget(self.add_category_button)
+        categorical_toolbar.addWidget(self.remove_category_button)
+        categorical_toolbar.addStretch(1)
         categorical_layout.addLayout(categorical_toolbar)
         self.categorical_table = QTableWidget(0, 4)
         self.categorical_table.setHorizontalHeaderLabels(["值", "标签", "颜色", "可见"])
-        self.categorical_table.horizontalHeader().setStretchLastSection(True)
+        header = self.categorical_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.categorical_table.setColumnWidth(2, 52)
         self.categorical_table.itemChanged.connect(self._on_categorical_item_changed)
         self.categorical_table.cellDoubleClicked.connect(self._on_categorical_color_double_clicked)
         categorical_layout.addWidget(self.categorical_table)
@@ -780,6 +799,14 @@ class RenderSidebarWidget(QWidget):
             self.nodata_edit.setText("Null" if self._source_nodata_value is None else str(self._source_nodata_value))
             self.nodata_edit.blockSignals(False)
 
+    def _choose_background_color(self) -> None:
+        current = QColor(self.background_color_button.property("rgba_hex") or "#ff000000")
+        chosen = _choose_color_with_alpha(self, current, "选择画布背景色")
+        if not chosen.isValid():
+            return
+        self.set_background_color(tuple(chosen.getRgb()))
+        self.display_settings_changed.emit()
+
     def _on_manual_range_toggled(self, checked: bool) -> None:
         manual = bool(checked)
         self._manual_range_just_enabled = manual
@@ -805,7 +832,7 @@ class RenderSidebarWidget(QWidget):
         if item is None:
             return
         color = QColor(item.data(Qt.UserRole) or "#000000")
-        chosen = QColorDialog.getColor(color, self, "选择颜色")
+        chosen = _choose_color_with_alpha(self, color, "选择颜色")
         if not chosen.isValid():
             return
         self._categorical_block = True
@@ -815,12 +842,46 @@ class RenderSidebarWidget(QWidget):
             self._categorical_block = False
         self.categorical_style_changed.emit()
 
-    def _choose_undefined_color(self) -> None:
-        current = QColor(self.undefined_color_button.property("rgba_hex") or "#00000000")
-        chosen = QColorDialog.getColor(current, self, "选择未定义值颜色")
-        if not chosen.isValid():
+    def _add_categorical_row(self) -> None:
+        value, ok = QInputDialog.getText(self, "添加分类值", "请输入值:")
+        if not ok:
             return
-        self.set_undefined_color(tuple(chosen.getRgb()))
+        parsed_value = _parse_table_value(value)
+        color = _choose_color_with_alpha(self, QColor("#ffffffff"), "选择颜色")
+        if not color.isValid():
+            return
+        target_text = str(parsed_value)
+        target_row = None
+        for row in range(self.categorical_table.rowCount()):
+            value_item = self.categorical_table.item(row, 0)
+            if value_item is not None and value_item.text() == target_text:
+                target_row = row
+                break
+        self._categorical_block = True
+        try:
+            if target_row is None:
+                self._append_category_row(parsed_value, "" if self.categorical_table.isColumnHidden(1) else target_text, color.getRgb(), True)
+            else:
+                color_item = self.categorical_table.item(target_row, 2)
+                visible_item = self.categorical_table.item(target_row, 3)
+                if color_item is not None:
+                    _update_color_item(color_item, color)
+                if visible_item is not None:
+                    visible_item.setCheckState(Qt.Checked)
+        finally:
+            self._categorical_block = False
+        self.categorical_style_changed.emit()
+
+    def _remove_selected_categorical_rows(self) -> None:
+        rows = sorted({index.row() for index in self.categorical_table.selectedIndexes()}, reverse=True)
+        if not rows:
+            return
+        self._categorical_block = True
+        try:
+            for row in rows:
+                self.categorical_table.removeRow(row)
+        finally:
+            self._categorical_block = False
         self.categorical_style_changed.emit()
 
     def set_target_options(self, options: list[tuple[str, str]]) -> None:
@@ -875,6 +936,7 @@ class RenderSidebarWidget(QWidget):
             self.renderer_combo,
             self.nodata_edit,
             self.nodata_override_check,
+            self.background_color_button,
             self.gray_band_combo,
             self.band_r_combo,
             self.band_g_combo,
@@ -895,12 +957,15 @@ class RenderSidebarWidget(QWidget):
             self.hillshade_zfactor_spin,
             self.categorical_table,
             self.auto_scan_button,
-            self.undefined_color_button,
+            self.add_category_button,
+            self.remove_category_button,
             self.reset_style_button,
             self.save_style_button,
             self.load_style_button,
         ):
             widget.setEnabled(enabled)
+        if enabled:
+            self._on_nodata_override_toggled(self.nodata_override_check.isChecked())
         self.status_label.setText("")
         self.status_group.setVisible(False)
         self._update_section_visibility()
@@ -982,8 +1047,11 @@ class RenderSidebarWidget(QWidget):
         )
         self.nodata_edit.setText("Null" if shown_nodata is None else str(shown_nodata))
         self.nodata_edit.setEnabled(override_nodata)
+        self.nodata_edit.setReadOnly(not override_nodata)
+        self.set_background_color(display_settings.background_color)
         self.nodata_override_check.blockSignals(False)
         self.nodata_edit.blockSignals(False)
+        self._on_nodata_override_toggled(override_nodata)
         self._on_manual_range_toggled(self.render_settings.auto_range_check.isChecked())
         self._manual_range_just_enabled = False
 
@@ -1008,6 +1076,7 @@ class RenderSidebarWidget(QWidget):
                 value=parsed_nodata,
                 use_source_nodata=use_source_nodata,
             ),
+            background_color=_hex_to_rgba(self.background_color_button.property("rgba_hex") or "#ff000000"),
         )
 
     def _set_image_info(self, layer) -> None:
@@ -1045,25 +1114,32 @@ class RenderSidebarWidget(QWidget):
         try:
             self.categorical_table.setRowCount(0)
             if isinstance(style, UniqueValueRenderStyle):
+                self.categorical_table.setColumnHidden(1, False)
                 for item in style.items:
                     self._append_category_row(item.value, item.label or str(item.value), item.color, item.visible)
-                self.set_undefined_color(style.undefined_color)
             elif isinstance(style, PalettedRenderStyle):
+                self.categorical_table.setColumnHidden(1, True)
                 for index, color in enumerate(style.palette):
-                    self._append_category_row(index, str(index), color, True)
-                self.set_undefined_color(style.default_color)
+                    visible = bool(style.palette_visibility[index]) if index < len(style.palette_visibility) else int(tuple(color[:4])[3]) > 0
+                    self._append_category_row(index, "", color, visible)
             else:
-                self.set_undefined_color((0, 0, 0, 0))
+                self.categorical_table.setColumnHidden(1, False)
         finally:
             self._categorical_block = False
 
-    def set_undefined_color(self, rgba: tuple[int, int, int, int]) -> None:
-        rgba_hex = _rgba_to_hex(rgba)
-        self.undefined_color_button.setProperty("rgba_hex", rgba_hex)
-        self.undefined_color_button.setStyleSheet(f"background-color: {rgba_hex};")
+    def set_background_color(self, rgba: tuple[int, int, int, int] | None) -> None:
+        color = tuple(rgba[:4]) if rgba is not None else self._default_background_rgba()
+        rgba_hex = _rgba_to_hex(color)
+        self.background_color_button.setProperty("rgba_hex", rgba_hex)
+        self.background_color_button.setStyleSheet(f"background-color: {rgba_hex};")
+
+    def _default_background_rgba(self) -> tuple[int, int, int, int]:
+        window_color = self.palette().color(self.backgroundRole())
+        return (0, 0, 0, 255) if window_color.lightness() < 128 else (255, 255, 255, 255)
 
     def current_categorical_payload(self) -> dict:
         items = []
+        palette_visibility = []
         for row in range(self.categorical_table.rowCount()):
             value_item = self.categorical_table.item(row, 0)
             label_item = self.categorical_table.item(row, 1)
@@ -1071,17 +1147,20 @@ class RenderSidebarWidget(QWidget):
             visible_item = self.categorical_table.item(row, 3)
             if value_item is None or color_item is None:
                 continue
+            visible = visible_item is None or visible_item.checkState() == Qt.Checked
             items.append(
                 UniqueValueItem(
                     value=_parse_table_value(value_item.text()),
                     label=(label_item.text() if label_item is not None else ""),
                     color=_hex_to_rgba(color_item.data(Qt.UserRole) or "#00000000"),
-                    visible=visible_item is None or visible_item.checkState() == Qt.Checked,
+                    visible=visible,
                 )
             )
+            palette_visibility.append(bool(visible))
         return {
             "items": tuple(items),
-            "undefined_color": _hex_to_rgba(self.undefined_color_button.property("rgba_hex") or "#00000000"),
+            "palette_visibility": tuple(palette_visibility),
+            "undefined_color": (0, 0, 0, 0),
         }
 
     def _append_category_row(self, value, label: str, rgba, visible: bool) -> None:
@@ -1229,10 +1308,25 @@ class RenderSidebarController:
         if target_mode == RENDER_MODE_CATEGORICAL:
             payload = self.widget.current_categorical_payload()
             if getattr(layer.render_style, "renderer_type", "") == "paletted" or getattr(layer.metadata, "has_color_table", False):
-                palette = tuple(item.color for item in payload["items"])
+                indexed_items = []
+                for item in payload["items"]:
+                    try:
+                        index = int(item.value)
+                    except (TypeError, ValueError):
+                        continue
+                    if index < 0:
+                        continue
+                    indexed_items.append((index, item))
+                max_index = max((index for index, _item in indexed_items), default=-1)
+                palette_list = [(0, 0, 0, 0)] * (max_index + 1)
+                visibility_list = [False] * (max_index + 1)
+                for index, item in indexed_items:
+                    palette_list[index] = item.color
+                    visibility_list[index] = bool(item.visible)
                 return PalettedRenderStyle(
                     band_indices=(int(self.widget.render_settings.gray_band_spin.value()),),
-                    palette=palette,
+                    palette=tuple(palette_list),
+                    palette_visibility=tuple(visibility_list),
                     default_color=payload["undefined_color"],
                 )
             return UniqueValueRenderStyle(
@@ -1499,7 +1593,7 @@ def _set_combo_by_data(combo: QComboBox, value) -> None:
 
 def _rgba_to_hex(rgba) -> str:
     r, g, b, a = [int(v) for v in tuple(rgba)[:4]]
-    return f"#{r:02x}{g:02x}{b:02x}{a:02x}"
+    return f"#{a:02x}{r:02x}{g:02x}{b:02x}"
 
 
 def _hex_to_rgba(text: str) -> tuple[int, int, int, int]:
@@ -1511,8 +1605,19 @@ def _hex_to_rgba(text: str) -> tuple[int, int, int, int]:
 
 def _update_color_item(item: QTableWidgetItem, color: QColor) -> None:
     item.setData(Qt.UserRole, color.name(QColor.HexArgb))
-    item.setText(color.name(QColor.HexArgb))
+    item.setText("")
+    item.setToolTip(color.name(QColor.HexArgb))
+    item.setSizeHint(QSize(36, 18))
     item.setBackground(color)
+
+
+def _choose_color_with_alpha(parent, initial: QColor, title: str) -> QColor:
+    dialog = QColorDialog(initial, parent)
+    dialog.setWindowTitle(title)
+    dialog.setOption(QColorDialog.ShowAlphaChannel, True)
+    if dialog.exec():
+        return dialog.selectedColor()
+    return QColor()
 
 
 def _parse_table_value(text: str):

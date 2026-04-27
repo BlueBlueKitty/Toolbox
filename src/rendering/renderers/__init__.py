@@ -190,8 +190,20 @@ class PalettedRenderer(BaseRenderer):
         if not style.palette:
             return rgba
         table = np.asarray(style.palette, dtype=np.uint8)
-        clamped = np.clip(arr.astype(np.int64), 0, max(len(table) - 1, 0))
-        rgba = table[clamped]
+        valid = np.isfinite(arr)
+        arr_int = np.zeros(arr.shape, dtype=np.int64)
+        if np.any(valid):
+            arr_int[valid] = arr[valid].astype(np.int64)
+        in_range = valid & (arr_int >= 0) & (arr_int < len(table))
+        if np.any(in_range):
+            rgba[in_range] = table[arr_int[in_range]]
+        if style.palette_visibility:
+            visibility = np.asarray(style.palette_visibility, dtype=bool)
+            visible_mask = np.zeros(arr.shape, dtype=bool)
+            visible_indices = in_range & (arr_int < len(visibility))
+            if np.any(visible_indices):
+                visible_mask[visible_indices] = visibility[arr_int[visible_indices]]
+            rgba[in_range & ~visible_mask] = np.asarray(style.default_color, dtype=np.uint8)
         return rgba
 
 

@@ -16,6 +16,7 @@ from shiboken6 import isValid
 from .config import default_raster_render_config, render_raster_rgb
 from .layers import LayerManager
 from .models import LayerSpec, RasterLayer, RenderRequest, RenderTileResult, ViewportState
+from .pipeline import DEFAULT_RENDER_PIPELINE
 from .style_auto_selector import DefaultRenderStyleFactory
 from .styles import default_display_settings, legacy_config_to_style, style_to_legacy_config
 
@@ -96,6 +97,7 @@ class LayeredRasterCanvas(QWidget):
         self._synced_pointer_items: list[object] = []
         self._pending_sync_refresh = False
         self._pending_sync_refresh_delay_ms = 80
+        self._background_color_override: QColor | None = None
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(80)
@@ -463,9 +465,19 @@ class LayeredRasterCanvas(QWidget):
         super().changeEvent(event)
 
     def _apply_background_from_palette(self) -> None:
+        color = self._resolved_background_color()
+        self.graphics.setBackground(color)
+
+    def _resolved_background_color(self) -> QColor:
+        if self._background_color_override is not None:
+            return QColor(self._background_color_override)
         window_color = self.palette().color(self.backgroundRole())
         is_dark = window_color.lightness() < 128
-        self.graphics.setBackground(QColor("#000000" if is_dark else "#ffffff"))
+        return QColor("#000000" if is_dark else "#ffffff")
+
+    def set_background_color(self, rgba: tuple[int, int, int, int] | None) -> None:
+        self._background_color_override = None if rgba is None else QColor(*rgba[:4])
+        self._apply_background_from_palette()
 
     def _accept_drag_event(self, event) -> bool:
         mime = event.mimeData()
@@ -542,10 +554,17 @@ class LayeredRasterCanvas(QWidget):
         render_config = self._render_config_from_state()
         base_state = self.layer_manager.layer(self.BASE_LAYER_ID)
         if base_state is not None and base_state.layer is not None:
-            result = self.source.render(request, style_to_legacy_config(base_state.layer.render_style, base_state.layer.display_settings))
+            result = DEFAULT_RENDER_PIPELINE.render_source(
+                self.source,
+                request,
+                base_state.layer.render_style,
+                base_state.layer.display_settings,
+                layer_id=self.BASE_LAYER_ID,
+                layer_revision=self._base_layer_revision(),
+            )
         else:
             result = self.source.render(request, render_config)
-        if self.nodata_value != getattr(self.source.metadata(), "nodata", None):
+        if base_state is None and self.nodata_value != getattr(self.source.metadata(), "nodata", None):
             rect_x, rect_y, rect_width, rect_height = result.image_rect
             display_rgb = render_raster_rgb(
                 result.raw_array,
@@ -925,15 +944,29 @@ class LayeredRasterCanvas(QWidget):
         state = self.layer_manager.layer(self.BASE_LAYER_ID)
         if state is None or state.layer is None:
             return
+        source_nodata = getattr(state.layer.metadata, "nodata", None)
+        use_source_nodata = self._nodata_values_equal(nodata_value, source_nodata)
         display_settings = replace(
             state.layer.display_settings,
             nodata_policy=replace(
                 state.layer.display_settings.nodata_policy,
                 value=nodata_value,
-                use_source_nodata=nodata_value is None,
+                use_source_nodata=use_source_nodata,
             ),
         )
         self.layer_manager.set_display_settings(self.BASE_LAYER_ID, display_settings)
+
+    def _nodata_values_equal(self, left, right) -> bool:
+        if left is right:
+            return True
+        if left is None or right is None:
+            return left is None and right is None
+        try:
+            if np.isnan(left) and np.isnan(right):
+                return True
+        except Exception:
+            pass
+        return left == right
 
     def _memory_metadata_for_array(self, image_array):
         from .models import ImageSourceMetadata
@@ -982,6 +1015,7 @@ class LayeredRasterCanvas(QWidget):
         if state is None or state.layer is None:
             return
         self.nodata_value = state.layer.display_settings.nodata_policy.value
+        self.set_background_color(state.layer.display_settings.background_color)
         self._last_request_signature = None
         if self.source is not None:
             self.refresh_view()

@@ -62,6 +62,7 @@ class DefaultRenderStyleFactory:
             opacity=1.0,
             blend_mode="source_over",
             nodata_policy=default_display_settings(nodata_value=getattr(metadata, "nodata", None)).nodata_policy,
+            background_color=None,
             alpha_band=None,
             mask_enabled=False,
             resampling=default_display_settings().resampling.__class__(zoomed_in="nearest", zoomed_out=resampling),

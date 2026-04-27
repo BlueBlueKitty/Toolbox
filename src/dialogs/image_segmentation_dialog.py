@@ -194,9 +194,10 @@ class ImageSegmentationDialog(QDialog):
         self._bind_signals()
         self._load_render_preferences()
         self._setup_shortcuts()
+        self._autosave_interval_ms = self._load_autosave_interval_ms()
 
         self.autosave_timer = QTimer(self)
-        self.autosave_timer.setInterval(60000)
+        self.autosave_timer.setInterval(self._autosave_interval_ms)
         self.autosave_timer.setSingleShot(True)
         self.autosave_timer.timeout.connect(self._autosave_if_needed)
 
@@ -533,6 +534,9 @@ class ImageSegmentationDialog(QDialog):
         self.workspace.active_window_changed.connect(self._on_workspace_active_window_changed)
         self.workspace.window_detached_changed.connect(self._on_workspace_window_detached_changed)
         self.render_sidebar.target_changed.connect(self._on_workspace_active_window_changed)
+        for canvas in self._all_canvases():
+            canvas.layer_manager.layer_style_changed.connect(self._on_canvas_layer_rendering_changed)
+            canvas.layer_manager.layer_display_changed.connect(self._on_canvas_layer_rendering_changed)
 
         self._bind_canvas_signals(self.canvas)
 
@@ -745,9 +749,15 @@ class ImageSegmentationDialog(QDialog):
         self._dirty = value
         if value:
             self._last_edit_timestamp = time.monotonic()
+            self.autosave_timer.setInterval(self._autosave_interval_ms)
             self.autosave_timer.start()
         else:
             self.autosave_timer.stop()
+
+    def _load_autosave_interval_ms(self) -> int:
+        seconds = self.project_manager.settings.value("autosave/interval_seconds", 60, type=int)
+        seconds = max(5, int(seconds))
+        return seconds * 1000
 
     def _remove_hillshade_mode(self) -> None:
         combo = self.render_settings.display_mode_combo
@@ -3207,6 +3217,20 @@ class ImageSegmentationDialog(QDialog):
         self._refresh_canvas()
         self._set_dirty(True)
 
+    def _on_canvas_layer_rendering_changed(self, layer_id: str) -> None:
+        if self.project.image_asset is None or not layer_id or layer_id == "base_raster":
+            return
+        target_layer = None
+        for layer in self._auxiliary_layers:
+            if layer.get("id") == layer_id and layer.get("type") == "raster":
+                target_layer = layer
+                break
+        if target_layer is None:
+            return
+        for canvas in self._all_canvases():
+            if canvas.layer_manager.layer(layer_id):
+                self._refresh_aux_raster_layer(target_layer, canvas=canvas)
+
     def _on_layer_selected(self, layer_id: str | None) -> None:
         self._selected_render_layer_id = layer_id
         if not isinstance(self.project.export_prefs, dict):
@@ -3611,21 +3635,28 @@ class ImageSegmentationDialog(QDialog):
             screen_width=max(1, sample_w),
             screen_height=max(1, sample_h),
         )
-        render_cfg = layer.get("render_config") or default_raster_render_config(meta.band_count, bool(meta.has_color_table))
+        layer_state = canvas.layer_manager.layer(str(layer.get("id")))
+        current_layer = None if layer_state is None else layer_state.layer
+        render_style = None if current_layer is None else current_layer.render_style
+        display_settings = None if current_layer is None else current_layer.display_settings
+        render_cfg = (
+            style_to_legacy_config(render_style, display_settings)
+            if render_style is not None and display_settings is not None
+            else layer.get("render_config") or default_raster_render_config(meta.band_count, bool(meta.has_color_table))
+        )
         try:
-            style = legacy_config_to_style(render_cfg, meta)
-            display_settings = default_display_settings(nodata_value=layer.get("nodata_override", meta.nodata))
-            display_settings = replace(
-                display_settings,
+            style = render_style or legacy_config_to_style(render_cfg, meta)
+            resolved_display_settings = display_settings or default_display_settings(nodata_value=layer.get("nodata_override", meta.nodata))
+            resolved_display_settings = replace(
+                resolved_display_settings,
                 visible=bool(self.project.layer_visibility.get(str(layer.get("id")), True)),
-                opacity=1.0,
             )
             canvas.layer_manager.update_raster_layer(
                 str(layer.get("id")),
                 source=source,
                 metadata=meta,
                 render_style=style,
-                display_settings=display_settings,
+                display_settings=resolved_display_settings,
                 custom_properties={"auxiliary_layer": True},
             )
         except Exception:

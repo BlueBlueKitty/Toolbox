@@ -76,6 +76,8 @@ class MainWindow(QMainWindow):
             self.pyramid_threshold_mb = 512
             self.settings.setValue("display/pyramid_threshold_mb", self.pyramid_threshold_mb)
         self.geotiff_full_render_cache_limit_mb = self.pyramid_threshold_mb
+        self.segmentation_autosave_interval_seconds = self.segmentation_settings.value("autosave/interval_seconds", 60, type=int)
+        self.segmentation_autosave_interval_seconds = max(5, int(self.segmentation_autosave_interval_seconds))
         cleanup_pyramid_cache_async(7)
         
         # 设置窗口属性
@@ -110,8 +112,8 @@ class MainWindow(QMainWindow):
         # 设置菜单
         settings_menu = menubar.addMenu("设置")
         
-        # 显示设置
-        display_settings_action = QAction("显示设置...", self)
+        # 设置
+        display_settings_action = QAction("设置...", self)
         display_settings_action.triggered.connect(self._on_display_settings)
         settings_menu.addAction(display_settings_action)
         
@@ -806,7 +808,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(self, f"关于 {APP_DISPLAY_NAME}", about_text)
     
     def _on_display_settings(self):
-        """显示设置对话框"""
+        """设置对话框"""
         from PySide6.QtWidgets import (
             QDialog,
             QVBoxLayout,
@@ -820,7 +822,7 @@ class MainWindow(QMainWindow):
         )
         
         dialog = QDialog(self)
-        dialog.setWindowTitle("显示设置")
+        dialog.setWindowTitle("设置")
         dialog.setMinimumWidth(400)
         
         layout = QVBoxLayout(dialog)
@@ -852,6 +854,24 @@ class MainWindow(QMainWindow):
         threshold_layout.addStretch()
         layout.addLayout(threshold_layout)
         
+        layout.addSpacing(10)
+
+        autosave_layout = QHBoxLayout()
+        autosave_label = parameter_label(
+            "图像分割自动保存间隔:",
+            "图像分割工具在项目已保存且有未保存修改时，会按该时间间隔自动生成 autosave 文件。"
+        )
+        autosave_layout.addWidget(autosave_label)
+        autosave_spinbox = QSpinBox()
+        autosave_spinbox.setRange(5, 3600)
+        autosave_spinbox.setSingleStep(5)
+        autosave_spinbox.setValue(max(5, int(self.segmentation_autosave_interval_seconds)))
+        autosave_spinbox.setSuffix(" 秒")
+        autosave_spinbox.setMinimumWidth(120)
+        autosave_layout.addWidget(autosave_spinbox)
+        autosave_layout.addStretch()
+        layout.addLayout(autosave_layout)
+
         layout.addSpacing(10)
 
         cache_layout = QVBoxLayout()
@@ -925,15 +945,18 @@ class MainWindow(QMainWindow):
             self.pyramid_threshold_mb = threshold_spinbox.value()
             smooth_display = smooth_check.isChecked()
             self.geotiff_full_render_cache_limit_mb = self.pyramid_threshold_mb
+            self.segmentation_autosave_interval_seconds = autosave_spinbox.value()
             self.settings.setValue("display/pyramid_threshold_mb", self.pyramid_threshold_mb)
             self.settings.setValue("display/smooth_display", smooth_display)
             cache_dir_path = set_cache_dir(cache_dir_path)
             self.segmentation_settings.setValue("segmentation/geotiff_full_render_cache_limit_mb", self.geotiff_full_render_cache_limit_mb)
+            self.segmentation_settings.setValue("autosave/interval_seconds", int(self.segmentation_autosave_interval_seconds))
             QMessageBox.information(
                 self, 
                 "设置已保存",
                 f"栅格显示阈值: {self.pyramid_threshold_mb} MB\n"
                 f"显示缓存目录: {cache_dir_path}\n"
+                f"图像分割自动保存间隔: {self.segmentation_autosave_interval_seconds} 秒\n"
                 f"平滑显示: {'已启用' if smooth_display else '已禁用'}\n"
                 "图像分割工具的整图渲染缓存阈值已同步使用该值。\n\n"
                 "新设置将在下次打开图像或生成缓存时生效。"

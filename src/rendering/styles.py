@@ -56,6 +56,7 @@ class LayerDisplaySettings:
     opacity: float = 1.0
     blend_mode: str = "source_over"
     nodata_policy: NodataPolicy = field(default_factory=NodataPolicy)
+    background_color: tuple[int, int, int, int] | None = None
     alpha_band: int | None = None
     mask_enabled: bool = False
     resampling: ResamplingPolicy = field(default_factory=ResamplingPolicy)
@@ -108,6 +109,7 @@ class PalettedRenderStyle(BaseRenderStyle):
     renderer_type: str = "paletted"
     band_indices: tuple[int, ...] = (1,)
     palette: tuple[tuple[int, int, int, int], ...] = ()
+    palette_visibility: tuple[bool, ...] = ()
     default_color: tuple[int, int, int, int] = (0, 0, 0, 0)
 
 
@@ -189,6 +191,7 @@ def style_from_dict(payload: dict[str, Any]) -> BaseRenderStyle:
             saturation=float(payload.get("saturation", 1.0)),
             invert=bool(payload.get("invert", False)),
             palette=tuple(tuple(item) for item in payload.get("palette", [])),
+            palette_visibility=tuple(bool(item) for item in payload.get("palette_visibility", [])),
             default_color=tuple(payload.get("default_color", (0, 0, 0, 0))),
         )
     if renderer_type == "hillshade":
@@ -238,6 +241,7 @@ def display_settings_from_dict(payload: dict[str, Any]) -> LayerDisplaySettings:
         opacity=float(payload.get("opacity", 1.0)),
         blend_mode=str(payload.get("blend_mode", "source_over")),
         nodata_policy=nodata,
+        background_color=tuple(payload["background_color"]) if payload.get("background_color") is not None else None,
         alpha_band=payload.get("alpha_band"),
         mask_enabled=bool(payload.get("mask_enabled", False)),
         resampling=resampling,
