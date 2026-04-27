@@ -46,6 +46,12 @@ class SegmentationCanvas(LayeredRasterCanvas):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # 分割工具单窗工作区更大，沿用通用画布的超大预取边距会显著放大
+        # 每次交互后的重采样面积，导致同数据下比其它查看器更容易感觉到延迟。
+        # 这里收敛到更稳妥的 0.5 倍边距，保留交互缓冲的同时降低重绘成本。
+        self._dynamic_render_margin_ratio = 0.50
+        self._dynamic_zoom_margin_ratio = 0.50
+        self._dynamic_pan_margin_ratio = 0.50
         try:
             self.view_box.sigRangeChanged.disconnect(self._on_range_changed)
         except (TypeError, RuntimeError):
@@ -426,6 +432,8 @@ class SegmentationCanvas(LayeredRasterCanvas):
 
     def _on_view_range_changed(self, *_args) -> None:
         self._update_current_zoom_from_view_range()
+        if self._suspend_range_signal:
+            return
         if self.source is not None:
             if self._is_panning:
                 if not self.is_syncing:

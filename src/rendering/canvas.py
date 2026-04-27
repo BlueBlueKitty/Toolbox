@@ -94,6 +94,8 @@ class LayeredRasterCanvas(QWidget):
         self._coordinates_are_image_space = False
         self._overlay_items_by_layer: dict[str, list[object]] = {}
         self._synced_pointer_items: list[object] = []
+        self._pending_sync_refresh = False
+        self._pending_sync_refresh_delay_ms = 80
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(80)
@@ -180,6 +182,15 @@ class LayeredRasterCanvas(QWidget):
     def restore_view_state(self, state):
         if not state:
             return False
+        sync_refresh_delay_ms = None
+        if isinstance(state, dict):
+            sync_mode = state.get("_sync_interaction")
+            if sync_mode == "zoom":
+                sync_refresh_delay_ms = 35
+            elif sync_mode in {"pan", "idle"}:
+                sync_refresh_delay_ms = self._refresh_timer.interval()
+        self._pending_sync_refresh = sync_refresh_delay_ms is not None
+        self._pending_sync_refresh_delay_ms = sync_refresh_delay_ms or self._refresh_timer.interval()
         self.is_syncing = True
         self._suspend_range_signal = True
         if isinstance(state, dict) and "x_range" in state and "y_range" in state:
@@ -199,6 +210,13 @@ class LayeredRasterCanvas(QWidget):
             self.view_box.setRange(xRange=(cx - half_w, cx + half_w), yRange=(cy - half_h, cy + half_h), padding=0)
         self._suspend_range_signal = False
         self.is_syncing = False
+        if self.source is not None:
+            if self._pending_sync_refresh:
+                self._refresh_timer.start(max(1, int(self._pending_sync_refresh_delay_ms)))
+            else:
+                self.refresh_view()
+        self._pending_sync_refresh = False
+        self._pending_sync_refresh_delay_ms = self._refresh_timer.interval()
         return True
 
     def fit_in_view(self, delayed=False):
@@ -1144,6 +1162,8 @@ class LayeredRasterCanvas(QWidget):
 
     def _on_range_changed(self, *_args):
         self._update_current_zoom_from_view_range()
+        if self._suspend_range_signal:
+            return
         if self.source is not None:
             if self._is_refresh_panning:
                 self._emit_view_changed()

@@ -73,6 +73,14 @@ class MultiCanvasSyncController:
                 state = source.capture_view_state()
             if state is None and hasattr(source, "current_view_state"):
                 state = source.current_view_state()
+            if isinstance(state, dict):
+                state = dict(state)
+                if getattr(source, "_is_refresh_zooming", False):
+                    state["_sync_interaction"] = "zoom"
+                elif bool(getattr(source, "is_panning", False)):
+                    state["_sync_interaction"] = "pan"
+                else:
+                    state["_sync_interaction"] = "idle"
             for canvas in self.group.canvases():
                 if canvas is source:
                     continue

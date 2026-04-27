@@ -160,6 +160,7 @@ class ImageSegmentationDialog(QDialog):
         self._auxiliary_layer_counter = 0
         self._selected_render_layer_id: str | None = None
         self._active_window_id = "viewer_1"
+        self._layout_view_states: dict[int, dict | None] = {1: None, 2: None}
         self._layer_window_visibility: dict[str, dict[str, bool]] = {}
         self._base_nodata_override = None
         self._autosave_thread: QThread | None = None
@@ -450,11 +451,25 @@ class ImageSegmentationDialog(QDialog):
         viewer1 = self._canvas_for_window("viewer_1")
         active_canvas = self.canvas
         preserved_state = None
+        current_count = self.workspace.window_count()
         if viewer1 is not None:
             preserved_state = viewer1.capture_view_state()
         elif active_canvas is not None:
             preserved_state = active_canvas.capture_view_state()
+        if preserved_state is not None:
+            self._layout_view_states[int(current_count)] = dict(preserved_state)
         target_count = 1 if self.workspace.window_count() == 2 else 2
+        target_state = self._layout_view_states.get(int(target_count))
+        if (
+            int(target_count) >= 2
+            and isinstance(target_state, dict)
+            and "x_range" in target_state
+            and "y_range" in target_state
+        ):
+            preserved_state = dict(target_state)
+        elif preserved_state is not None:
+            preserved_state = dict(preserved_state)
+            preserved_state["_preserve_axis"] = "y"
         self.workspace.windows_splitter.setUpdatesEnabled(False)
         self.workspace.set_window_count(target_count)
         self.workspace.windows_splitter.setUpdatesEnabled(True)
@@ -3774,6 +3789,7 @@ class ImageSegmentationDialog(QDialog):
         QTimer.singleShot(0, lambda s=state, count=window_count: self._restore_workspace_view_state_after_layout(s, count))
         QTimer.singleShot(90, lambda s=state, count=window_count: self._restore_workspace_view_state_after_layout(s, count))
         QTimer.singleShot(220, lambda s=state, count=window_count: self._restore_workspace_view_state_after_layout(s, count))
+        QTimer.singleShot(420, lambda s=state, count=window_count: self._restore_workspace_view_state_after_layout(s, count))
 
     def _clear_synced_pointers(self) -> None:
         if hasattr(self, "workspace"):
@@ -3784,11 +3800,34 @@ class ImageSegmentationDialog(QDialog):
             return
         viewer1 = self._canvas_for_window("viewer_1")
         if viewer1 is not None:
-            viewer1.restore_view_state(state)
+            viewer1.restore_view_state(self._layout_adjusted_view_state(state, viewer1))
         if int(window_count) >= 2:
             viewer2 = self._canvas_for_window("viewer_2")
             if viewer2 is not None:
-                viewer2.restore_view_state(state)
+                viewer2.restore_view_state(self._layout_adjusted_view_state(state, viewer2))
+        self._layout_view_states[int(window_count)] = dict(state)
+
+    def _layout_adjusted_view_state(self, state: dict, canvas) -> dict:
+        adjusted = dict(state)
+        preserve_axis = adjusted.pop("_preserve_axis", None)
+        if preserve_axis != "y" or "y_range" not in adjusted:
+            return adjusted
+        viewport = canvas.graphics.viewport()
+        if viewport is None:
+            return adjusted
+        rect = viewport.rect()
+        viewport_width = max(float(rect.width()), 1.0)
+        viewport_height = max(float(rect.height()), 1.0)
+        y0, y1 = adjusted["y_range"]
+        half_h = max((float(y1) - float(y0)) / 2.0, 0.5)
+        center_y = float((float(y0) + float(y1)) / 2.0)
+        center_x = float(adjusted.get("scene_center_x", (float(adjusted["x_range"][0]) + float(adjusted["x_range"][1])) / 2.0))
+        half_w = max(half_h * viewport_width / viewport_height, 0.5)
+        adjusted["x_range"] = (center_x - half_w, center_x + half_w)
+        adjusted["y_range"] = (center_y - half_h, center_y + half_h)
+        adjusted["scene_center_x"] = center_x
+        adjusted["scene_center_y"] = center_y
+        return adjusted
 
     def _sync_display_state_from_canvas(self) -> None:
         if self.project.image_asset is None:
