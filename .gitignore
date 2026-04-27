@@ -239,5 +239,6 @@ installer.nsi
 ref_repos/
 AGENTS.md
 
+.mindfs/
 .omx/
 .pytest_tmp/
