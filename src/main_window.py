@@ -10,7 +10,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (QMainWindow, QApplication, QMessageBox, QDialog,
                                QWidget, QVBoxLayout, QGridLayout, QPushButton, QLabel,
                                QGroupBox, QScrollArea, QMenuBar, QMenu, QProgressDialog,
-                               QHBoxLayout, QToolButton)
+                               QHBoxLayout, QToolButton, QCheckBox)
 from PySide6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor, QPalette, QFont, QFontDatabase
 from PySide6.QtCore import Qt, QThread, Signal, QSettings, QTimer, QEvent, QSize
 import sys
@@ -109,13 +109,10 @@ class MainWindow(QMainWindow):
         """创建菜单栏"""
         menubar = self.menuBar()
         
-        # 设置菜单
-        settings_menu = menubar.addMenu("设置")
-        
-        # 设置
-        display_settings_action = QAction("设置...", self)
-        display_settings_action.triggered.connect(self._on_display_settings)
-        settings_menu.addAction(display_settings_action)
+        # 设置入口：点击菜单栏“设置”直接打开设置对话框
+        settings_action = QAction("设置", self)
+        settings_action.triggered.connect(self._on_display_settings)
+        menubar.addAction(settings_action)
         
         # 帮助菜单
         help_menu = menubar.addMenu("帮助")
@@ -660,9 +657,11 @@ class MainWindow(QMainWindow):
     def _on_auto_update_found(self, update_info: dict):
         self.statusBar().clearMessage()
         self._set_update_indicator(True, update_info)
+        if self._is_update_reminder_suppressed(update_info):
+            return
         # 自动提示更新内容
         checker = UpdateChecker()
-        self._show_update_dialog(update_info, checker)
+        self._show_update_dialog(update_info, checker, allow_suppress=True)
 
     def _on_auto_no_update(self):
         self.statusBar().clearMessage()
@@ -708,7 +707,7 @@ class MainWindow(QMainWindow):
         painter.end()
         return QIcon(pixmap)
     
-    def _show_update_dialog(self, update_info: dict, checker: UpdateChecker):
+    def _show_update_dialog(self, update_info: dict, checker: UpdateChecker, allow_suppress: bool = True):
         """显示更新对话框"""
         version = update_info['version']
         name = update_info.get('name', f'v{version}')
@@ -723,27 +722,58 @@ class MainWindow(QMainWindow):
         message += body[:500] + ("..." if len(body) > 500 else "")
         
         if download_url:
-            reply = QMessageBox.question(
-                self,
-                "发现新版本",
-                message + "\n\n是否立即下载并安装？",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes
+            reply, suppress_reminder = self._ask_update_action(
+                title="发现新版本",
+                content=message + "\n\n是否立即下载并安装？",
+                allow_suppress=allow_suppress
             )
-            
+
+            self._save_update_reminder_choice(version, suppress_reminder)
             if reply == QMessageBox.Yes:
                 self._download_and_install_update(download_url, checker)
         else:
             # 没有当前平台的下载链接，引导到浏览器
-            reply = QMessageBox.question(
-                self,
-                "发现新版本",
-                message + "\n\n未找到当前平台的安装包，是否打开下载页面？",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes
+            reply, suppress_reminder = self._ask_update_action(
+                title="发现新版本",
+                content=message + "\n\n未找到当前平台的安装包，是否打开下载页面？",
+                allow_suppress=allow_suppress
             )
+            self._save_update_reminder_choice(version, suppress_reminder)
             if reply == QMessageBox.Yes and html_url:
                 webbrowser.open(html_url)
+
+    def _is_update_reminder_suppressed(self, update_info: dict) -> bool:
+        """自动检查时，判断当前版本是否被用户设置为暂不提醒。"""
+        update_version = str(update_info.get("version", "")).strip().lstrip("v")
+        if not update_version:
+            return False
+        suppressed_version = self.settings.value("update/suppressed_version", "", type=str).strip().lstrip("v")
+        return bool(suppressed_version and suppressed_version == update_version)
+
+    def _save_update_reminder_choice(self, version: str, suppress_reminder: bool) -> None:
+        """保存“下个版本前不再提醒”选项。"""
+        key = "update/suppressed_version"
+        if suppress_reminder:
+            self.settings.setValue(key, str(version).strip().lstrip("v"))
+
+    def _ask_update_action(self, title: str, content: str, allow_suppress: bool) -> tuple[int, bool]:
+        """弹出更新对话框并返回用户选择及是否抑制自动提醒。"""
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Question)
+        dialog.setWindowTitle(title)
+        dialog.setText(content)
+        dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        dialog.setDefaultButton(QMessageBox.Yes)
+
+        suppress_check = None
+        if allow_suppress:
+            suppress_check = QCheckBox("不再提醒我直到下个版本")
+            suppress_check.setChecked(False)
+            dialog.setCheckBox(suppress_check)
+
+        reply = dialog.exec()
+        suppress = bool(suppress_check and suppress_check.isChecked())
+        return reply, suppress
     
     def _download_and_install_update(self, url: str, checker: UpdateChecker):
         """下载并安装更新"""
