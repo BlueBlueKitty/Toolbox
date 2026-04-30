@@ -20,34 +20,10 @@ class BandStatistics:
 
 class RasterStatisticsService:
     def __init__(self):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._band_cache: dict[tuple, BandStatistics] = {}
         self._hist_cache: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
 
     def band_statistics(self, source, band_index: int = 1, *, sample_max_side: int = 512) -> BandStatistics | None:
-        """band_statistics。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            source (Any): 输入参数。
-            band_index (int): 输入参数。
-            sample_max_side (int): 输入参数。
-        返回:
-            BandStatistics | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         meta = source.metadata()
         key = (meta.path, meta.width, meta.height, meta.dtype, meta.nodata, band_index, sample_max_side)
         cached = self._band_cache.get(key)
@@ -67,22 +43,6 @@ class RasterStatisticsService:
         return stats
 
     def percentile_range(self, source, band_index: int = 1, percent_clip: tuple[float, float] = (2.0, 98.0), *, sample_max_side: int = 512):
-        """percentile_range。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            source (Any): 输入参数。
-            band_index (int): 输入参数。
-            percent_clip (tuple[float, float]): 输入参数。
-            sample_max_side (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        复杂度:
-            时间和空间复杂度与输入规模线性或近线性相关。
-        """
         data = self._sample_band(source, band_index, sample_max_side=sample_max_side)
         if data is None or data.size == 0:
             return None
@@ -90,20 +50,6 @@ class RasterStatisticsService:
         return float(np.percentile(data, low)), float(np.percentile(data, high))
 
     def histogram(self, source, band_index: int = 1, *, bins: int = 256, sample_max_side: int = 512):
-        """histogram。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            source (Any): 输入参数。
-            band_index (int): 输入参数。
-            bins (int): 输入参数。
-            sample_max_side (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         meta = source.metadata()
         key = (meta.path, band_index, bins, sample_max_side)
         cached = self._hist_cache.get(key)
@@ -118,19 +64,6 @@ class RasterStatisticsService:
         return result
 
     def _sample_band(self, source, band_index: int, *, sample_max_side: int = 512):
-        """_sample_band。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            source (Any): 输入参数。
-            band_index (int): 输入参数。
-            sample_max_side (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         meta = source.metadata()
         band_index = min(max(int(band_index), 1), max(int(meta.band_count or 1), 1))
         if hasattr(source, "_sample_band_values"):

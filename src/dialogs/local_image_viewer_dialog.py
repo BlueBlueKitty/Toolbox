@@ -20,17 +20,6 @@ from PySide6.QtGui import QFontDatabase, QFont, QPainter, QPixmap, QIcon, QColor
 
 # 配置文件路径
 def get_settings():
-    """get_settings。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        无。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     config_dir = Path.home() / ".toolbox"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_file = config_dir / "local_image_viewer.ini"
@@ -87,18 +76,6 @@ class LocalImageViewerDialog(QDialog):
     """图像局部查看器对话框"""
     
     def __init__(self, parent=None, pyramid_threshold_mb=DEFAULT_PYRAMID_THRESHOLD_MB):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parent (Any): 输入参数。
-            pyramid_threshold_mb (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__(parent)
         
         # 显示金字塔配置
@@ -151,17 +128,6 @@ class LocalImageViewerDialog(QDialog):
             button.setDefault(False)
 
     def on_theme_mode_changed(self, _mode: str) -> None:
-        """on_theme_mode_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            _mode (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._theme_mode = _mode
         if hasattr(self, "image_viewer") and self.image_viewer is not None:
             self.image_viewer._apply_background_from_palette()
@@ -180,17 +146,6 @@ class LocalImageViewerDialog(QDialog):
             self._update_image_stats_to_render_settings()
 
     def _compose_image_info(self, parts):
-        """_compose_image_info。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parts (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         info_parts = [str(part) for part in parts if part]
         if self.nodata_value is not None and not any(part.startswith("Nodata:") for part in info_parts):
             info_parts.append(f"Nodata: {self.nodata_value}")
@@ -200,34 +155,12 @@ class LocalImageViewerDialog(QDialog):
         return " | ".join(info_parts)
 
     def _show_loading_indicator(self, message):
-        """_show_loading_indicator。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            message (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.setWindowTitle(f"{self._loading_title_text} - 加载中")
         if hasattr(self, "operation_progress") and self.operation_progress is not None:
             self.operation_progress.start_task(message.replace("\n", " | "), 0)
         QApplication.processEvents()
 
     def _hide_loading_indicator(self):
-        """_hide_loading_indicator。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not isValid(self):
             return
         self.setWindowTitle(self._loading_title_text)
@@ -235,17 +168,6 @@ class LocalImageViewerDialog(QDialog):
             self.operation_progress.finish_task("完成")
 
     def _toggle_sidebar(self):
-        """_toggle_sidebar。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not hasattr(self, "render_sidebar") or not hasattr(self, "outer_splitter"):
             return
         if self._sidebar_visible:
@@ -264,17 +186,6 @@ class LocalImageViewerDialog(QDialog):
             self._sidebar_visible = True
 
     def _load_material_icon_font(self) -> str | None:
-        """_load_material_icon_font。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            str | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         font_path = Path(__file__).resolve().parents[2] / "resources" / "fonts" / "MaterialIcons-Regular.ttf"
         if not font_path.exists():
             return None
@@ -285,18 +196,6 @@ class LocalImageViewerDialog(QDialog):
         return families[0] if families else None
 
     def _material_icon(self, icon_name: str, *, size: int = 20) -> QIcon:
-        """_material_icon。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            icon_name (str): 输入参数。
-            size (int): 输入参数。
-        返回:
-            QIcon: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not self._material_icon_family:
             return QIcon()
         pixmap = QPixmap(size, size)
@@ -313,32 +212,10 @@ class LocalImageViewerDialog(QDialog):
         return QIcon(pixmap)
 
     def _update_sidebar_toggle_icon(self) -> None:
-        """_update_sidebar_toggle_icon。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if hasattr(self, "toggle_sidebar_btn") and self.toggle_sidebar_btn is not None:
             self.toggle_sidebar_btn.setIcon(self._material_icon("tune"))
 
     def _on_db_toggled(self, enabled: bool) -> None:
-        """_on_db_toggled。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            enabled (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if enabled == bool(self._converted_to_db):
             return
         if enabled:
@@ -350,17 +227,6 @@ class LocalImageViewerDialog(QDialog):
             self.load_image(self.image_file)
 
     def _set_viewer_source_or_array(self, original_size=None):
-        """_set_viewer_source_or_array。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            original_size (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.image_source is not None:
             self._base_render_source = self.image_source
             self._hillshade_cache_key = None
@@ -411,34 +277,12 @@ class LocalImageViewerDialog(QDialog):
         self.image_viewer.render_config.colormap_name = config.colormap_name
 
     def _create_standard_source(self, file_path):
-        """_create_standard_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            file_path (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         try:
             return GdalRasterSource(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
         except Exception:
             return StandardImageSource(file_path)
 
     def _refresh_image_info_label(self):
-        """_refresh_image_info_label。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.image_data is None or not self.image_file:
             return
 
@@ -472,17 +316,6 @@ class LocalImageViewerDialog(QDialog):
         self.image_info_label.setText(self._compose_image_info(info_parts))
 
     def keyPressEvent(self, event):
-        """keyPressEvent。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if event.key() == Qt.Key_Escape:
             if self.image_viewer.cancel_active_drawing():
                 event.accept()
@@ -515,17 +348,6 @@ class LocalImageViewerDialog(QDialog):
         return db_data.astype(np.float32)
 
     def _convert_block_to_db(self, block):
-        """_convert_block_to_db。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            block (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         data_copy = np.asarray(block).copy()
         if self.is_gamma or self.nodata_value == 0:
             nodata_mask = (data_copy == 0)
@@ -676,17 +498,6 @@ class LocalImageViewerDialog(QDialog):
         main_layout.addWidget(self.operation_progress)
         
     def _on_viewer_files_dropped(self, paths: list[str]) -> None:
-        """_on_viewer_files_dropped。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            paths (list[str]): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         mode, target = self._classify_drop_target(paths)
         if mode == "image":
             self.open_image(target)
@@ -700,17 +511,6 @@ class LocalImageViewerDialog(QDialog):
         QMessageBox.warning(self, "拖拽打开失败", "未识别拖入数据类型，无法打开。")
 
     def _classify_drop_target(self, paths: list[str]) -> tuple[str | None, str | None]:
-        """_classify_drop_target。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            paths (list[str]): 输入参数。
-        返回:
-            tuple[str | None, str | None]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not paths:
             return None, None
         local_paths = [str(Path(item)) for item in paths if os.path.exists(item)]
@@ -1094,17 +894,6 @@ class LocalImageViewerDialog(QDialog):
             self._render_update_timer.start(150)
 
     def _apply_render_settings_update(self):
-        """_apply_render_settings_update。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if hasattr(self, "render_sidebar_controller") and self.render_sidebar_controller is not None:
             self._refresh_colorbar_from_controls()
             return
@@ -1131,17 +920,6 @@ class LocalImageViewerDialog(QDialog):
             self._hide_loading_indicator()
 
     def _refresh_colorbar_from_controls(self) -> None:
-        """_refresh_colorbar_from_controls。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not hasattr(self, 'colorbar') or self.colorbar is None:
             return
         settings = self.render_settings.get_all_settings() if hasattr(self, 'render_settings') else {}
@@ -1150,17 +928,6 @@ class LocalImageViewerDialog(QDialog):
         self.colorbar.set_colormap(self.colormap_combo.currentText(), bool(settings.get('colormap_reversed', False)))
 
     def closeEvent(self, event):
-        """closeEvent。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         try:
             if hasattr(self, "_render_update_timer") and isValid(self._render_update_timer):
                 self._render_update_timer.stop()
@@ -1171,17 +938,6 @@ class LocalImageViewerDialog(QDialog):
         super().closeEvent(event)
 
     def _restore_base_render_source(self) -> None:
-        """_restore_base_render_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._base_render_source is not None and self.image_source is not self._base_render_source:
             self.image_source = self._base_render_source
             self._hillshade_cache_key = None
@@ -1189,17 +945,6 @@ class LocalImageViewerDialog(QDialog):
             self.image_viewer.set_raster_source(self.image_source, reset_view=False)
 
     def _clear_hillshade_cache(self) -> None:
-        """_clear_hillshade_cache。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._hillshade_cache_key = None
         self._restore_base_render_source()
 
@@ -1224,17 +969,6 @@ class LocalImageViewerDialog(QDialog):
         base_gt = meta.geotransform
 
         def _transform(full_array):
-            """_transform。
-
-            功能:
-                承担当前方法对应的业务逻辑。
-            参数:
-                full_array (Any): 输入参数。
-            返回:
-                None: 方法执行结果。
-            异常:
-                Exception: 依赖组件或输入异常时可能抛出。
-            """
             arr = np.asarray(full_array)
             if arr.ndim == 3:
                 band = min(max(gray_band, 1), arr.shape[2]) - 1
@@ -1266,17 +1000,6 @@ class LocalImageViewerDialog(QDialog):
         return self._hillshade_view_settings(settings)
 
     def _hillshade_view_settings(self, settings: dict) -> dict:
-        """_hillshade_view_settings。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            settings (dict): 输入参数。
-        返回:
-            dict: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         view_settings = dict(settings)
         view_settings["display_mode"] = "灰度"
         return view_settings
@@ -1566,17 +1289,6 @@ class LocalImageViewerDialog(QDialog):
                 pass
 
     def _ensure_chart_hover(self):
-        """_ensure_chart_hover。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not hasattr(self, "_chart_hover_connection"):
             self._chart_hover_connection = self.canvas.mpl_connect('motion_notify_event', self.on_chart_mouse_move)
         self._chart_annotation = None
@@ -1670,18 +1382,6 @@ class LocalImageViewerDialog(QDialog):
         }
     
     def _gaussian_kernel(self, sigma, radius=None):
-        """_gaussian_kernel。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            sigma (Any): 输入参数。
-            radius (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if sigma <= 0:
             return np.array([1.0], dtype=np.float64)
         if radius is None:

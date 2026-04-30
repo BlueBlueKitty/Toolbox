@@ -41,17 +41,6 @@ class UpdateChecker:
     TIMEOUT = 10
     
     def __init__(self):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.current_version = __version__
         self.latest_release_info: Optional[Dict[str, Any]] = None
     

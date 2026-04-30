@@ -26,19 +26,6 @@ BEIJING_LAT = 39.9042
 
 class LocalRasterSourceConfigDialog(QDialog):
     def __init__(self, parent=None, manager: RasterSourceConfigManager | None = None, selected_name: str | None = None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parent (Any): 输入参数。
-            manager (RasterSourceConfigManager | None): 输入参数。
-            selected_name (str | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__(parent)
         self.manager = manager or RasterSourceConfigManager()
         self.selected_name = selected_name
@@ -63,17 +50,6 @@ class LocalRasterSourceConfigDialog(QDialog):
             self.source_list.setCurrentRow(0)
 
     def _create_ui(self):
-        """_create_ui。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         layout = QVBoxLayout(self)
         body = QHBoxLayout()
         layout.addLayout(body)
@@ -227,18 +203,6 @@ class LocalRasterSourceConfigDialog(QDialog):
         self.allow_missing_checkbox.toggled.connect(self._on_form_changed)
 
     def _label_with_tip(self, text: str, tip: str) -> QWidget:
-        """_label_with_tip。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            text (str): 输入参数。
-            tip (str): 输入参数。
-        返回:
-            QWidget: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         widget = QWidget()
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -268,17 +232,6 @@ class LocalRasterSourceConfigDialog(QDialog):
         return widget
 
     def _load_sources(self):
-        """_load_sources。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         current_name = None
         current_item = self.source_list.currentItem()
         if current_item:
@@ -296,17 +249,6 @@ class LocalRasterSourceConfigDialog(QDialog):
             self._select_by_name(current_name)
 
     def _select_by_name(self, name: str):
-        """_select_by_name。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            name (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         for row in range(self.source_list.count()):
             item = self.source_list.item(row)
             if item.data(Qt.UserRole) == name:
@@ -314,18 +256,6 @@ class LocalRasterSourceConfigDialog(QDialog):
                 return
 
     def _on_item_changed(self, current, previous):
-        """_on_item_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            current (Any): 输入参数。
-            previous (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._suspend_item_change:
             return
         if previous and not self._confirm_discard_if_needed():
@@ -350,17 +280,6 @@ class LocalRasterSourceConfigDialog(QDialog):
         self._load_config_to_form(config)
 
     def _load_config_to_form(self, config: LocalRasterSourceConfig):
-        """_load_config_to_form。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            config (LocalRasterSourceConfig): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         needs_repair = False
         if "{lat}" not in config.relative_path_template and "{lon}" not in config.relative_path_template and "{tile}" not in config.relative_path_template:
             needs_repair = True
@@ -407,34 +326,12 @@ class LocalRasterSourceConfigDialog(QDialog):
         self._restoring_state = False
 
     def _apply_builtin_state(self, is_builtin: bool):
-        """_apply_builtin_state。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            is_builtin (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.name_edit.setEnabled(not is_builtin)
         self.path_rule_edit.setReadOnly(is_builtin)
         for widget in self._builtin_rule_widgets:
             widget.setEnabled(not is_builtin)
 
     def _collect_form_config(self) -> LocalRasterSourceConfig:
-        """_collect_form_config。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            LocalRasterSourceConfig: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         builtin = bool(self.current_config.builtin) if self.current_config else False
         return LocalRasterSourceConfig(
             name=self.name_edit.text().strip() or "未命名本地数据源",
@@ -460,97 +357,31 @@ class LocalRasterSourceConfigDialog(QDialog):
         )
 
     def _refresh_preview(self):
-        """_refresh_preview。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         preview = build_rule_preview(self._collect_form_config())
         self.preview_label.setText(preview)
 
     def _on_form_changed(self):
-        """_on_form_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._restoring_state:
             return
         self._dirty = True
         self._refresh_preview()
 
     def _browse_root_dir(self):
-        """_browse_root_dir。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         folder = QFileDialog.getExistingDirectory(self, "选择数据根目录", self.root_dir_edit.text().strip())
         if folder:
             self.root_dir_edit.setText(folder)
 
     def _update_archive_state(self):
-        """_update_archive_state。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         is_archive = self.is_archive_combo.currentText() == "是"
         builtin = bool(self.current_config.builtin) if self.current_config else False
         self.archive_ext_edit.setEnabled(is_archive and not builtin)
         self.zip_strategy_combo.setEnabled(is_archive and not builtin)
 
     def _restore_default_test_point(self):
-        """_restore_default_test_point。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.test_lon_spin.setValue(BEIJING_LON)
         self.test_lat_spin.setValue(BEIJING_LAT)
 
     def _new_source(self):
-        """_new_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         config = LocalRasterSourceConfig(name=self.manager.generate_unique_name("新的本地数据源", local=True), last_test_point=(BEIJING_LAT, BEIJING_LON))
         self.current_original_name = None
         self.current_config = config
@@ -569,17 +400,6 @@ class LocalRasterSourceConfigDialog(QDialog):
         self._dirty = False
 
     def _import_sample(self):
-        """_import_sample。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         sample_path, _ = QFileDialog.getOpenFileName(self, "选择样例栅格文件或压缩包", "", "栅格或压缩包 (*.tif *.tiff *.hgt *.img *.vrt *.zip);;所有文件 (*.*)")
         if not sample_path:
             return
@@ -633,17 +453,6 @@ class LocalRasterSourceConfigDialog(QDialog):
             QMessageBox.warning(self, "识别失败", f"自动识别失败，请手动修正。\n\n原因: {exc}")
 
     def _copy_source(self):
-        """_copy_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         item = self.source_list.currentItem()
         if not item:
             return
@@ -667,17 +476,6 @@ class LocalRasterSourceConfigDialog(QDialog):
         self._dirty = True
 
     def _delete_source(self):
-        """_delete_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         item = self.source_list.currentItem()
         if not item:
             return
@@ -697,17 +495,6 @@ class LocalRasterSourceConfigDialog(QDialog):
             self.source_list.setCurrentRow(0)
 
     def _save_current(self):
-        """_save_current。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         config = self._collect_form_config()
         if not config.name.strip():
             QMessageBox.warning(self, "警告", "请填写配置名称")
@@ -731,17 +518,6 @@ class LocalRasterSourceConfigDialog(QDialog):
         self._dirty = False
 
     def _save_as(self):
-        """_save_as。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         config = self._collect_form_config()
         new_name, ok = QInputDialog.getText(self, "另存为", "请输入新的配置名称", text=f"{config.name} - 副本")
         if not ok or not new_name.strip():
@@ -764,17 +540,6 @@ class LocalRasterSourceConfigDialog(QDialog):
         self._dirty = False
 
     def _test_current_config(self):
-        """_test_current_config。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         config = self._collect_form_config()
         processor = LocalRasterProcessor()
         result = processor.test_config(config, self.test_lat_spin.value(), self.test_lon_spin.value(), processor.get_raster_extent_wgs84)
@@ -790,17 +555,6 @@ class LocalRasterSourceConfigDialog(QDialog):
             self._dirty = False
 
     def _confirm_discard_if_needed(self) -> bool:
-        """_confirm_discard_if_needed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not self._dirty:
             return True
         config_name = self.name_edit.text().strip() or "未命名配置"
@@ -823,17 +577,6 @@ class LocalRasterSourceConfigDialog(QDialog):
         return True
 
     def _discard_unsaved_draft(self, draft_key: str):
-        """_discard_unsaved_draft。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            draft_key (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if draft_key in self._draft_configs:
             del self._draft_configs[draft_key]
         for row in range(self.source_list.count()):
@@ -859,18 +602,6 @@ class LocalRasterSourceConfigDialog(QDialog):
                     self._load_config_to_form(config)
 
     def _save_draft_config(self, draft_key: str, config: LocalRasterSourceConfig):
-        """_save_draft_config。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            draft_key (str): 输入参数。
-            config (LocalRasterSourceConfig): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not config.name.strip():
             config.name = self.manager.generate_unique_name("未命名本地数据源", local=True)
         if self.manager.get_local_source(config.name):
@@ -880,17 +611,6 @@ class LocalRasterSourceConfigDialog(QDialog):
             del self._draft_configs[draft_key]
 
     def closeEvent(self, event):
-        """closeEvent。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         current_is_draft = self.current_original_name is None and self._current_draft_key is not None
         if not current_is_draft:
             if not self._confirm_discard_if_needed():

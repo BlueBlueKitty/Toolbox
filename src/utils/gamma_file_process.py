@@ -102,7 +102,6 @@ def freadbkB(
 	read_all = r0 == 1 and rN == lines and c0 == 1 and cN == width
 
 	def _read_chunk(fh, start: int, count: int) -> np.ndarray:
-		"""从二进制文件中读取指定偏移和长度的数据块。"""
 		fh.seek(start, os.SEEK_SET)
 		return np.fromfile(fh, dtype=dtype, count=count)
 

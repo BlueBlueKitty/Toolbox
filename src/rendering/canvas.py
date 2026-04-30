@@ -36,17 +36,6 @@ class LayeredRasterCanvas(QWidget):
     SYNC_POINTER_Z_VALUE = 30_000
 
     def __init__(self, parent=None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parent (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -134,19 +123,6 @@ class LayeredRasterCanvas(QWidget):
         self._apply_background_from_palette()
 
     def set_raster_array(self, image_array, original_size=None, refresh: bool = True):
-        """set_raster_array。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            image_array (Any): 输入参数。
-            original_size (Any): 输入参数。
-            refresh (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.source = None
         self.last_render = None
         self._dynamic_source = False
@@ -163,20 +139,6 @@ class LayeredRasterCanvas(QWidget):
             self._update_display()
 
     def set_raster_source(self, source, reset_view: bool = True, refresh: bool = True, nodata_value=_UNSET):
-        """set_raster_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            source (Any): 输入参数。
-            reset_view (bool): 输入参数。
-            refresh (bool): 输入参数。
-            nodata_value (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.source = source
         self.last_render = None
         self.image_array = None
@@ -223,18 +185,6 @@ class LayeredRasterCanvas(QWidget):
             self.refresh_view()
 
     def set_scene_mapping(self, scene_world_rect=None, image_world_rect=None):
-        """set_scene_mapping。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            scene_world_rect (Any): 输入参数。
-            image_world_rect (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.scene_world_rect = scene_world_rect
         self.image_world_rect = image_world_rect
         if self.source is not None:
@@ -260,17 +210,6 @@ class LayeredRasterCanvas(QWidget):
             self._update_image_rect()
 
     def capture_view_state(self):
-        """capture_view_state。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         ((x0, x1), (y0, y1)) = self.view_box.viewRange()
         return {
             "x_range": (float(x0), float(x1)),
@@ -280,17 +219,6 @@ class LayeredRasterCanvas(QWidget):
         }
 
     def restore_view_state(self, state):
-        """restore_view_state。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            state (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not state:
             return False
         sync_refresh_delay_ms = None
@@ -331,17 +259,6 @@ class LayeredRasterCanvas(QWidget):
         return True
 
     def fit_in_view(self, delayed=False):
-        """fit_in_view。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            delayed (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if delayed:
             QTimer.singleShot(100, lambda: self.fit_in_view(delayed=False))
             return
@@ -355,17 +272,6 @@ class LayeredRasterCanvas(QWidget):
         self._update_zoom_limits()
 
     def set_one_to_one(self) -> None:
-        """set_one_to_one。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self.current_view_state()
         cx, cy = state.center_x, state.center_y
         rect = self.graphics.viewport().rect()
@@ -377,83 +283,28 @@ class LayeredRasterCanvas(QWidget):
         self.refresh_view()
 
     def zoom_in(self):
-        """zoom_in。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.current_zoom * self.zoom_factor <= self.max_zoom:
             self.view_box.scaleBy((1.0 / self.zoom_factor, 1.0 / self.zoom_factor))
             self.current_zoom *= self.zoom_factor
 
     def zoom_out(self):
-        """zoom_out。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.current_zoom / self.zoom_factor >= self.min_zoom:
             self.view_box.scaleBy((self.zoom_factor, self.zoom_factor))
             self.current_zoom /= self.zoom_factor
 
     def set_colormap(self, colormap_name):
-        """set_colormap。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            colormap_name (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.current_colormap = colormap_name
         self.render_config.colormap_name = colormap_name
         self._sync_base_layer_from_config()
         self._update_display() if self.source is None else self.refresh_view()
 
     def set_colormap_reversed(self, reversed):
-        """set_colormap_reversed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            reversed (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.colormap_reversed = reversed
         self.render_config.colormap_reversed = reversed
         self._sync_base_layer_from_config()
         self._update_display() if self.source is None else self.refresh_view()
 
     def set_render_config(self, render_config) -> None:
-        """set_render_config。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            render_config (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.render_config = render_config
         self.current_colormap = render_config.colormap_name
         self.colormap_reversed = render_config.colormap_reversed
@@ -462,17 +313,6 @@ class LayeredRasterCanvas(QWidget):
         self.refresh_view() if self.source is not None else self._update_display()
 
     def set_render_settings(self, settings):
-        """set_render_settings。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            settings (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not isValid(self):
             return
         self.render_settings = settings
@@ -493,17 +333,6 @@ class LayeredRasterCanvas(QWidget):
         self._sync_base_layer_from_config()
 
     def set_nodata_value(self, nodata_value):
-        """set_nodata_value。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            nodata_value (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.nodata_value = nodata_value
         self._sync_base_layer_nodata(nodata_value)
         self.refresh_view() if self.source is not None else self._update_display()
@@ -532,110 +361,30 @@ class LayeredRasterCanvas(QWidget):
         self._clear_synced_pointer()
 
     def set_geotransform(self, geotransform, projection=None):
-        """set_geotransform。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            geotransform (Any): 输入参数。
-            projection (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.geotransform = geotransform
         self.projection = projection
 
     def set_selected_pixel(self, x, y):
-        """set_selected_pixel。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            x (Any): 输入参数。
-            y (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.selected_pixel = (int(x), int(y))
         self._rebuild_selected_pixel_marker()
 
     def clear_selected_pixel(self):
-        """clear_selected_pixel。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.selected_pixel = None
         self._clear_selected_pixel_marker()
 
     def sync_transform(self, transform):
-        """sync_transform。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            transform (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.restore_view_state(transform)
 
     def sync_cursor(self, cursor):
-        """sync_cursor。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            cursor (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.is_syncing = True
         self.graphics.viewport().setCursor(cursor)
         self.is_syncing = False
 
     def sync_scroll(self, h_value, v_value):
-        """sync_scroll。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            h_value (Any): 输入参数。
-            v_value (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if isinstance(h_value, dict):
             self.sync_transform(h_value)
 
     def get_image_size(self):
-        """get_image_size。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.original_width > 0 and self.original_height > 0:
             return self.original_height, self.original_width
         if self.image_array is not None:
@@ -643,18 +392,6 @@ class LayeredRasterCanvas(QWidget):
         return None
 
     def get_pixel_value(self, x, y):
-        """get_pixel_value。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            x (Any): 输入参数。
-            y (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.source is not None:
             return self.source.read_pixel(int(x), int(y))
         if self.image_array is None:
@@ -666,20 +403,6 @@ class LayeredRasterCanvas(QWidget):
         return None
 
     def read_window_native(self, x: int, y: int, width: int, height: int):
-        """read_window_native。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            x (int): 输入参数。
-            y (int): 输入参数。
-            width (int): 输入参数。
-            height (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.source is not None:
             return self.source.read_window_native(x, y, width, height)
         if self.image_array is None:
@@ -687,77 +410,18 @@ class LayeredRasterCanvas(QWidget):
         return self.image_array[y:y + height, x:x + width]
 
     def set_layer_visible(self, layer_id: str, visible: bool) -> None:
-        """set_layer_visible。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            visible (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.layer_manager.set_visible(layer_id, visible)
 
     def set_layer_opacity(self, layer_id: str, opacity: float) -> None:
-        """set_layer_opacity。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            opacity (float): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.layer_manager.set_opacity(layer_id, opacity)
 
     def move_layer(self, layer_id: str, index: int) -> None:
-        """move_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            index (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.layer_manager.move_layer(layer_id, index)
 
     def set_layer_blend_mode(self, layer_id: str, blend_mode: str) -> None:
-        """set_layer_blend_mode。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            blend_mode (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.layer_manager.set_blend_mode(layer_id, blend_mode)
 
     def remove_layer(self, layer_id: str) -> None:
-        """remove_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self.layer_manager.remove_layer(layer_id)
         self.clear_overlay_layer(layer_id)
         if state is None:
@@ -774,21 +438,6 @@ class LayeredRasterCanvas(QWidget):
             pass
 
     def set_raster_overlay(self, layer_id: str, rgba_array, bbox=None, name: str | None = None, opacity: float = 1.0):
-        """set_raster_overlay。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            rgba_array (Any): 输入参数。
-            bbox (Any): 输入参数。
-            name (str | None): 输入参数。
-            opacity (float): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         item = self._single_image_layer(layer_id, name or layer_id, opacity)
         if rgba_array is None:
             item.clear()
@@ -809,23 +458,6 @@ class LayeredRasterCanvas(QWidget):
         active_vertex=None,
         name: str | None = None,
     ) -> None:
-        """set_vector_overlay。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            features (Any): 输入参数。
-            style (Any): 输入参数。
-            selected_ids (set[str] | None): 输入参数。
-            editable_feature_id (str | None): 输入参数。
-            active_vertex (Any): 输入参数。
-            name (str | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.clear_overlay_layer(layer_id)
         state = self.layer_manager.layer(layer_id)
         if state is None:
@@ -849,17 +481,6 @@ class LayeredRasterCanvas(QWidget):
         self._sync_overlay_items(layer_id)
 
     def clear_overlay_layer(self, layer_id: str) -> None:
-        """clear_overlay_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         for item in self._overlay_items_by_layer.pop(layer_id, []):
             try:
                 if hasattr(item, "scene") and item.scene() is not None:
@@ -870,48 +491,14 @@ class LayeredRasterCanvas(QWidget):
                 pass
 
     def image_pos_from_event(self, event):
-        """image_pos_from_event。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         scene_pos = self.graphics.mapToScene(event.position().toPoint())
         view_pos = self.view_box.mapSceneToView(scene_pos)
         return self._view_to_image_pos(view_pos)
 
     def image_contains_pos(self, point: QPointF) -> bool:
-        """image_contains_pos。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            point (QPointF): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return 0 <= point.x() < self.original_width and 0 <= point.y() < self.original_height
 
     def eventFilter(self, obj, event):
-        """eventFilter。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            obj (Any): 输入参数。
-            event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if obj is self.graphics or obj is self.graphics.viewport():
             if event.type() == QEvent.DragEnter:
                 if self._accept_drag_event(event):
@@ -939,50 +526,15 @@ class LayeredRasterCanvas(QWidget):
         return super().eventFilter(obj, event)
 
     def changeEvent(self, event):
-        """changeEvent。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
             self._apply_background_from_palette()
         super().changeEvent(event)
 
     def _apply_background_from_palette(self) -> None:
-        """_apply_background_from_palette。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         color = self._resolved_background_color()
         self.graphics.setBackground(color)
 
     def _resolved_background_color(self) -> QColor:
-        """_resolved_background_color。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            QColor: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        复杂度:
-            时间和空间复杂度与输入规模线性或近线性相关。
-        """
         if self._background_color_override is not None:
             return QColor(self._background_color_override)
         window_color = self.palette().color(self.backgroundRole())
@@ -990,32 +542,10 @@ class LayeredRasterCanvas(QWidget):
         return QColor("#000000" if is_dark else "#ffffff")
 
     def set_background_color(self, rgba: tuple[int, int, int, int] | None) -> None:
-        """set_background_color。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            rgba (tuple[int, int, int, int] | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._background_color_override = None if rgba is None else QColor(*rgba[:4])
         self._apply_background_from_palette()
 
     def _accept_drag_event(self, event) -> bool:
-        """_accept_drag_event。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         mime = event.mimeData()
         if mime is None or not mime.hasUrls():
             return False
@@ -1026,17 +556,6 @@ class LayeredRasterCanvas(QWidget):
         return True
 
     def _handle_drop_event(self, event) -> bool:
-        """_handle_drop_event。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         mime = event.mimeData()
         if mime is None or not mime.hasUrls():
             return False
@@ -1048,17 +567,6 @@ class LayeredRasterCanvas(QWidget):
         return True
 
     def wheelEvent(self, event):
-        """wheelEvent。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         scene_pos = self.graphics.mapToScene(event.position().toPoint())
         anchor = self.view_box.mapSceneToView(scene_pos)
         ((x0, x1), (y0, y1)) = self.view_box.viewRange()
@@ -1096,17 +604,6 @@ class LayeredRasterCanvas(QWidget):
             self._zoom_settle_timer.start()
 
     def refresh_view(self):
-        """refresh_view。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.source is None or not isValid(self):
             self._is_refresh_zooming = False
             return
@@ -1177,17 +674,6 @@ class LayeredRasterCanvas(QWidget):
 
     def _request_signature(self, request: RenderRequest) -> tuple:
         # 不再用 int 截断请求范围，避免亚像素缩放被错误去重导致“暂停时跳变”。
-        """_request_signature。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            request (RenderRequest): 输入参数。
-        返回:
-            tuple: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return (
             round(float(request.x), 4),
             round(float(request.y), 4),
@@ -1201,17 +687,6 @@ class LayeredRasterCanvas(QWidget):
         )
 
     def current_render_request(self) -> RenderRequest:
-        """current_render_request。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            RenderRequest: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not all(
             isValid(obj) for obj in (self, self.graphics, self.view_box)
         ):
@@ -1289,34 +764,12 @@ class LayeredRasterCanvas(QWidget):
         )
 
     def _on_zoom_settled(self) -> None:
-        """_on_zoom_settled。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._is_refresh_zooming = False
         if self.source is not None:
             self._refresh_timer.stop()
             self.refresh_view()
 
     def current_view_state(self) -> ViewportState:
-        """current_view_state。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            ViewportState: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         ((x0, x1), (y0, y1)) = self.view_box.viewRange()
         view_rect = self.graphics.viewport().rect()
         return ViewportState(
@@ -1329,19 +782,6 @@ class LayeredRasterCanvas(QWidget):
         )
 
     def _single_image_layer(self, layer_id: str, name: str, opacity: float):
-        """_single_image_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            name (str): 输入参数。
-            opacity (float): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self.layer_manager.layer(layer_id)
         if state is not None and state.item is not None:
             return state.item
@@ -1354,17 +794,6 @@ class LayeredRasterCanvas(QWidget):
         return item
 
     def _sync_overlay_items(self, layer_id: str) -> None:
-        """_sync_overlay_items。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self.layer_manager.layer(layer_id)
         if state is None:
             return
@@ -1377,17 +806,6 @@ class LayeredRasterCanvas(QWidget):
                 item.setZValue(state.z_order)
 
     def _handle_mouse_press(self, event) -> bool:
-        """_handle_mouse_press。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if event.button() == Qt.LeftButton:
             self.canvas_left_clicked.emit()
         if event.button() == Qt.LeftButton and (self.image_array is not None or self.source is not None):
@@ -1413,17 +831,6 @@ class LayeredRasterCanvas(QWidget):
         return False
 
     def _handle_mouse_move(self, event) -> bool:
-        """_handle_mouse_move。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.is_panning and self.pan_start_pos is not None:
             current_pos = QPointF(event.position())
             start_range = self._pan_start_view_range or self.view_box.viewRange()
@@ -1461,17 +868,6 @@ class LayeredRasterCanvas(QWidget):
         return False
 
     def _handle_mouse_release(self, event) -> bool:
-        """_handle_mouse_release。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if event.button() == Qt.MiddleButton:
             self.is_panning = False
             was_refresh_panning = self._is_refresh_panning
@@ -1488,18 +884,6 @@ class LayeredRasterCanvas(QWidget):
         return False
 
     def _stabilized_pan_delta(self, dx: float, dy: float) -> tuple[float, float]:
-        """_stabilized_pan_delta。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            dx (float): 输入参数。
-            dy (float): 输入参数。
-        返回:
-            tuple[float, float]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         abs_dx = abs(dx)
         abs_dy = abs(dy)
         if (
@@ -1515,34 +899,9 @@ class LayeredRasterCanvas(QWidget):
         return float(round(dx)), float(round(dy))
 
     def _emit_mouse_moved(self, x: int, y: int, value, _event=None) -> None:
-        """_emit_mouse_moved。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            x (int): 输入参数。
-            y (int): 输入参数。
-            value (Any): 输入参数。
-            _event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.mouse_moved.emit(x, y, value)
 
     def _update_display(self):
-        """_update_display。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.image_array is None:
             return
         display = self._render_display_array(self.image_array)
@@ -1555,17 +914,6 @@ class LayeredRasterCanvas(QWidget):
         self._rebuild_selected_pixel_marker()
 
     def _render_display_array(self, image_array):
-        """_render_display_array。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            image_array (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.render_settings is None and image_array.ndim == 3 and image_array.shape[2] == 3:
             if image_array.dtype == np.uint8:
                 return image_array
@@ -1588,18 +936,6 @@ class LayeredRasterCanvas(QWidget):
         )
 
     def _window_geotransform(self, x0: float, y0: float):
-        """_window_geotransform。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            x0 (float): 输入参数。
-            y0 (float): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         gt = self.geotransform
         if gt is None:
             return None
@@ -1613,17 +949,6 @@ class LayeredRasterCanvas(QWidget):
         )
 
     def _render_config_from_state(self):
-        """_render_config_from_state。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         config = replace(self.render_config) if self.render_config is not None else default_raster_render_config()
         if self.render_settings:
             settings = dict(self.render_settings)
@@ -1650,18 +975,6 @@ class LayeredRasterCanvas(QWidget):
         return config
 
     def _sync_base_layer_from_source(self, source, metadata) -> None:
-        """_sync_base_layer_from_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            source (Any): 输入参数。
-            metadata (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         current_config = self._render_config_from_state()
         auto_style = DefaultRenderStyleFactory.create(metadata)
         if current_config is None:
@@ -1696,17 +1009,6 @@ class LayeredRasterCanvas(QWidget):
         self.layer_manager.set_active_layer(self.BASE_LAYER_ID)
 
     def _sync_base_layer_from_array(self, image_array) -> None:
-        """_sync_base_layer_from_array。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            image_array (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         metadata = self._memory_metadata_for_array(image_array)
         current_style = legacy_config_to_style(self._render_config_from_state(), metadata)
         auto_style = DefaultRenderStyleFactory.create(metadata)
@@ -1727,17 +1029,6 @@ class LayeredRasterCanvas(QWidget):
         self.layer_manager.set_active_layer(self.BASE_LAYER_ID)
 
     def _sync_base_layer_from_config(self) -> None:
-        """_sync_base_layer_from_config。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self.layer_manager.layer(self.BASE_LAYER_ID)
         if state is None or state.layer is None:
             return
@@ -1746,19 +1037,6 @@ class LayeredRasterCanvas(QWidget):
         self.layer_manager.layer_style_changed.emit(self.BASE_LAYER_ID)
 
     def _should_prefer_auto_style(self, current_style, auto_style, metadata) -> bool:
-        """_should_prefer_auto_style。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            current_style (Any): 输入参数。
-            auto_style (Any): 输入参数。
-            metadata (Any): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         current_renderer = getattr(current_style, "renderer_type", "")
         auto_renderer = getattr(auto_style, "renderer_type", "")
         if auto_renderer == current_renderer:
@@ -1775,17 +1053,6 @@ class LayeredRasterCanvas(QWidget):
         return False
 
     def _sync_base_layer_nodata(self, nodata_value) -> None:
-        """_sync_base_layer_nodata。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            nodata_value (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self.layer_manager.layer(self.BASE_LAYER_ID)
         if state is None or state.layer is None:
             return
@@ -1802,18 +1069,6 @@ class LayeredRasterCanvas(QWidget):
         self.layer_manager.set_display_settings(self.BASE_LAYER_ID, display_settings)
 
     def _nodata_values_equal(self, left, right) -> bool:
-        """_nodata_values_equal。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            left (Any): 输入参数。
-            right (Any): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if left is right:
             return True
         if left is None or right is None:
@@ -1826,17 +1081,6 @@ class LayeredRasterCanvas(QWidget):
         return left == right
 
     def _memory_metadata_for_array(self, image_array):
-        """_memory_metadata_for_array。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            image_array (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         from .models import ImageSourceMetadata
 
         return ImageSourceMetadata(
@@ -1856,34 +1100,12 @@ class LayeredRasterCanvas(QWidget):
         )
 
     def _base_layer_revision(self) -> int:
-        """_base_layer_revision。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            int: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self.layer_manager.layer(self.BASE_LAYER_ID)
         if state is None or state.layer is None:
             return 0
         return int(state.layer.revision)
 
     def _on_base_layer_style_changed(self, layer_id: str) -> None:
-        """_on_base_layer_style_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if layer_id != self.BASE_LAYER_ID:
             return
         state = self.layer_manager.layer(layer_id)
@@ -1899,17 +1121,6 @@ class LayeredRasterCanvas(QWidget):
             self._update_display()
 
     def _on_base_layer_display_changed(self, layer_id: str) -> None:
-        """_on_base_layer_display_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if layer_id != self.BASE_LAYER_ID:
             return
         state = self.layer_manager.layer(layer_id)
@@ -1924,17 +1135,6 @@ class LayeredRasterCanvas(QWidget):
             self._update_display()
 
     def _render_config_signature(self):
-        """_render_config_signature。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         config = self._render_config_from_state()
         return (
             config.display_mode,
@@ -1951,30 +1151,8 @@ class LayeredRasterCanvas(QWidget):
         )
 
     def _create_alpha_channel(self, image_array):
-        """_create_alpha_channel。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            image_array (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         arr = image_array
         def _invalid(data):
-            """_invalid。
-
-            功能:
-                承担当前方法对应的业务逻辑。
-            参数:
-                data (Any): 输入参数。
-            返回:
-                None: 方法执行结果。
-            异常:
-                Exception: 依赖组件或输入异常时可能抛出。
-            """
             mask = ~np.isfinite(data)
             if self.nodata_value is not None:
                 try:
@@ -1999,17 +1177,6 @@ class LayeredRasterCanvas(QWidget):
         return alpha
 
     def _update_image_rect(self):
-        """_update_image_rect。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.image_array is None:
             return
         if self.image_world_rect is not None:
@@ -2035,34 +1202,12 @@ class LayeredRasterCanvas(QWidget):
         self._update_zoom_limits()
 
     def _current_scene_rect(self) -> QRectF:
-        """_current_scene_rect。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            QRectF: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.scene_world_rect is not None:
             x, y, width, height = self.scene_world_rect
             return QRectF(x, y, width, height)
         return QRectF(self._image_rect)
 
     def _min_scene_ranges(self) -> tuple[float, float]:
-        """_min_scene_ranges。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            tuple[float, float]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         width_ref = float(self.original_width or (self.image_array.shape[1] if self.image_array is not None else 1))
         height_ref = float(self.original_height or (self.image_array.shape[0] if self.image_array is not None else 1))
         if self._image_rect.isNull():
@@ -2072,17 +1217,6 @@ class LayeredRasterCanvas(QWidget):
         return max(pixel_w, 1e-9), max(pixel_h, 1e-9)
 
     def _update_zoom_limits(self) -> None:
-        """_update_zoom_limits。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         scene_rect = self._current_scene_rect()
         if scene_rect.isNull():
             self.max_zoom = 1000.0
@@ -2096,17 +1230,6 @@ class LayeredRasterCanvas(QWidget):
         self.max_zoom = max(1000.0, float(needed_zoom) * 4.0)
 
     def _view_to_image_pos(self, view_pos: QPointF):
-        """_view_to_image_pos。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            view_pos (QPointF): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._coordinates_are_image_space:
             if self.image_world_rect is None:
                 return QPointF(view_pos.x(), view_pos.y())
@@ -2120,18 +1243,6 @@ class LayeredRasterCanvas(QWidget):
         return QPointF(x, y)
 
     def image_to_view_point(self, x: float, y: float) -> QPointF:
-        """image_to_view_point。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            x (float): 输入参数。
-            y (float): 输入参数。
-        返回:
-            QPointF: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._coordinates_are_image_space:
             if self.image_world_rect is None:
                 return QPointF(x, y)
@@ -2145,67 +1256,21 @@ class LayeredRasterCanvas(QWidget):
         return QPointF(vx, vy)
 
     def sync_pointer_coordinates(self, x: float, y: float) -> tuple[float, float] | None:
-        """sync_pointer_coordinates。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            x (float): 输入参数。
-            y (float): 输入参数。
-        返回:
-            tuple[float, float] | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         point = self.image_to_view_point(float(x) + 0.5, float(y) + 0.5)
         return float(point.x()), float(point.y())
 
     def image_coordinates_from_sync_point(self, sync_x: float, sync_y: float) -> tuple[int, int] | None:
-        """image_coordinates_from_sync_point。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            sync_x (float): 输入参数。
-            sync_y (float): 输入参数。
-        返回:
-            tuple[int, int] | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         pos = self._view_to_image_pos(QPointF(float(sync_x), float(sync_y)))
         if pos is None or not self.image_contains_pos(pos):
             return None
         return int(pos.x()), int(pos.y())
 
     def _clear_selected_pixel_marker(self):
-        """_clear_selected_pixel_marker。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         for item in self._selected_pixel_items:
             self.view_box.removeItem(item)
         self._selected_pixel_items = []
 
     def _rebuild_selected_pixel_marker(self):
-        """_rebuild_selected_pixel_marker。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._clear_selected_pixel_marker()
         if self.selected_pixel is None or (self.image_array is None and self.source is None):
             return
@@ -2239,35 +1304,11 @@ class LayeredRasterCanvas(QWidget):
         self._selected_pixel_items.append(circle)
 
     def _emit_view_changed(self):
-        """_emit_view_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.is_syncing or self._suspend_range_signal:
             return
         self.view_transformed.emit(self.capture_view_state())
 
     def update_synced_pointer(self, x: float | None, y: float | None, visible: bool = True) -> None:
-        """update_synced_pointer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            x (float | None): 输入参数。
-            y (float | None): 输入参数。
-            visible (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not visible or x is None or y is None:
             self._clear_synced_pointer()
             return
@@ -2302,17 +1343,6 @@ class LayeredRasterCanvas(QWidget):
             item.setVisible(True)
 
     def _clear_synced_pointer(self) -> None:
-        """_clear_synced_pointer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         for item in self._synced_pointer_items:
             try:
                 self.view_box.removeItem(item)
@@ -2321,17 +1351,6 @@ class LayeredRasterCanvas(QWidget):
         self._synced_pointer_items = []
 
     def _on_range_changed(self, *_args):
-        """_on_range_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            *_args (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._update_current_zoom_from_view_range()
         if self._suspend_range_signal:
             return
@@ -2347,17 +1366,6 @@ class LayeredRasterCanvas(QWidget):
         self._emit_view_changed()
 
     def _update_current_zoom_from_view_range(self) -> None:
-        """_update_current_zoom_from_view_range。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.original_width <= 0 or self.original_height <= 0:
             self.current_zoom = 1.0
             return
@@ -2388,84 +1396,28 @@ class LayeredRasterCanvas(QWidget):
 
 class RasterCanvasSynchronizer:
     def __init__(self, viewers):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            viewers (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.viewers = viewers
         self._connect_signals()
 
     def _connect_signals(self):
-        """_connect_signals。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         for viewer in self.viewers:
             viewer.view_transformed.connect(self._on_view_transformed)
             viewer.cursor_changed.connect(self._on_cursor_changed)
             viewer.scroll_changed.connect(self._on_scroll_changed)
 
     def _on_view_transformed(self, transform):
-        """_on_view_transformed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            transform (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         sender = self.sender()
         for viewer in self.viewers:
             if viewer != sender:
                 viewer.sync_transform(transform)
 
     def _on_cursor_changed(self, cursor):
-        """_on_cursor_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            cursor (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         sender = self.sender()
         for viewer in self.viewers:
             if viewer != sender:
                 viewer.sync_cursor(cursor)
 
     def _on_scroll_changed(self, h_value, v_value):
-        """_on_scroll_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            h_value (Any): 输入参数。
-            v_value (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         sender = self.sender()
         for viewer in self.viewers:
             if viewer != sender:

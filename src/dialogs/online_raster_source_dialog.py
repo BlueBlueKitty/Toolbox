@@ -19,33 +19,11 @@ class OnlineSourceApiTestWorker(QThread):
     test_completed = Signal(bool, str)
 
     def __init__(self, api_key: str):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            api_key (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__()
         self.api_key = api_key
         self.is_running = True
 
     def run(self):
-        """run。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         try:
             client = OpenTopographyClient(self.api_key)
             ok = client.validate_api_key(
@@ -57,35 +35,11 @@ class OnlineSourceApiTestWorker(QThread):
             self.test_completed.emit(False, f"测试失败：{exc}")
 
     def stop(self):
-        """stop。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.is_running = False
 
 
 class OnlineRasterSourceConfigDialog(QDialog):
     def __init__(self, parent=None, manager: RasterSourceConfigManager | None = None, selected_name: str | None = None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parent (Any): 输入参数。
-            manager (RasterSourceConfigManager | None): 输入参数。
-            selected_name (str | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__(parent)
         self.manager = manager or RasterSourceConfigManager()
         self.selected_name = selected_name
@@ -106,17 +60,6 @@ class OnlineRasterSourceConfigDialog(QDialog):
             self.source_list.setCurrentRow(0)
 
     def _create_ui(self):
-        """_create_ui。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         layout = QVBoxLayout(self)
         body = QHBoxLayout()
         layout.addLayout(body)
@@ -197,17 +140,6 @@ class OnlineRasterSourceConfigDialog(QDialog):
         self.description_edit.textChanged.connect(self._mark_dirty)
 
     def _load_sources(self):
-        """_load_sources。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.source_list.clear()
         for source in self.manager.get_online_sources():
             item = QListWidgetItem(f"{source.name} [内置]" if source.builtin else source.name)
@@ -215,17 +147,6 @@ class OnlineRasterSourceConfigDialog(QDialog):
             self.source_list.addItem(item)
 
     def _select_by_name(self, name: str):
-        """_select_by_name。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            name (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         for row in range(self.source_list.count()):
             item = self.source_list.item(row)
             if item.data(Qt.UserRole) == name:
@@ -233,18 +154,6 @@ class OnlineRasterSourceConfigDialog(QDialog):
                 break
 
     def _on_item_changed(self, current, previous):
-        """_on_item_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            current (Any): 输入参数。
-            previous (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if previous and not self._confirm_discard_if_needed():
             self.source_list.blockSignals(True)
             self.source_list.setCurrentItem(previous)
@@ -271,17 +180,6 @@ class OnlineRasterSourceConfigDialog(QDialog):
         self._dirty = False
 
     def _collect_config(self) -> OnlineRasterSourceConfig:
-        """_collect_config。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            OnlineRasterSourceConfig: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         builtin = bool(self.current_config.builtin) if self.current_config else False
         product = self.default_product_combo.currentData()
         if product is None:
@@ -296,17 +194,6 @@ class OnlineRasterSourceConfigDialog(QDialog):
         )
 
     def _copy_source(self):
-        """_copy_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         item = self.source_list.currentItem()
         if not item:
             return
@@ -329,17 +216,6 @@ class OnlineRasterSourceConfigDialog(QDialog):
         self._dirty = True
 
     def _new_source(self):
-        """_new_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         config = OnlineRasterSourceConfig(name=self.manager.generate_unique_name("新的在线数据源", local=False), builtin=False)
         self.current_original_name = None
         self.current_config = config
@@ -358,17 +234,6 @@ class OnlineRasterSourceConfigDialog(QDialog):
         self._dirty = True
 
     def _delete_source(self):
-        """_delete_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         item = self.source_list.currentItem()
         if not item:
             return
@@ -385,17 +250,6 @@ class OnlineRasterSourceConfigDialog(QDialog):
             self.source_list.setCurrentRow(0)
 
     def _save_current(self):
-        """_save_current。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         config = self._collect_config()
         self.manager.save_online_source(config, original_name=self.current_original_name)
         self.current_original_name = config.name
@@ -407,17 +261,6 @@ class OnlineRasterSourceConfigDialog(QDialog):
         self._dirty = False
 
     def _save_as(self):
-        """_save_as。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         config = self._collect_config()
         new_name, ok = QInputDialog.getText(self, "另存为", "请输入新的配置名称", text=f"{config.name} - 副本")
         if not ok or not new_name.strip():
@@ -434,17 +277,6 @@ class OnlineRasterSourceConfigDialog(QDialog):
         self._dirty = False
 
     def _test_current(self):
-        """_test_current。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         config = self._collect_config()
         if config.platform_type != "OpenTopography":
             self.test_result_edit.setPlainText("暂不支持该平台测试。")
@@ -470,35 +302,11 @@ class OnlineRasterSourceConfigDialog(QDialog):
         self.test_result_edit.setPlainText("正在测试，请稍候...")
 
     def _on_test_progress(self, progress: int, message: str):
-        """_on_test_progress。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            progress (int): 输入参数。
-            message (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._test_progress_dialog:
             self._test_progress_dialog.setLabelText(message)
             self._test_progress_dialog.setValue(max(0, min(progress, 100)))
 
     def _on_test_completed(self, ok: bool, message: str):
-        """_on_test_completed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            ok (bool): 输入参数。
-            message (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._test_progress_dialog:
             self._test_progress_dialog.setValue(100)
             self._test_progress_dialog.close()
@@ -507,31 +315,9 @@ class OnlineRasterSourceConfigDialog(QDialog):
         self.test_result_edit.setPlainText(message)
 
     def _mark_dirty(self):
-        """_mark_dirty。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._dirty = True
 
     def _confirm_discard_if_needed(self) -> bool:
-        """_confirm_discard_if_needed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not self._dirty:
             return True
         reply = QMessageBox.question(
@@ -548,17 +334,6 @@ class OnlineRasterSourceConfigDialog(QDialog):
         return True
 
     def closeEvent(self, event):
-        """closeEvent。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._test_worker and self._test_worker.isRunning():
             self._test_worker.stop()
         if not self._confirm_discard_if_needed():

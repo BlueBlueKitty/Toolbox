@@ -18,20 +18,6 @@ def export_mask_file(
     binary_label_id: int | None = None,
     colored: bool = False,
 ) -> None:
-    """export_mask_file。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        project (SegmentationProject): 输入参数。
-        output_path (str): 输入参数。
-        binary_label_id (int | None): 输入参数。
-        colored (bool): 输入参数。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     if project.image_asset is None:
         raise ValueError("缺少图像元信息，无法导出掩膜")
     width = project.image_asset.width
@@ -81,18 +67,6 @@ def export_mask_file(
 
 
 def _colorize_mask_rgb(mask: np.ndarray, project: SegmentationProject) -> np.ndarray:
-    """_colorize_mask_rgb。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        mask (np.ndarray): 输入参数。
-        project (SegmentationProject): 输入参数。
-    返回:
-        np.ndarray: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     rgb_mask = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
     for label in project.labels:
         color = label.color.lstrip("#")

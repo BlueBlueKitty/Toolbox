@@ -280,18 +280,6 @@ class OpenTopographyClient:
         通过发送一个小范围请求来测试
         """
         def _emit(percent: int, message: str):
-            """_emit。
-
-            功能:
-                承担当前方法对应的业务逻辑。
-            参数:
-                percent (int): 输入参数。
-                message (str): 输入参数。
-            返回:
-                None: 方法执行结果。
-            异常:
-                Exception: 依赖组件或输入异常时可能抛出。
-            """
             if progress_callback:
                 progress_callback(percent, message)
 

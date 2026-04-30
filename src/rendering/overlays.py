@@ -13,34 +13,10 @@ import pyqtgraph as pg
 
 
 def build_polygon_path(feature) -> QPainterPath:
-    """build_polygon_path。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        feature (Any): 输入参数。
-    返回:
-        QPainterPath: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    复杂度:
-        时间和空间复杂度与输入规模线性或近线性相关。
-    """
     path = QPainterPath()
     path.setFillRule(pg.QtCore.Qt.OddEvenFill)
 
     def add_ring(points) -> None:
-        """add_ring。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            points (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not points:
             return
         path.moveTo(points[0][0], points[0][1])
@@ -63,21 +39,6 @@ class PolygonOverlayItem:
         editable: bool = False,
         active_vertex=None,
     ):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            feature (Any): 输入参数。
-            color (str): 输入参数。
-            selected (bool): 输入参数。
-            editable (bool): 输入参数。
-            active_vertex (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.feature = feature
         self.path_item = QGraphicsPathItem()
         self.scatter = pg.ScatterPlotItem()
@@ -87,18 +48,6 @@ class PolygonOverlayItem:
         self.update_geometry(feature, active_vertex)
 
     def update_style(self, selected: bool, editable: bool = False) -> None:
-        """update_style。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            selected (bool): 输入参数。
-            editable (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         style = self._style if isinstance(self._style, dict) else {"color": str(self._style)}
         color = QColor(style.get("color", "#22c55e"))
         fill = QColor(color)
@@ -117,18 +66,6 @@ class PolygonOverlayItem:
         self._editable = editable
 
     def update_geometry(self, feature, active_vertex=None) -> None:
-        """update_geometry。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            feature (Any): 输入参数。
-            active_vertex (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.path_item.setPath(build_polygon_path(feature))
         if not self._editable:
             self.scatter.setData(pos=np.empty((0, 2)))
@@ -161,33 +98,9 @@ class PolygonOverlayItem:
 
 class PreviewMaskItem(pg.ImageItem):
     def __init__(self):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__(axisOrder="row-major")
 
     def update_mask(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None, color_name: str = "#ffd43b") -> None:
-        """update_mask。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            mask (np.ndarray | None): 输入参数。
-            bbox (tuple[int, int, int, int] | None): 输入参数。
-            color_name (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if mask is None or bbox is None:
             self.clear()
             return
@@ -201,35 +114,12 @@ class PreviewMaskItem(pg.ImageItem):
 
 class DraftOverlayItem:
     def __init__(self):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.path_item = QGraphicsPathItem()
         self.scatter = pg.ScatterPlotItem()
         self.scatter.setSize(7)
         self.update_style("#ffd43b", fill_alpha=40)
 
     def update_style(self, color_name: str, fill_alpha: int = 40) -> None:
-        """update_style。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            color_name (str): 输入参数。
-            fill_alpha (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         color = QColor(color_name)
         pen = QPen(color)
         pen.setWidthF(2.0)
@@ -243,17 +133,6 @@ class DraftOverlayItem:
         self.scatter.setPen(pg.mkPen("#ffffff", width=1.0))
 
     def update_geometry(self, points: list[list[float]] | None) -> None:
-        """update_geometry。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            points (list[list[float]] | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         path = QPainterPath()
         if points:
             path.moveTo(points[0][0], points[0][1])
@@ -265,17 +144,6 @@ class DraftOverlayItem:
 
 class SnapIndicatorItem:
     def __init__(self):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.path_item = QGraphicsPathItem()
         self.path_item.setZValue(10_000)
         self.path_item.setFlag(QGraphicsPathItem.ItemIgnoresTransformations, True)
@@ -286,19 +154,6 @@ class SnapIndicatorItem:
         self.clear()
 
     def update_indicator(self, snap_type: str | None, x: float | None, y: float | None) -> None:
-        """update_indicator。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            snap_type (str | None): 输入参数。
-            x (float | None): 输入参数。
-            y (float | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if snap_type is None or x is None or y is None:
             self.clear()
             return
@@ -330,17 +185,6 @@ class SnapIndicatorItem:
         self.text_item.setVisible(True)
 
     def clear(self) -> None:
-        """clear。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.path_item.setPos(0.0, 0.0)
         self.path_item.setPath(QPainterPath())
         self.path_item.setVisible(False)

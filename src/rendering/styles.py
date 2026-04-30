@@ -126,65 +126,21 @@ class HillshadeRenderStyle(BaseRenderStyle):
 
 
 def stable_style_hash(value: Any) -> str:
-    """stable_style_hash。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        value (Any): 输入参数。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     payload = json.dumps(asdict(value), sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
 def style_to_dict(style: Any) -> dict[str, Any]:
-    """style_to_dict。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        style (Any): 输入参数。
-    返回:
-        dict[str, Any]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     payload = asdict(style)
     payload["renderer_type"] = getattr(style, "renderer_type", payload.get("renderer_type"))
     return payload
 
 
 def display_settings_to_dict(display_settings: LayerDisplaySettings) -> dict[str, Any]:
-    """display_settings_to_dict。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        display_settings (LayerDisplaySettings): 输入参数。
-    返回:
-        dict[str, Any]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return asdict(display_settings)
 
 
 def style_from_dict(payload: dict[str, Any]) -> BaseRenderStyle:
-    """style_from_dict。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        payload (dict[str, Any]): 输入参数。
-    返回:
-        BaseRenderStyle: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     renderer_type = payload.get("renderer_type", "singleband_gray")
     if renderer_type == "multiband":
         return MultibandRenderStyle(
@@ -278,17 +234,6 @@ def style_from_dict(payload: dict[str, Any]) -> BaseRenderStyle:
 
 
 def display_settings_from_dict(payload: dict[str, Any]) -> LayerDisplaySettings:
-    """display_settings_from_dict。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        payload (dict[str, Any]): 输入参数。
-    返回:
-        LayerDisplaySettings: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     nodata = NodataPolicy(**payload.get("nodata_policy", {}))
     resampling = ResamplingPolicy(**payload.get("resampling", {}))
     return LayerDisplaySettings(
@@ -304,20 +249,6 @@ def display_settings_from_dict(payload: dict[str, Any]) -> LayerDisplaySettings:
 
 
 def default_display_settings(*, visible: bool = True, opacity: float = 1.0, blend_mode: str = "source_over", nodata_value=None) -> LayerDisplaySettings:
-    """default_display_settings。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        visible (bool): 输入参数。
-        opacity (float): 输入参数。
-        blend_mode (str): 输入参数。
-        nodata_value (Any): 输入参数。
-    返回:
-        LayerDisplaySettings: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return LayerDisplaySettings(
         visible=visible,
         opacity=opacity,
@@ -327,18 +258,6 @@ def default_display_settings(*, visible: bool = True, opacity: float = 1.0, blen
 
 
 def serialize_style_bundle(style: BaseRenderStyle, display_settings: LayerDisplaySettings) -> dict[str, Any]:
-    """serialize_style_bundle。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        style (BaseRenderStyle): 输入参数。
-        display_settings (LayerDisplaySettings): 输入参数。
-    返回:
-        dict[str, Any]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return {
         "style": style_to_dict(style),
         "display_settings": display_settings_to_dict(display_settings),
@@ -346,17 +265,6 @@ def serialize_style_bundle(style: BaseRenderStyle, display_settings: LayerDispla
 
 
 def deserialize_style_bundle(payload: dict[str, Any]) -> tuple[BaseRenderStyle, LayerDisplaySettings]:
-    """deserialize_style_bundle。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        payload (dict[str, Any]): 输入参数。
-    返回:
-        tuple[BaseRenderStyle, LayerDisplaySettings]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return (
         style_from_dict(payload.get("style", {})),
         display_settings_from_dict(payload.get("display_settings", {})),
@@ -364,17 +272,6 @@ def deserialize_style_bundle(payload: dict[str, Any]) -> tuple[BaseRenderStyle, 
 
 
 def style_to_display_mode(style: BaseRenderStyle) -> str:
-    """style_to_display_mode。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        style (BaseRenderStyle): 输入参数。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     if isinstance(style, MultibandRenderStyle):
         return "RGB"
     if isinstance(style, HillshadeRenderStyle):
@@ -383,18 +280,6 @@ def style_to_display_mode(style: BaseRenderStyle) -> str:
 
 
 def legacy_config_to_style(render_config, metadata=None) -> BaseRenderStyle:
-    """legacy_config_to_style。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        render_config (Any): 输入参数。
-        metadata (Any): 输入参数。
-    返回:
-        BaseRenderStyle: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     band_count = max(1, int(getattr(metadata, "band_count", 1) or 1))
     if getattr(render_config, "display_mode", "灰度") == "RGB" and band_count >= 3:
         return MultibandRenderStyle(
@@ -459,18 +344,6 @@ def legacy_config_to_style(render_config, metadata=None) -> BaseRenderStyle:
 
 
 def style_to_legacy_config(style: BaseRenderStyle, display_settings: LayerDisplaySettings | None = None):
-    """style_to_legacy_config。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        style (BaseRenderStyle): 输入参数。
-        display_settings (LayerDisplaySettings | None): 输入参数。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     from .config import RasterRenderConfig
 
     config = RasterRenderConfig()
@@ -527,19 +400,6 @@ def style_to_legacy_config(style: BaseRenderStyle, display_settings: LayerDispla
 
 
 def migrate_style_on_renderer_switch(style: BaseRenderStyle, renderer_type: str, metadata=None) -> BaseRenderStyle:
-    """migrate_style_on_renderer_switch。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        style (BaseRenderStyle): 输入参数。
-        renderer_type (str): 输入参数。
-        metadata (Any): 输入参数。
-    返回:
-        BaseRenderStyle: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     band = tuple(getattr(style, "band_indices", ()) or (1,))
     gamma = float(getattr(style, "gamma", 1.0))
     stretch = getattr(style, "stretch", StretchSettings())

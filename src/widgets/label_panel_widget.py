@@ -31,17 +31,6 @@ class LabelPanelWidget(QGroupBox):
     labels_changed = Signal(object)
 
     def __init__(self, parent=None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parent (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__("标签", parent)
         layout = QVBoxLayout(self)
         self.list_widget = QListWidget()
@@ -69,18 +58,6 @@ class LabelPanelWidget(QGroupBox):
         self._labels: list[LabelClass] = []
 
     def set_labels(self, labels: list[LabelClass], active_label_id: int | None = None) -> None:
-        """set_labels。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            labels (list[LabelClass]): 输入参数。
-            active_label_id (int | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._labels = labels[:]
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
@@ -97,32 +74,10 @@ class LabelPanelWidget(QGroupBox):
         self.list_widget.blockSignals(False)
 
     def _on_current_changed(self, row: int) -> None:
-        """_on_current_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            row (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if 0 <= row < len(self._labels):
             self.active_label_changed.emit(self._labels[row].id)
 
     def _add_label(self) -> None:
-        """_add_label。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         next_id = max([label.id for label in self._labels], default=0) + 1
         suggested_color = self._generate_next_label_color()
         dialog = LabelEditDialog(
@@ -140,17 +95,6 @@ class LabelPanelWidget(QGroupBox):
         self.active_label_changed.emit(next_id)
 
     def _edit_label(self) -> None:
-        """_edit_label。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         row = self.list_widget.currentRow()
         if not (0 <= row < len(self._labels)):
             return
@@ -164,48 +108,15 @@ class LabelPanelWidget(QGroupBox):
         self.set_labels(self._labels, label.id)
 
     def _make_color_icon(self, color_name: str) -> QIcon:
-        """_make_color_icon。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            color_name (str): 输入参数。
-        返回:
-            QIcon: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         pixmap = QPixmap(14, 14)
         pixmap.fill(QColor(color_name))
         return QIcon(pixmap)
 
     def _generate_next_label_color(self) -> str:
-        """_generate_next_label_color。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            str: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return generate_distinct_label_color([label.color for label in self._labels])
 
 
 def generate_distinct_label_color(existing_colors: list[str]) -> str:
-    """generate_distinct_label_color。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        existing_colors (list[str]): 输入参数。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     used_colors = {QColor(color).name().lower() for color in existing_colors if QColor(color).isValid()}
     used_lab = [
         _rgb_to_lab(*_qcolor_to_rgb(QColor(color)))
@@ -232,17 +143,6 @@ DEFAULT_LABEL_COLOR = "#1d4ed8"
 
 
 def _candidate_label_colors() -> list[str]:
-    """_candidate_label_colors。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        无。
-    返回:
-        list[str]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     colors: list[str] = []
     seen: set[str] = set()
     golden_ratio = 0.618033988749895
@@ -258,34 +158,10 @@ def _candidate_label_colors() -> list[str]:
 
 
 def _qcolor_to_rgb(color: QColor) -> tuple[int, int, int]:
-    """_qcolor_to_rgb。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        color (QColor): 输入参数。
-    返回:
-        tuple[int, int, int]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return color.red(), color.green(), color.blue()
 
 
 def _rgb_to_lab(red: int, green: int, blue: int) -> tuple[float, float, float]:
-    """_rgb_to_lab。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        red (int): 输入参数。
-        green (int): 输入参数。
-        blue (int): 输入参数。
-    返回:
-        tuple[float, float, float]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     x, y, z = _rgb_to_xyz(red, green, blue)
     white_x, white_y, white_z = 0.95047, 1.0, 1.08883
     fx = _lab_f(x / white_x)
@@ -295,19 +171,6 @@ def _rgb_to_lab(red: int, green: int, blue: int) -> tuple[float, float, float]:
 
 
 def _rgb_to_xyz(red: int, green: int, blue: int) -> tuple[float, float, float]:
-    """_rgb_to_xyz。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        red (int): 输入参数。
-        green (int): 输入参数。
-        blue (int): 输入参数。
-    返回:
-        tuple[float, float, float]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     r = _srgb_to_linear(red / 255.0)
     g = _srgb_to_linear(green / 255.0)
     b = _srgb_to_linear(blue / 255.0)
@@ -319,34 +182,12 @@ def _rgb_to_xyz(red: int, green: int, blue: int) -> tuple[float, float, float]:
 
 
 def _srgb_to_linear(value: float) -> float:
-    """_srgb_to_linear。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        value (float): 输入参数。
-    返回:
-        float: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     if value <= 0.04045:
         return value / 12.92
     return ((value + 0.055) / 1.055) ** 2.4
 
 
 def _lab_f(value: float) -> float:
-    """_lab_f。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        value (float): 输入参数。
-    返回:
-        float: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     epsilon = 216.0 / 24389.0
     kappa = 24389.0 / 27.0
     if value > epsilon:
@@ -355,36 +196,11 @@ def _lab_f(value: float) -> float:
 
 
 def _lab_distance(first: tuple[float, float, float], second: tuple[float, float, float]) -> float:
-    """_lab_distance。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        first (tuple[float, float, float]): 输入参数。
-        second (tuple[float, float, float]): 输入参数。
-    返回:
-        float: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return math.sqrt(sum((left - right) ** 2 for left, right in zip(first, second)))
 
 
 class LabelEditDialog(QDialog):
     def __init__(self, label: LabelClass, existing_labels: list[LabelClass] | None = None, parent=None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            label (LabelClass): 输入参数。
-            existing_labels (list[LabelClass] | None): 输入参数。
-            parent (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__(parent)
         self.setWindowTitle("编辑标签")
         self._color = QColor(label.color)
@@ -417,17 +233,6 @@ class LabelEditDialog(QDialog):
         self._validate()
 
     def _choose_color(self):
-        """_choose_color。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         color = QColorDialog.getColor(self._color, self, "选择标签颜色")
         if color.isValid():
             self._color = color
@@ -435,34 +240,12 @@ class LabelEditDialog(QDialog):
             self._validate()
 
     def _update_color_button(self):
-        """_update_color_button。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.color_button.setText(f"选择颜色: {self._color.name()}")
         self.color_button.setStyleSheet(
             f"background-color: {self._color.name()}; color: {'#000000' if self._color.lightness() > 128 else '#ffffff'};"
         )
 
     def _validate(self):
-        """_validate。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         name = self.name_edit.text().strip()
         shortcut = self.shortcut_edit.text().strip()
         color_name = self._color.name().lower()
@@ -480,17 +263,6 @@ class LabelEditDialog(QDialog):
             self.ok_button.setEnabled(not error)
 
     def label(self) -> LabelClass:
-        """label。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            LabelClass: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return LabelClass(
             id=0,
             name=self.name_edit.text().strip() or "未命名标签",

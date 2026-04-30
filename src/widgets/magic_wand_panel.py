@@ -41,17 +41,6 @@ class MagicWandPanel(QGroupBox):
     slider_config_changed = Signal(str, dict)
 
     def __init__(self, parent=None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parent (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__("参数", parent)
         self._material_icon_family = self._load_material_icon_font()
         self._slider_configs: dict[str, dict[str, int]] = {
@@ -184,31 +173,9 @@ class MagicWandPanel(QGroupBox):
         self.refresh_icons()
 
     def brush_size(self) -> float:
-        """brush_size。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            float: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self._slider_value_to_brush_radius(int(self.brush_size_slider.value()))
 
     def params(self) -> MagicWandParams:
-        """params。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            MagicWandParams: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         try:
             min_area = max(1, int(self.min_area_edit.text().strip() or "1"))
         except ValueError:
@@ -223,45 +190,12 @@ class MagicWandPanel(QGroupBox):
         )
 
     def merge_preview_enabled(self) -> bool:
-        """merge_preview_enabled。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.merge_preview_button.isChecked()
 
     def only_show_new_region_enabled(self) -> bool:
-        """only_show_new_region_enabled。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.show_new_region_only_check.isChecked()
 
     def _set_merge_preview(self, enabled: bool) -> None:
-        """_set_merge_preview。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            enabled (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.merge_preview_button.blockSignals(True)
         self.single_preview_button.blockSignals(True)
         self.merge_preview_button.setChecked(enabled)
@@ -271,33 +205,9 @@ class MagicWandPanel(QGroupBox):
         self.merge_preview_changed.emit(enabled)
 
     def _emit_params(self, *_args) -> None:
-        """_emit_params。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            *_args (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.params_changed.emit(self.params())
 
     def _make_slider(self, minimum: int, maximum: int, value: int) -> tuple[QSlider, QLabel]:
-        """_make_slider。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            minimum (int): 输入参数。
-            maximum (int): 输入参数。
-            value (int): 输入参数。
-        返回:
-            tuple[QSlider, QLabel]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         slider = QSlider(Qt.Horizontal)
         slider.setRange(minimum, maximum)
         slider.setValue(value)
@@ -308,17 +218,6 @@ class MagicWandPanel(QGroupBox):
         return slider, label
 
     def get_slider_configs(self) -> dict[str, dict[str, int]]:
-        """get_slider_configs。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            dict[str, dict[str, int]]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return {
             key: {
                 "min": int(cfg.get("min", 0)),
@@ -330,33 +229,10 @@ class MagicWandPanel(QGroupBox):
         }
 
     def slider_step(self, key: str) -> int:
-        """slider_step。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            key (str): 输入参数。
-        返回:
-            int: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         cfg = self._slider_configs.get(key, {})
         return max(1, int(cfg.get("step", 1)))
 
     def apply_slider_configs(self, configs: dict[str, dict[str, int]] | None, *, emit_change: bool = False) -> None:
-        """apply_slider_configs。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            configs (dict[str, dict[str, int]] | None): 输入参数。
-            emit_change (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         merged = self.get_slider_configs()
         if isinstance(configs, dict):
             for key in ("tolerance", "brush_size"):
@@ -383,17 +259,6 @@ class MagicWandPanel(QGroupBox):
             self.slider_config_changed.emit("all", self.get_slider_configs())
 
     def _apply_slider_config_to_widget(self, key: str) -> None:
-        """_apply_slider_config_to_widget。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            key (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         slider = self.tolerance_slider if key == "tolerance" else self.brush_size_slider
         cfg = self._slider_configs[key]
         current = int(slider.value())
@@ -409,17 +274,6 @@ class MagicWandPanel(QGroupBox):
             self.brush_size_value.setText(self._format_brush_radius(self.brush_size()))
 
     def _open_slider_range_dialog(self, key: str) -> None:
-        """_open_slider_range_dialog。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            key (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         cfg = self._slider_configs[key]
         dialog = QDialog(self)
         dialog.setWindowTitle("设置滑动范围")
@@ -461,18 +315,6 @@ class MagicWandPanel(QGroupBox):
         self._emit_params()
 
     def _slider_row(self, slider, label: QLabel) -> QWidget:
-        """_slider_row。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            slider (Any): 输入参数。
-            label (QLabel): 输入参数。
-        返回:
-            QWidget: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         widget = QWidget()
         widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         layout = QHBoxLayout(widget)
@@ -484,19 +326,6 @@ class MagicWandPanel(QGroupBox):
         return widget
 
     def _form_label_with_settings(self, text: str, tooltip: str, slider_key: str) -> tuple[QWidget, QToolButton]:
-        """_form_label_with_settings。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            text (str): 输入参数。
-            tooltip (str): 输入参数。
-            slider_key (str): 输入参数。
-        返回:
-            tuple[QWidget, QToolButton]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         widget = QWidget()
         row = QHBoxLayout(widget)
         row.setContentsMargins(0, 0, 0, 0)
@@ -513,17 +342,6 @@ class MagicWandPanel(QGroupBox):
         return widget, setting_btn
 
     def get_panel_state(self) -> dict:
-        """get_panel_state。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            dict: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return {
             "slider_configs": self.get_slider_configs(),
             "tolerance": int(self.tolerance_slider.value()),
@@ -538,18 +356,6 @@ class MagicWandPanel(QGroupBox):
         }
 
     def apply_panel_state(self, state: dict | None, *, emit_change: bool = False) -> None:
-        """apply_panel_state。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            state (dict | None): 输入参数。
-            emit_change (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         payload = dict(state or {})
         # 兼容旧项目：magic_panel_settings 仅保存了 slider_configs（tolerance/brush_size 为 dict）
         if "slider_configs" not in payload:
@@ -593,35 +399,12 @@ class MagicWandPanel(QGroupBox):
             self.show_new_region_only_changed.emit(self.only_show_new_region_enabled())
 
     def _set_mode_by_value(self, mode: str) -> None:
-        """_set_mode_by_value。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            mode (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         for index in range(self.mode_combo.count()):
             if str(self.mode_combo.itemData(index)) == mode:
                 self.mode_combo.setCurrentIndex(index)
                 return
 
     def _on_slider_value_changed(self, key: str, value: int) -> None:
-        """_on_slider_value_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            key (str): 输入参数。
-            value (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         slider = self.tolerance_slider if key == "tolerance" else self.brush_size_slider
         snapped = self._snap_slider_value(key, value)
         if snapped != value:
@@ -634,18 +417,6 @@ class MagicWandPanel(QGroupBox):
             self.brush_size_value.setText(self._format_brush_radius(self.brush_size()))
 
     def _snap_slider_value(self, key: str, value: int) -> int:
-        """_snap_slider_value。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            key (str): 输入参数。
-            value (int): 输入参数。
-        返回:
-            int: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         slider = self.tolerance_slider if key == "tolerance" else self.brush_size_slider
         cfg = self._slider_configs.get(key, {})
         minimum = int(cfg.get("min", slider.minimum()))
@@ -656,50 +427,17 @@ class MagicWandPanel(QGroupBox):
         return max(minimum, min(maximum, int(snapped)))
 
     def _slider_value_to_brush_radius(self, slider_value: int) -> float:
-        """_slider_value_to_brush_radius。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            slider_value (int): 输入参数。
-        返回:
-            float: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         value = max(1, int(slider_value))
         if value <= 5:
             return round(value * 0.2, 1)
         return float(value - 4)
 
     def _format_brush_radius(self, radius: float) -> str:
-        """_format_brush_radius。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            radius (float): 输入参数。
-        返回:
-            str: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if radius <= 1.0:
             return f"{radius:.1f}"
         return str(int(round(radius)))
 
     def refresh_icons(self) -> None:
-        """refresh_icons。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         settings_icon = self._material_icon("settings")
         if settings_icon.isNull():
             return
@@ -707,34 +445,11 @@ class MagicWandPanel(QGroupBox):
         self.brush_settings_btn.setIcon(settings_icon)
 
     def _form_label(self, text: str, tooltip: str) -> QLabel:
-        """_form_label。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            text (str): 输入参数。
-            tooltip (str): 输入参数。
-        返回:
-            QLabel: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         label = QLabel(text)
         label.setToolTip(tooltip)
         return label
 
     def _load_material_icon_font(self) -> str | None:
-        """_load_material_icon_font。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            str | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         font_path = Path(__file__).resolve().parents[2] / "resources" / "fonts" / "MaterialIcons-Regular.ttf"
         if not font_path.exists():
             return None
@@ -745,17 +460,6 @@ class MagicWandPanel(QGroupBox):
         return families[0] if families else None
 
     def _material_icon(self, icon_name: str) -> QIcon:
-        """_material_icon。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            icon_name (str): 输入参数。
-        返回:
-            QIcon: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not self._material_icon_family:
             return QIcon()
         pixmap = QPixmap(18, 18)

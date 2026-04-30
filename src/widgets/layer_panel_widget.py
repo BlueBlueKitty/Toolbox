@@ -37,17 +37,6 @@ class LayerPanelWidget(QGroupBox):
     files_dropped = Signal(list)
 
     def __init__(self, parent=None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parent (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__("图层", parent)
         self.setAcceptDrops(True)
         layout = QVBoxLayout(self)
@@ -74,17 +63,6 @@ class LayerPanelWidget(QGroupBox):
         self._window_checkboxes: dict[tuple[str, str], QCheckBox] = {}
 
     def set_layers(self, layers: list[LayerSpec]) -> None:
-        """set_layers。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layers (list[LayerSpec]): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._updating = True
         self.layer_tree.clear()
         self._window_checkboxes.clear()
@@ -103,20 +81,6 @@ class LayerPanelWidget(QGroupBox):
         self._updating = False
 
     def _attach_window_checkbox(self, item: QTreeWidgetItem, window_id: str, column: int, visible: bool) -> None:
-        """_attach_window_checkbox。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            item (QTreeWidgetItem): 输入参数。
-            window_id (str): 输入参数。
-            column (int): 输入参数。
-            visible (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         layer_id = item.data(0, Qt.UserRole)
         wrapper = QWidget(self.layer_tree)
         inner = QHBoxLayout(wrapper)
@@ -130,37 +94,11 @@ class LayerPanelWidget(QGroupBox):
         self._window_checkboxes[(str(layer_id), window_id)] = check
 
     def _on_window_toggled(self, layer_id: str, window_id: str, visible: bool) -> None:
-        """_on_window_toggled。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            window_id (str): 输入参数。
-            visible (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._updating:
             return
         self.window_visibility_changed.emit(str(layer_id), window_id, bool(visible))
 
     def set_window_visibility(self, layer_id: str, window_id: str, visible: bool) -> None:
-        """set_window_visibility。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            window_id (str): 输入参数。
-            visible (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         check = self._window_checkboxes.get((str(layer_id), window_id))
         if check is None:
             return
@@ -169,18 +107,6 @@ class LayerPanelWidget(QGroupBox):
         self._updating = False
 
     def set_layer_checked(self, layer_id: str, visible: bool) -> None:
-        """set_layer_checked。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            visible (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         item = self._item_for_layer(layer_id)
         if item is None:
             return
@@ -189,34 +115,12 @@ class LayerPanelWidget(QGroupBox):
         self._updating = False
 
     def layer_order(self) -> list[str]:
-        """layer_order。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            list[str]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return [
             self.layer_tree.topLevelItem(index).data(0, Qt.UserRole)
             for index in range(self.layer_tree.topLevelItemCount())
         ]
 
     def set_current_layer(self, layer_id: str | None) -> None:
-        """set_current_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._updating = True
         try:
             if layer_id is None:
@@ -229,17 +133,6 @@ class LayerPanelWidget(QGroupBox):
             self._updating = False
 
     def _item_for_layer(self, layer_id: str):
-        """_item_for_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         for index in range(self.layer_tree.topLevelItemCount()):
             item = self.layer_tree.topLevelItem(index)
             if item.data(0, Qt.UserRole) == layer_id:
@@ -247,85 +140,27 @@ class LayerPanelWidget(QGroupBox):
         return None
 
     def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
-        """_on_item_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            item (QTreeWidgetItem): 输入参数。
-            column (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._updating or column != 0:
             return
         self._last_changed_item = item
         self.visibility_changed.emit(item.data(0, Qt.UserRole), item.checkState(0) == Qt.Checked)
 
     def _on_item_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
-        """_on_item_clicked。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            item (QTreeWidgetItem): 输入参数。
-            _column (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._updating:
             return
         self._last_changed_item = None
 
     def _on_rows_moved(self, *_args) -> None:
-        """_on_rows_moved。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            *_args (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._updating:
             return
         for index, layer_id in enumerate(self.layer_order()):
             self.order_changed.emit(layer_id, index)
 
     def _on_current_item_changed(self, current: QTreeWidgetItem, _previous: QTreeWidgetItem) -> None:
-        """_on_current_item_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            current (QTreeWidgetItem): 输入参数。
-            _previous (QTreeWidgetItem): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         layer_id = None if current is None else current.data(0, Qt.UserRole)
         self.layer_selected.emit(layer_id)
 
     def _open_context_menu(self, pos) -> None:
-        """_open_context_menu。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            pos (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         item = self.layer_tree.itemAt(pos)
         if item is None:
             return
@@ -423,17 +258,6 @@ class LayerPanelWidget(QGroupBox):
             self.blend_mode_changed.emit(layer_id, mode)
 
     def dragEnterEvent(self, event) -> None:
-        """dragEnterEvent。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         mime = event.mimeData()
         if mime is not None and mime.hasUrls():
             event.acceptProposedAction()
@@ -441,17 +265,6 @@ class LayerPanelWidget(QGroupBox):
         super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:
-        """dragMoveEvent。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         mime = event.mimeData()
         if mime is not None and mime.hasUrls():
             event.acceptProposedAction()
@@ -459,17 +272,6 @@ class LayerPanelWidget(QGroupBox):
         super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
-        """dropEvent。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         mime = event.mimeData()
         if mime is None or not mime.hasUrls():
             super().dropEvent(event)

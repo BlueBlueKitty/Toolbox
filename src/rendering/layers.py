@@ -15,17 +15,6 @@ from .styles import LayerDisplaySettings, default_display_settings
 
 
 def raster_layer_to_spec(layer: RasterLayer) -> LayerSpec:
-    """raster_layer_to_spec。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        layer (RasterLayer): 输入参数。
-    返回:
-        LayerSpec: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     display = layer.display_settings
     return LayerSpec(
         id=layer.id,
@@ -48,34 +37,11 @@ class LayerManager(QObject):
     layer_selection_changed = Signal(str, bool)
 
     def __init__(self):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__()
         self._layers: OrderedDict[str, LayerState] = OrderedDict()
         self._active_layer_id: str | None = None
 
     def add_layer(self, spec: LayerSpec | RasterLayer, item=None) -> LayerState:
-        """add_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            spec (LayerSpec | RasterLayer): 输入参数。
-            item (Any): 输入参数。
-        返回:
-            LayerState: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if isinstance(spec, RasterLayer):
             layer = spec
             state = LayerState(spec=raster_layer_to_spec(layer), z_order=len(self._layers), item=item, layer=layer)
@@ -88,18 +54,6 @@ class LayerManager(QObject):
         return state
 
     def add_raster_layer(self, layer: RasterLayer, item=None) -> LayerState:
-        """add_raster_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer (RasterLayer): 输入参数。
-            item (Any): 输入参数。
-        返回:
-            LayerState: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         existing = self._layers.get(layer.id)
         if existing is not None:
             existing.layer = layer
@@ -116,17 +70,6 @@ class LayerManager(QObject):
         return state
 
     def remove_layer(self, layer_id: str) -> LayerState | None:
-        """remove_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-        返回:
-            LayerState | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self._layers.pop(layer_id, None)
         if self._active_layer_id == layer_id:
             self._active_layer_id = None
@@ -139,74 +82,19 @@ class LayerManager(QObject):
         return state
 
     def layer(self, layer_id: str) -> LayerState | None:
-        """layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-        返回:
-            LayerState | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self._layers.get(layer_id)
 
     def layers(self) -> list[LayerState]:
-        """layers。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            list[LayerState]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return list(self._layers.values())
 
     def active_layer_id(self) -> str | None:
-        """active_layer_id。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            str | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self._active_layer_id
 
     def active_raster_layer(self) -> RasterLayer | None:
-        """active_raster_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            RasterLayer | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self.layer(self._active_layer_id) if self._active_layer_id else None
         return None if state is None else state.layer
 
     def set_active_layer(self, layer_id: str | None) -> None:
-        """set_active_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if layer_id is not None and layer_id not in self._layers:
             raise KeyError(layer_id)
         previous = self._active_layer_id
@@ -222,35 +110,11 @@ class LayerManager(QObject):
         self.active_layer_changed.emit(layer_id)
 
     def set_item(self, layer_id: str, item) -> None:
-        """set_item。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            item (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self._require(layer_id)
         state.item = item
         self._apply_item_state(state)
 
     def set_visible(self, layer_id: str, visible: bool) -> None:
-        """set_visible。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            visible (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self._require(layer_id)
         state.spec.visible = bool(visible)
         if state.layer is not None:
@@ -260,18 +124,6 @@ class LayerManager(QObject):
         self.layer_display_changed.emit(layer_id)
 
     def set_opacity(self, layer_id: str, opacity: float) -> None:
-        """set_opacity。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            opacity (float): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self._require(layer_id)
         opacity = max(0.0, min(float(opacity), 1.0))
         state.spec.opacity = opacity
@@ -281,18 +133,6 @@ class LayerManager(QObject):
         self.layer_display_changed.emit(layer_id)
 
     def move_layer(self, layer_id: str, target_index: int) -> None:
-        """move_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            target_index (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if layer_id not in self._layers:
             raise KeyError(layer_id)
         items = list(self._layers.items())
@@ -305,18 +145,6 @@ class LayerManager(QObject):
         self.layer_order_changed.emit()
 
     def set_blend_mode(self, layer_id: str, blend_mode: str) -> None:
-        """set_blend_mode。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            blend_mode (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self._require(layer_id)
         state.spec.blend_mode = str(blend_mode or "source_over")
         if state.layer is not None:
@@ -325,18 +153,6 @@ class LayerManager(QObject):
         self.layer_display_changed.emit(layer_id)
 
     def set_render_style(self, layer_id: str, render_style) -> None:
-        """set_render_style。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            render_style (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self._require(layer_id)
         if state.layer is None:
             return
@@ -345,18 +161,6 @@ class LayerManager(QObject):
         self.layer_style_changed.emit(layer_id)
 
     def set_display_settings(self, layer_id: str, display_settings: LayerDisplaySettings) -> None:
-        """set_display_settings。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            display_settings (LayerDisplaySettings): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self._require(layer_id)
         if state.layer is None:
             return
@@ -368,22 +172,6 @@ class LayerManager(QObject):
         self.layer_display_changed.emit(layer_id)
 
     def update_raster_layer(self, layer_id: str, *, source=None, metadata=None, render_style=None, display_settings=None, custom_properties=None) -> None:
-        """update_raster_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-            source (Any): 输入参数。
-            metadata (Any): 输入参数。
-            render_style (Any): 输入参数。
-            display_settings (Any): 输入参数。
-            custom_properties (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self._require(layer_id)
         if state.layer is None:
             display = display_settings or default_display_settings(nodata_value=getattr(metadata, "nodata", None) if metadata is not None else None)
@@ -415,64 +203,20 @@ class LayerManager(QObject):
         self._apply_item_state(state)
 
     def to_specs(self) -> list[LayerSpec]:
-        """to_specs。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            list[LayerSpec]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return [state.spec for state in self.layers()]
 
     def _require(self, layer_id: str) -> LayerState:
-        """_require。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_id (str): 输入参数。
-        返回:
-            LayerState: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self.layer(layer_id)
         if state is None:
             raise KeyError(layer_id)
         return state
 
     def _sync_z_order(self) -> None:
-        """_sync_z_order。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         for index, state in enumerate(self._layers.values()):
             state.z_order = index
             self._apply_item_state(state)
 
     def _apply_item_state(self, state: LayerState) -> None:
-        """_apply_item_state。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            state (LayerState): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         item = state.item
         if item is None:
             return

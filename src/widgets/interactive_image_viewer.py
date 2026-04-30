@@ -36,17 +36,6 @@ class InteractiveImageViewer(LayeredRasterCanvas):
     polyline_hover = Signal(int)  # 折线路径上的点索引
 
     def __init__(self, parent=None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parent (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__(parent)
 
         self.draw_mode = self.MODE_NONE
@@ -71,52 +60,16 @@ class InteractiveImageViewer(LayeredRasterCanvas):
         self.hover_brush = QBrush(QColor(255, 255, 0))
 
     def set_raster_array(self, image_array, original_size=None):
-        """set_raster_array。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            image_array (Any): 输入参数。
-            original_size (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.clear_rect()
         self.clear_polyline()
         super().set_raster_array(image_array, original_size=original_size)
 
     def set_raster_source(self, source, reset_view: bool = True):
-        """set_raster_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            source (Any): 输入参数。
-            reset_view (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.clear_rect()
         self.clear_polyline()
         super().set_raster_source(source, reset_view=reset_view)
 
     def set_scene_mapping(self, scene_world_rect=None, image_world_rect=None):
-        """set_scene_mapping。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            scene_world_rect (Any): 输入参数。
-            image_world_rect (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().set_scene_mapping(scene_world_rect, image_world_rect)
         self._refresh_overlay_items()
 
@@ -129,17 +82,6 @@ class InteractiveImageViewer(LayeredRasterCanvas):
             self.clear_rect()
 
     def keyPressEvent(self, event):
-        """keyPressEvent。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if event.key() == Qt.Key_Escape and self.cancel_active_drawing():
             event.accept()
             return
@@ -168,17 +110,6 @@ class InteractiveImageViewer(LayeredRasterCanvas):
         self.polyline_completed = False
 
     def _handle_mouse_press(self, event) -> bool:
-        """_handle_mouse_press。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if event.button() == Qt.LeftButton and (self.image_array is not None or self.source is not None):
             image_pos = self.image_pos_from_event(event)
             if image_pos is not None and self.image_contains_pos(image_pos):
@@ -202,17 +133,6 @@ class InteractiveImageViewer(LayeredRasterCanvas):
         return super()._handle_mouse_press(event)
 
     def _handle_mouse_move(self, event) -> bool:
-        """_handle_mouse_move。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.image_array is None and self.source is None:
             return super()._handle_mouse_move(event)
 
@@ -245,17 +165,6 @@ class InteractiveImageViewer(LayeredRasterCanvas):
         return super()._handle_mouse_move(event)
 
     def _handle_mouse_release(self, event) -> bool:
-        """_handle_mouse_release。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            event (Any): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if event.button() == Qt.LeftButton and self.draw_mode == self.MODE_RECT:
             if self.rect_start is not None:
                 image_pos = self.image_pos_from_event(event)
@@ -294,17 +203,6 @@ class InteractiveImageViewer(LayeredRasterCanvas):
         self._update_rect_item()
 
     def _update_rect_item(self):
-        """_update_rect_item。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.current_rect is None:
             return
         rect = self._image_rect_to_view_rect(self.current_rect)
@@ -354,18 +252,6 @@ class InteractiveImageViewer(LayeredRasterCanvas):
         self._update_polyline(temp_point=(x, y))
 
     def _update_polyline_hover(self, x, y):
-        """_update_polyline_hover。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            x (Any): 输入参数。
-            y (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         path_points, _ = self.get_polyline_path_values()
         if not path_points:
             self._hide_hover_marker()
@@ -469,17 +355,6 @@ class InteractiveImageViewer(LayeredRasterCanvas):
         return points
 
     def _build_polyline_path(self, points):
-        """_build_polyline_path。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            points (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         path = QPainterPath()
         first = self.image_to_view_point(points[0][0] + 0.5, points[0][1] + 0.5)
         path.moveTo(first)
@@ -488,38 +363,11 @@ class InteractiveImageViewer(LayeredRasterCanvas):
         return path
 
     def _image_rect_to_view_rect(self, rect: QRectF) -> QRectF:
-        """_image_rect_to_view_rect。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            rect (QRectF): 输入参数。
-        返回:
-            QRectF: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         p1 = self.image_to_view_point(rect.left(), rect.top())
         p2 = self.image_to_view_point(rect.right(), rect.bottom())
         return QRectF(p1, p2).normalized()
 
     def _create_marker(self, x, y, brush, pen_color, pen_width, radius=3):
-        """_create_marker。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            x (Any): 输入参数。
-            y (Any): 输入参数。
-            brush (Any): 输入参数。
-            pen_color (Any): 输入参数。
-            pen_width (Any): 输入参数。
-            radius (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         item = QGraphicsEllipseItem(-radius, -radius, radius * 2, radius * 2)
         item.setBrush(brush)
         if pen_width > 0:
@@ -534,17 +382,6 @@ class InteractiveImageViewer(LayeredRasterCanvas):
         return item
 
     def _remove_view_item(self, item):
-        """_remove_view_item。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            item (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if item is None:
             return
         try:
@@ -553,17 +390,6 @@ class InteractiveImageViewer(LayeredRasterCanvas):
             pass
 
     def _refresh_overlay_items(self):
-        """_refresh_overlay_items。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.current_rect is not None:
             self._update_rect_item()
         if self.polyline_points:

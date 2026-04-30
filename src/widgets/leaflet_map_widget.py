@@ -26,17 +26,6 @@ class MapBridge(QObject):
     boundsCleared = Signal()   # 边界清除信号
     
     def __init__(self, parent=None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parent (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__(parent)
     
     @Slot(str)
@@ -467,17 +456,6 @@ if __name__ == "__main__":
     
     class TestWindow(QMainWindow):
         def __init__(self):
-            """__init__。
-
-            功能:
-                承担当前方法对应的业务逻辑。
-            参数:
-                无。
-            返回:
-                None: 方法执行结果。
-            异常:
-                Exception: 依赖组件或输入异常时可能抛出。
-            """
             super().__init__()
             self.setWindowTitle("Leaflet Map Widget 测试")
             self.resize(900, 600)
@@ -513,34 +491,9 @@ if __name__ == "__main__":
             layout.addWidget(self.map)
         
         def on_bounds_drawn(self, south, north, west, east):
-            """on_bounds_drawn。
-
-            功能:
-                承担当前方法对应的业务逻辑。
-            参数:
-                south (Any): 输入参数。
-                north (Any): 输入参数。
-                west (Any): 输入参数。
-                east (Any): 输入参数。
-            返回:
-                None: 方法执行结果。
-            异常:
-                Exception: 依赖组件或输入异常时可能抛出。
-            """
             print(f"绘制区域: 南={south:.6f}, 北={north:.6f}, 西={west:.6f}, 东={east:.6f}")
         
         def on_bounds_cleared(self):
-            """on_bounds_cleared。
-
-            功能:
-                承担当前方法对应的业务逻辑。
-            参数:
-                无。
-            返回:
-                None: 方法执行结果。
-            异常:
-                Exception: 依赖组件或输入异常时可能抛出。
-            """
             print("区域已清除")
     
     app = QApplication(sys.argv)

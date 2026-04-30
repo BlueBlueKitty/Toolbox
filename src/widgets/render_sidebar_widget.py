@@ -106,35 +106,10 @@ _CATEGORY_COLORS = [
 class LegacyRenderSettingsAdapter:
     @staticmethod
     def layer_to_legacy_config(layer):
-        """layer_to_legacy_config。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return style_to_legacy_config(layer.render_style, layer.display_settings)
 
     @staticmethod
     def _resolved_value_range(layer, config: RasterRenderConfig) -> tuple[float, float]:
-        """_resolved_value_range。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer (Any): 输入参数。
-            config (RasterRenderConfig): 输入参数。
-        返回:
-            tuple[float, float]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        复杂度:
-            时间和空间复杂度与输入规模线性或近线性相关。
-        """
         value_range = tuple(config.value_range or (0.0, 1.0))
         if not bool(getattr(config, "auto_range", False)):
             return float(value_range[0]), float(value_range[1])
@@ -159,18 +134,6 @@ class LegacyRenderSettingsAdapter:
 
     @staticmethod
     def apply_layer_to_widget(widget: "RenderSidebarWidget", layer) -> None:
-        """apply_layer_to_widget。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            widget ('RenderSidebarWidget'): 输入参数。
-            layer (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if layer is None:
             return
         config = LegacyRenderSettingsAdapter.layer_to_legacy_config(layer)
@@ -242,17 +205,6 @@ class LegacyRenderSettingsAdapter:
 
     @staticmethod
     def widget_to_legacy_config(widget: "RenderSidebarWidget") -> RasterRenderConfig:
-        """widget_to_legacy_config。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            widget ('RenderSidebarWidget'): 输入参数。
-        返回:
-            RasterRenderConfig: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         settings = widget.render_settings.get_all_settings()
         config = RasterRenderConfig()
         selected_mode = widget.current_render_mode()
@@ -280,105 +232,26 @@ class RenderBindingBase(QObject):
     changed = Signal()
 
     def available_targets(self) -> list[tuple[str, str]]:
-        """available_targets。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            list[tuple[str, str]]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return []
 
     def current_target_id(self) -> str | None:
-        """current_target_id。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            str | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         raise NotImplementedError
 
     def set_current_target(self, target_id: str) -> None:
-        """set_current_target。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            target_id (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         raise NotImplementedError
 
     def current_layer(self):
-        """current_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         raise NotImplementedError
 
     def current_layer_manager(self):
-        """current_layer_manager。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         raise NotImplementedError
 
     def refresh_signals(self) -> list:
-        """refresh_signals。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            list: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return [self.changed]
 
 
 class SingleCanvasRenderBinding(RenderBindingBase):
     def __init__(self, canvas, *, target_id: str = "single_canvas", target_label: str = "唯一图层"):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            canvas (Any): 输入参数。
-            target_id (str): 输入参数。
-            target_label (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__()
         self.canvas = canvas
         self._target_id = target_id
@@ -388,76 +261,21 @@ class SingleCanvasRenderBinding(RenderBindingBase):
         self.canvas.layer_manager.layer_display_changed.connect(lambda *_: self.changed.emit())
 
     def available_targets(self) -> list[tuple[str, str]]:
-        """available_targets。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            list[tuple[str, str]]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return [(self._target_id, self._target_label)]
 
     def current_target_id(self) -> str | None:
-        """current_target_id。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            str | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self._target_id
 
     def set_current_target(self, target_id: str) -> None:
-        """set_current_target。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            target_id (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if target_id == self._target_id:
             self.canvas.layer_manager.set_active_layer(self.canvas.BASE_LAYER_ID)
             self.changed.emit()
 
     def current_layer(self):
-        """current_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self.canvas.layer_manager.layer(self.canvas.BASE_LAYER_ID)
         return None if state is None else state.layer
 
     def current_layer_manager(self):
-        """current_layer_manager。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.canvas.layer_manager
 
 
@@ -469,19 +287,6 @@ class MultiCanvasRenderBinding(RenderBindingBase):
         *,
         layer_mode: str = "base",
     ):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            target_canvases (dict[str, object]): 输入参数。
-            target_labels (dict[str, str] | None): 输入参数。
-            layer_mode (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__()
         self._target_canvases = dict(target_canvases)
         self._target_labels = dict(target_labels or {})
@@ -495,17 +300,6 @@ class MultiCanvasRenderBinding(RenderBindingBase):
             canvas.layer_manager.layer_display_changed.connect(lambda *_: self.changed.emit())
 
     def available_targets(self) -> list[tuple[str, str]]:
-        """available_targets。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            list[tuple[str, str]]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return [
             (target_id, self._target_labels.get(target_id, target_id))
             for target_id in self._available_target_ids
@@ -513,31 +307,9 @@ class MultiCanvasRenderBinding(RenderBindingBase):
         ]
 
     def current_target_id(self) -> str | None:
-        """current_target_id。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            str | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self._current_target_id
 
     def set_available_targets(self, target_ids: list[str] | None) -> None:
-        """set_available_targets。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            target_ids (list[str] | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not target_ids:
             self._available_target_ids = list(self._target_canvases.keys())
         else:
@@ -551,17 +323,6 @@ class MultiCanvasRenderBinding(RenderBindingBase):
         self.changed.emit()
 
     def set_current_target(self, target_id: str) -> None:
-        """set_current_target。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            target_id (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if target_id not in self._target_canvases or target_id not in self._available_target_ids:
             return
         self._current_target_id = target_id
@@ -573,17 +334,6 @@ class MultiCanvasRenderBinding(RenderBindingBase):
         self.changed.emit()
 
     def current_layer(self):
-        """current_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         canvas = self._target_canvases.get(self._current_target_id)
         if canvas is None:
             return None
@@ -594,34 +344,12 @@ class MultiCanvasRenderBinding(RenderBindingBase):
         return None if state is None else state.layer
 
     def current_layer_manager(self):
-        """current_layer_manager。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         canvas = self._target_canvases.get(self._current_target_id)
         return None if canvas is None else canvas.layer_manager
 
 
 class LayerManagerRenderBinding(RenderBindingBase):
     def __init__(self, layer_manager):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer_manager (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__()
         self.layer_manager = layer_manager
         self.layer_manager.active_layer_changed.connect(lambda *_: self.changed.emit())
@@ -630,61 +358,17 @@ class LayerManagerRenderBinding(RenderBindingBase):
         self.layer_manager.layer_order_changed.connect(lambda *_: self.changed.emit())
 
     def current_target_id(self) -> str | None:
-        """current_target_id。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            str | None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.layer_manager.active_layer_id()
 
     def set_current_target(self, target_id: str) -> None:
-        """set_current_target。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            target_id (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.layer_manager.set_active_layer(target_id)
         self.changed.emit()
 
     def current_layer(self):
-        """current_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         state = self.layer_manager.layer(self.layer_manager.active_layer_id())
         return None if state is None else state.layer
 
     def current_layer_manager(self):
-        """current_layer_manager。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.layer_manager
 
 
@@ -700,18 +384,6 @@ class RenderSidebarWidget(QWidget):
     db_toggled = Signal(bool)
 
     def __init__(self, mode: str = "simple", parent=None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            mode (str): 输入参数。
-            parent (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__(parent)
         self.mode = mode
         self.setMinimumWidth(172)
@@ -1097,46 +769,13 @@ class RenderSidebarWidget(QWidget):
         self._update_section_visibility()
 
     def _emit_renderer_type_changed(self, text: str) -> None:
-        """_emit_renderer_type_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            text (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._apply_render_mode_to_sidebar(text)
         self.renderer_type_changed.emit(text)
 
     def _emit_legacy_editor_changed(self, *_args) -> None:
-        """_emit_legacy_editor_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            *_args (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.render_settings.settings_changed.emit()
 
     def _emit_target_changed(self, index: int) -> None:
-        """_emit_target_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            index (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if index < 0:
             return
         target_id = self.target_combo.itemData(index)
@@ -1144,17 +783,6 @@ class RenderSidebarWidget(QWidget):
             self.target_changed.emit(str(target_id))
 
     def _on_band_combo_changed(self, *_args) -> None:
-        """_on_band_combo_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            *_args (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._categorical_block:
             return
         self.render_settings.gray_band_spin.setValue(max(1, self.gray_band_combo.currentIndex() + 1))
@@ -1164,17 +792,6 @@ class RenderSidebarWidget(QWidget):
         self._emit_legacy_editor_changed()
 
     def _on_nodata_override_toggled(self, checked: bool) -> None:
-        """_on_nodata_override_toggled。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            checked (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.nodata_edit.setEnabled(bool(checked))
         self.nodata_edit.setStyleSheet("" if checked else "color: gray;")
         if not checked:
@@ -1183,17 +800,6 @@ class RenderSidebarWidget(QWidget):
             self.nodata_edit.blockSignals(False)
 
     def _choose_background_color(self) -> None:
-        """_choose_background_color。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         current = QColor(self.background_color_button.property("rgba_hex") or "#ff000000")
         chosen = _choose_color_with_alpha(self, current, "选择画布背景色")
         if not chosen.isValid():
@@ -1202,17 +808,6 @@ class RenderSidebarWidget(QWidget):
         self.display_settings_changed.emit()
 
     def _on_manual_range_toggled(self, checked: bool) -> None:
-        """_on_manual_range_toggled。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            checked (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         manual = bool(checked)
         self._manual_range_just_enabled = manual
         self.render_settings.min_spin.setEnabled(manual)
@@ -1221,50 +816,16 @@ class RenderSidebarWidget(QWidget):
         self.render_settings.max_spin.setStyleSheet("" if manual else "color: gray;")
 
     def consume_manual_range_just_enabled(self) -> bool:
-        """consume_manual_range_just_enabled。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         value = bool(self._manual_range_just_enabled)
         self._manual_range_just_enabled = False
         return value
 
     def _on_categorical_item_changed(self, _item) -> None:
-        """_on_categorical_item_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            _item (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._categorical_block:
             return
         self.categorical_style_changed.emit()
 
     def _on_categorical_color_double_clicked(self, row: int, column: int) -> None:
-        """_on_categorical_color_double_clicked。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            row (int): 输入参数。
-            column (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if column != 2:
             return
         item = self.categorical_table.item(row, column)
@@ -1282,17 +843,6 @@ class RenderSidebarWidget(QWidget):
         self.categorical_style_changed.emit()
 
     def _add_categorical_row(self) -> None:
-        """_add_categorical_row。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         value, ok = QInputDialog.getText(self, "添加分类值", "请输入值:")
         if not ok:
             return
@@ -1323,17 +873,6 @@ class RenderSidebarWidget(QWidget):
         self.categorical_style_changed.emit()
 
     def _remove_selected_categorical_rows(self) -> None:
-        """_remove_selected_categorical_rows。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         rows = sorted({index.row() for index in self.categorical_table.selectedIndexes()}, reverse=True)
         if not rows:
             return
@@ -1346,17 +885,6 @@ class RenderSidebarWidget(QWidget):
         self.categorical_style_changed.emit()
 
     def set_target_options(self, options: list[tuple[str, str]]) -> None:
-        """set_target_options。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            options (list[tuple[str, str]]): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.target_combo.blockSignals(True)
         self.target_combo.clear()
         for target_id, label in options or []:
@@ -1365,17 +893,6 @@ class RenderSidebarWidget(QWidget):
         self.target_combo.setVisible(self.mode == "multi_target")
 
     def set_current_target(self, target_id: str | None) -> None:
-        """set_current_target。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            target_id (str | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if target_id is None:
             self.target_combo.blockSignals(True)
             self.target_combo.setCurrentIndex(-1)
@@ -1388,17 +905,6 @@ class RenderSidebarWidget(QWidget):
             self.target_combo.blockSignals(False)
 
     def set_layer(self, layer) -> None:
-        """set_layer。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not isValid(self):
             return
         if layer is None:
@@ -1426,18 +932,6 @@ class RenderSidebarWidget(QWidget):
         self._set_image_info(layer)
 
     def set_raster_edit_enabled(self, enabled: bool, message: str | None = None) -> None:
-        """set_raster_edit_enabled。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            enabled (bool): 输入参数。
-            message (str | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         for widget in (
             self.renderer_combo,
             self.nodata_edit,
@@ -1477,45 +971,12 @@ class RenderSidebarWidget(QWidget):
         self._update_section_visibility()
 
     def current_render_mode(self) -> str:
-        """current_render_mode。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            str: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.renderer_combo.currentText() or RENDER_MODE_SINGLEBAND
 
     def current_singleband_symbol(self) -> str:
-        """current_singleband_symbol。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            str: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return "pseudocolor"
 
     def _apply_render_mode_to_sidebar(self, mode: str) -> None:
-        """_apply_render_mode_to_sidebar。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            mode (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.renderer_combo.currentText() != mode:
             self.renderer_combo.blockSignals(True)
             self.renderer_combo.setCurrentText(mode)
@@ -1532,17 +993,6 @@ class RenderSidebarWidget(QWidget):
         self._update_section_visibility()
 
     def _update_section_visibility(self) -> None:
-        """_update_section_visibility。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         mode = self.current_render_mode()
         show_multiband = mode == RENDER_MODE_MULTIBAND
         show_singleband = mode == RENDER_MODE_SINGLEBAND
@@ -1588,17 +1038,6 @@ class RenderSidebarWidget(QWidget):
                 label.setVisible(visible)
 
     def apply_display_settings(self, display_settings: LayerDisplaySettings) -> None:
-        """apply_display_settings。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            display_settings (LayerDisplaySettings): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.nodata_override_check.blockSignals(True)
         self.nodata_edit.blockSignals(True)
         override_nodata = not bool(display_settings.nodata_policy.use_source_nodata)
@@ -1617,17 +1056,6 @@ class RenderSidebarWidget(QWidget):
         self._manual_range_just_enabled = False
 
     def current_display_settings(self, fallback: LayerDisplaySettings) -> LayerDisplaySettings:
-        """current_display_settings。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            fallback (LayerDisplaySettings): 输入参数。
-        返回:
-            LayerDisplaySettings: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         nodata_value = self.nodata_edit.text().strip()
         override = self.nodata_override_check.isChecked()
         parsed_nodata = self._source_nodata_value
@@ -1652,30 +1080,7 @@ class RenderSidebarWidget(QWidget):
         )
 
     def _set_image_info(self, layer) -> None:
-        """_set_image_info。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         def _set(key: str, value) -> None:
-            """_set。
-
-            功能:
-                承担当前方法对应的业务逻辑。
-            参数:
-                key (str): 输入参数。
-                value (Any): 输入参数。
-            返回:
-                None: 方法执行结果。
-            异常:
-                Exception: 依赖组件或输入异常时可能抛出。
-            """
             label = self._info_labels.get(key)
             if label is not None:
                 label.setText("-" if value in (None, "", ()) else str(value))
@@ -1705,17 +1110,6 @@ class RenderSidebarWidget(QWidget):
         _set("minmax", minmax_value)
 
     def populate_categorical_table(self, style) -> None:
-        """populate_categorical_table。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            style (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._categorical_block = True
         try:
             self.categorical_table.setRowCount(0)
@@ -1734,49 +1128,16 @@ class RenderSidebarWidget(QWidget):
             self._categorical_block = False
 
     def set_background_color(self, rgba: tuple[int, int, int, int] | None) -> None:
-        """set_background_color。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            rgba (tuple[int, int, int, int] | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         color = tuple(rgba[:4]) if rgba is not None else self._default_background_rgba()
         rgba_hex = _rgba_to_hex(color)
         self.background_color_button.setProperty("rgba_hex", rgba_hex)
         self.background_color_button.setStyleSheet(f"background-color: {rgba_hex};")
 
     def _default_background_rgba(self) -> tuple[int, int, int, int]:
-        """_default_background_rgba。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            tuple[int, int, int, int]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         window_color = self.palette().color(self.backgroundRole())
         return (0, 0, 0, 255) if window_color.lightness() < 128 else (255, 255, 255, 255)
 
     def current_categorical_payload(self) -> dict:
-        """current_categorical_payload。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            dict: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         items = []
         palette_visibility = []
         for row in range(self.categorical_table.rowCount()):
@@ -1803,20 +1164,6 @@ class RenderSidebarWidget(QWidget):
         }
 
     def _append_category_row(self, value, label: str, rgba, visible: bool) -> None:
-        """_append_category_row。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            value (Any): 输入参数。
-            label (str): 输入参数。
-            rgba (Any): 输入参数。
-            visible (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         row = self.categorical_table.rowCount()
         self.categorical_table.insertRow(row)
         value_item = QTableWidgetItem(str(value))
@@ -1832,17 +1179,6 @@ class RenderSidebarWidget(QWidget):
         _update_color_item(color_item, QColor(*rgba[:4]))
 
     def _populate_band_combos(self, band_count: int) -> None:
-        """_populate_band_combos。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            band_count (int): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not all(isValid(combo) for combo in (self.gray_band_combo, self.band_r_combo, self.band_g_combo, self.band_b_combo)):
             return
         self._categorical_block = True
@@ -1859,18 +1195,6 @@ class RenderSidebarWidget(QWidget):
         self._categorical_block = False
 
     def _refresh_renderer_type_items(self, band_count: int, preferred_mode: str | None) -> None:
-        """_refresh_renderer_type_items。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            band_count (int): 输入参数。
-            preferred_mode (str | None): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if band_count <= 1:
             options = [RENDER_MODE_SINGLEBAND, RENDER_MODE_CATEGORICAL, RENDER_MODE_HILLSHADE]
         else:
@@ -1883,17 +1207,6 @@ class RenderSidebarWidget(QWidget):
         self.renderer_combo.blockSignals(False)
 
     def set_db_checked(self, checked: bool) -> None:
-        """set_db_checked。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            checked (bool): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.db_check.blockSignals(True)
         self.db_check.setChecked(bool(checked))
         self.db_check.blockSignals(False)
@@ -1901,18 +1214,6 @@ class RenderSidebarWidget(QWidget):
 
 class RenderSidebarController:
     def __init__(self, widget: RenderSidebarWidget, binding):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            widget (RenderSidebarWidget): 输入参数。
-            binding (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.widget = widget
         self.binding = binding
         self._block_updates = False
@@ -1933,17 +1234,6 @@ class RenderSidebarController:
         self.refresh()
 
     def dispose(self, *_args) -> None:
-        """dispose。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            *_args (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._disposed:
             return
         self._disposed = True
@@ -1954,45 +1244,12 @@ class RenderSidebarController:
             pass
 
     def _alive(self) -> bool:
-        """_alive。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return (not self._disposed) and self.widget is not None and isValid(self.widget)
 
     def close(self) -> None:
-        """close。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.dispose()
 
     def refresh(self) -> None:
-        """refresh。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._block_updates or not self._alive():
             return
         try:
@@ -2014,34 +1271,12 @@ class RenderSidebarController:
             self._block_updates = False
 
     def _on_target_changed(self, target_id: str) -> None:
-        """_on_target_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            target_id (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._block_updates or not self._alive():
             return
         self.binding.set_current_target(target_id)
         self.refresh()
 
     def _on_renderer_type_changed(self, renderer_type: str) -> None:
-        """_on_renderer_type_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            renderer_type (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._block_updates or not self._alive():
             return
         layer = self.binding.current_layer()
@@ -2064,33 +1299,11 @@ class RenderSidebarController:
         self.refresh()
 
     def _on_suggest_colormap(self, colormap_name: str) -> None:
-        """_on_suggest_colormap。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            colormap_name (str): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._block_updates or not self._alive():
             return
         self.widget.colormap_combo.setCurrentText(colormap_name)
 
     def _build_style_from_widget(self, layer):
-        """_build_style_from_widget。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         target_mode = self.widget.current_render_mode()
         if target_mode == RENDER_MODE_CATEGORICAL:
             payload = self.widget.current_categorical_payload()
@@ -2194,17 +1407,6 @@ class RenderSidebarController:
         return style
 
     def _on_editor_changed(self, *_args) -> None:
-        """_on_editor_changed。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            *_args (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self._block_updates or not self._alive():
             return
         layer = self.binding.current_layer()
@@ -2223,20 +1425,6 @@ class RenderSidebarController:
             self._block_updates = False
 
     def _resolve_manual_minmax_style(self, layer, style):
-        """_resolve_manual_minmax_style。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            layer (Any): 输入参数。
-            style (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        复杂度:
-            时间和空间复杂度与输入规模线性或近线性相关。
-        """
         stretch = getattr(style, "stretch", None)
         source = getattr(layer, "source", None)
         if stretch is None or source is None:
@@ -2275,17 +1463,6 @@ class RenderSidebarController:
         return replace(style, stretch=resolved_stretch)
 
     def _reset_style(self) -> None:
-        """_reset_style。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         layer = self.binding.current_layer()
         manager = self.binding.current_layer_manager()
         if layer is None or manager is None:
@@ -2297,17 +1474,6 @@ class RenderSidebarController:
         self.refresh()
 
     def _save_style(self) -> None:
-        """_save_style。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         layer = self.binding.current_layer()
         if layer is None:
             return
@@ -2319,17 +1485,6 @@ class RenderSidebarController:
             json.dump(payload, f, indent=2, ensure_ascii=False)
 
     def _load_style(self) -> None:
-        """_load_style。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         layer = self.binding.current_layer()
         manager = self.binding.current_layer_manager()
         if layer is None or manager is None:
@@ -2345,17 +1500,6 @@ class RenderSidebarController:
         self.refresh()
 
     def _auto_scan_unique_values(self) -> None:
-        """_auto_scan_unique_values。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         layer = self.binding.current_layer()
         manager = self.binding.current_layer_manager()
         if layer is None or manager is None:
@@ -2418,17 +1562,6 @@ class RenderSidebarController:
 
 
 def _render_mode_from_layer(layer) -> str:
-    """_render_mode_from_layer。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        layer (Any): 输入参数。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     renderer_type = getattr(getattr(layer, "render_style", None), "renderer_type", "")
     if renderer_type == "multiband":
         return RENDER_MODE_MULTIBAND
@@ -2440,18 +1573,6 @@ def _render_mode_from_layer(layer) -> str:
 
 
 def _renderer_type_for_widget(widget: RenderSidebarWidget, layer) -> str:
-    """_renderer_type_for_widget。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        widget (RenderSidebarWidget): 输入参数。
-        layer (Any): 输入参数。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     mode = widget.current_render_mode()
     if mode == RENDER_MODE_MULTIBAND:
         return "multiband"
@@ -2465,51 +1586,17 @@ def _renderer_type_for_widget(widget: RenderSidebarWidget, layer) -> str:
 
 
 def _set_combo_by_data(combo: QComboBox, value) -> None:
-    """_set_combo_by_data。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        combo (QComboBox): 输入参数。
-        value (Any): 输入参数。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     index = combo.findData(value)
     if index >= 0:
         combo.setCurrentIndex(index)
 
 
 def _rgba_to_hex(rgba) -> str:
-    """_rgba_to_hex。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        rgba (Any): 输入参数。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     r, g, b, a = [int(v) for v in tuple(rgba)[:4]]
     return f"#{a:02x}{r:02x}{g:02x}{b:02x}"
 
 
 def _hex_to_rgba(text: str) -> tuple[int, int, int, int]:
-    """_hex_to_rgba。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        text (str): 输入参数。
-    返回:
-        tuple[int, int, int, int]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     color = QColor(text)
     if not color.isValid():
         return 0, 0, 0, 0
@@ -2517,18 +1604,6 @@ def _hex_to_rgba(text: str) -> tuple[int, int, int, int]:
 
 
 def _update_color_item(item: QTableWidgetItem, color: QColor) -> None:
-    """_update_color_item。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        item (QTableWidgetItem): 输入参数。
-        color (QColor): 输入参数。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     item.setData(Qt.UserRole, color.name(QColor.HexArgb))
     item.setText("")
     item.setToolTip(color.name(QColor.HexArgb))
@@ -2537,19 +1612,6 @@ def _update_color_item(item: QTableWidgetItem, color: QColor) -> None:
 
 
 def _choose_color_with_alpha(parent, initial: QColor, title: str) -> QColor:
-    """_choose_color_with_alpha。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        parent (Any): 输入参数。
-        initial (QColor): 输入参数。
-        title (str): 输入参数。
-    返回:
-        QColor: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     dialog = QColorDialog(initial, parent)
     dialog.setWindowTitle(title)
     dialog.setOption(QColorDialog.ShowAlphaChannel, True)
@@ -2559,17 +1621,6 @@ def _choose_color_with_alpha(parent, initial: QColor, title: str) -> QColor:
 
 
 def _parse_table_value(text: str):
-    """_parse_table_value。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        text (str): 输入参数。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     raw = text.strip()
     if raw == "":
         return raw
@@ -2582,17 +1633,6 @@ def _parse_table_value(text: str):
 
 
 def _crs_brief(crs_wkt: str | None) -> str:
-    """_crs_brief。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        crs_wkt (str | None): 输入参数。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     text = (crs_wkt or "").strip()
     if not text:
         return "-"

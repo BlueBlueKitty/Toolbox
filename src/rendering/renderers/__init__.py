@@ -30,35 +30,10 @@ class BaseRenderer:
     renderer_type = "base"
 
     def render(self, raw_block, style, display_settings):
-        """render。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            raw_block (Any): 输入参数。
-            style (Any): 输入参数。
-            display_settings (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         raise NotImplementedError
 
 
 def _valid_mask(arr: np.ndarray, nodata_value=None):
-    """_valid_mask。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        arr (np.ndarray): 输入参数。
-        nodata_value (Any): 输入参数。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     mask = np.isfinite(arr)
     if nodata_value is not None:
         try:
@@ -72,21 +47,6 @@ def _valid_mask(arr: np.ndarray, nodata_value=None):
 
 
 def _resolve_range(arr: np.ndarray, valid_mask: np.ndarray, stretch: StretchSettings):
-    """_resolve_range。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        arr (np.ndarray): 输入参数。
-        valid_mask (np.ndarray): 输入参数。
-        stretch (StretchSettings): 输入参数。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    复杂度:
-        时间和空间复杂度与输入规模线性或近线性相关。
-    """
     if not np.any(valid_mask):
         return 0.0, 1.0
     valid = arr[valid_mask]
@@ -103,37 +63,12 @@ def _resolve_range(arr: np.ndarray, valid_mask: np.ndarray, stretch: StretchSett
 
 
 def _apply_brightness_contrast(rgb: np.ndarray, brightness: float = 0.0, contrast: float = 1.0):
-    """_apply_brightness_contrast。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        rgb (np.ndarray): 输入参数。
-        brightness (float): 输入参数。
-        contrast (float): 输入参数。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     arr = rgb.astype(np.float32) / 255.0
     arr = (arr - 0.5) * max(float(contrast), 0.0) + 0.5 + float(brightness)
     return np.clip(arr * 255.0, 0, 255).astype(np.uint8)
 
 
 def _apply_saturation(rgb: np.ndarray, saturation: float = 1.0):
-    """_apply_saturation。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        rgb (np.ndarray): 输入参数。
-        saturation (float): 输入参数。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     if abs(float(saturation) - 1.0) < 1e-6:
         return rgb
     arr = rgb.astype(np.float32)
@@ -143,21 +78,6 @@ def _apply_saturation(rgb: np.ndarray, saturation: float = 1.0):
 
 
 def _normalize_channel(arr: np.ndarray, stretch: StretchSettings, *, gamma: float = 1.0, invert: bool = False, nodata_value=None):
-    """_normalize_channel。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        arr (np.ndarray): 输入参数。
-        stretch (StretchSettings): 输入参数。
-        gamma (float): 输入参数。
-        invert (bool): 输入参数。
-        nodata_value (Any): 输入参数。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     valid = _valid_mask(arr, nodata_value=nodata_value)
     result = np.zeros(arr.shape, dtype=np.float32)
     if not np.any(valid):
@@ -176,20 +96,6 @@ def _normalize_channel(arr: np.ndarray, stretch: StretchSettings, *, gamma: floa
 
 
 def _apply_colormap_to_normalized(normalized_arr: np.ndarray, colormap_name: str, reversed_: bool = False, discrete: bool = False) -> np.ndarray:
-    """_apply_colormap_to_normalized。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        normalized_arr (np.ndarray): 输入参数。
-        colormap_name (str): 输入参数。
-        reversed_ (bool): 输入参数。
-        discrete (bool): 输入参数。
-    返回:
-        np.ndarray: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     normalized = np.clip(normalized_arr.astype(np.float32), 0.0, 1.0)
     if discrete:
         normalized = np.round(normalized * 255.0) / 255.0
@@ -209,19 +115,6 @@ class MultibandRenderer(BaseRenderer):
     renderer_type = "multiband"
 
     def render(self, raw_block, style: MultibandRenderStyle, display_settings):
-        """render。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            raw_block (Any): 输入参数。
-            style (MultibandRenderStyle): 输入参数。
-            display_settings (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         arr = np.asarray(raw_block.data)
         if arr.ndim == 2:
             arr = np.repeat(arr[:, :, np.newaxis], 3, axis=2)
@@ -244,19 +137,6 @@ class SinglebandGrayRenderer(BaseRenderer):
     renderer_type = "singleband_gray"
 
     def render(self, raw_block, style: SinglebandGrayRenderStyle, display_settings):
-        """render。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            raw_block (Any): 输入参数。
-            style (SinglebandGrayRenderStyle): 输入参数。
-            display_settings (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         arr = np.asarray(raw_block.data)
         if arr.ndim == 3:
             arr = arr[:, :, min(max(int(style.band_indices[0]), 1), arr.shape[2]) - 1]
@@ -270,19 +150,6 @@ class SinglebandPseudoColorRenderer(BaseRenderer):
     renderer_type = "singleband_pseudocolor"
 
     def render(self, raw_block, style: SinglebandPseudoColorRenderStyle, display_settings):
-        """render。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            raw_block (Any): 输入参数。
-            style (SinglebandPseudoColorRenderStyle): 输入参数。
-            display_settings (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         arr = np.asarray(raw_block.data)
         if arr.ndim == 3:
             arr = arr[:, :, min(max(int(style.band_indices[0]), 1), arr.shape[2]) - 1]
@@ -299,19 +166,6 @@ class UniqueValueRenderer(BaseRenderer):
     renderer_type = "unique_value"
 
     def render(self, raw_block, style: UniqueValueRenderStyle, display_settings):
-        """render。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            raw_block (Any): 输入参数。
-            style (UniqueValueRenderStyle): 输入参数。
-            display_settings (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         arr = np.asarray(raw_block.data)
         if arr.ndim == 3:
             arr = arr[:, :, min(max(int(style.band_indices[0]), 1), arr.shape[2]) - 1]
@@ -328,19 +182,6 @@ class PalettedRenderer(BaseRenderer):
     renderer_type = "paletted"
 
     def render(self, raw_block, style: PalettedRenderStyle, display_settings):
-        """render。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            raw_block (Any): 输入参数。
-            style (PalettedRenderStyle): 输入参数。
-            display_settings (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         arr = np.asarray(raw_block.data)
         if arr.ndim == 3:
             arr = arr[:, :, 0]
@@ -370,19 +211,6 @@ class HillshadeRenderer(BaseRenderer):
     renderer_type = "hillshade"
 
     def render(self, raw_block, style: HillshadeRenderStyle, display_settings):
-        """render。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            raw_block (Any): 输入参数。
-            style (HillshadeRenderStyle): 输入参数。
-            display_settings (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         arr = np.asarray(raw_block.data)
         if arr.ndim == 3:
             arr = arr[:, :, min(max(int(style.band_indices[0]), 1), arr.shape[2]) - 1]
@@ -418,15 +246,4 @@ RENDERER_REGISTRY = {
 
 
 def renderer_for_style(style):
-    """renderer_for_style。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        style (Any): 输入参数。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return RENDERER_REGISTRY.get(getattr(style, "renderer_type", "singleband_gray"), SinglebandGrayRenderer())

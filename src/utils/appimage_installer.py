@@ -15,17 +15,6 @@ from PySide6.QtWidgets import QMessageBox, QWidget
 
 class AppImageInstaller:
     def __init__(self):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.appimage_path = os.environ.get("APPIMAGE")
         self.home_dir = Path.home()
         self.apps_dir = self.home_dir / ".local/share/applications"

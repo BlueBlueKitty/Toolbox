@@ -34,17 +34,6 @@ RESAMPLE_METHOD_OPTIONS = [
 
 
 def get_user_config_dir() -> Path:
-    """get_user_config_dir。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        无。
-    返回:
-        Path: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     appdata = os.environ.get("APPDATA")
     if appdata:
         return Path(appdata) / "Toolbox"
@@ -52,17 +41,6 @@ def get_user_config_dir() -> Path:
 
 
 def _normalize_ext(value: str) -> str:
-    """_normalize_ext。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        value (str): 输入参数。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     if not value:
         return ""
     return value if value.startswith(".") else f".{value}"
@@ -92,17 +70,6 @@ class LocalRasterSourceConfig:
     sample_path: str = ""
 
     def to_dict(self) -> Dict:
-        """to_dict。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            Dict: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         data = asdict(self)
         data["archive_extension"] = _normalize_ext(self.archive_extension)
         data["raster_extension"] = _normalize_ext(self.raster_extension)
@@ -110,17 +77,6 @@ class LocalRasterSourceConfig:
 
     @classmethod
     def from_dict(cls, data: Dict) -> "LocalRasterSourceConfig":
-        """from_dict。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            data (Dict): 输入参数。
-        返回:
-            'LocalRasterSourceConfig': 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         data = dict(data)
         return cls(
             name=data.get("name", "未命名本地数据源"),
@@ -157,32 +113,10 @@ class OnlineRasterSourceConfig:
     builtin: bool = False
 
     def to_dict(self) -> Dict:
-        """to_dict。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            Dict: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: Dict) -> "OnlineRasterSourceConfig":
-        """from_dict。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            data (Dict): 输入参数。
-        返回:
-            'OnlineRasterSourceConfig': 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         data = dict(data)
         return cls(
             name=data.get("name", "未命名在线数据源"),
@@ -196,17 +130,6 @@ class OnlineRasterSourceConfig:
 
 
 def build_default_local_sources() -> List[LocalRasterSourceConfig]:
-    """build_default_local_sources。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        无。
-    返回:
-        List[LocalRasterSourceConfig]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return [
         LocalRasterSourceConfig(
             name="SRTM",
@@ -250,17 +173,6 @@ def build_default_local_sources() -> List[LocalRasterSourceConfig]:
 
 
 def build_default_online_sources() -> List[OnlineRasterSourceConfig]:
-    """build_default_online_sources。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        无。
-    返回:
-        List[OnlineRasterSourceConfig]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return [
         OnlineRasterSourceConfig(
             name="OpenTopography",
@@ -274,34 +186,12 @@ def build_default_online_sources() -> List[OnlineRasterSourceConfig]:
 
 class RasterSourceConfigManager:
     def __init__(self):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.config_dir = get_user_config_dir()
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.config_file = self.config_dir / "raster_data_sources.json"
         self.data = self._load_or_initialize()
 
     def _load_or_initialize(self) -> Dict:
-        """_load_or_initialize。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            Dict: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         legacy_values = self._load_legacy_settings()
         if not self.config_file.exists():
             data = self._default_payload()
@@ -321,17 +211,6 @@ class RasterSourceConfigManager:
         return data
 
     def _default_payload(self) -> Dict:
-        """_default_payload。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            Dict: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return {
             "local_sources": [item.to_dict() for item in build_default_local_sources()],
             "online_sources": [item.to_dict() for item in build_default_online_sources()],
@@ -344,17 +223,6 @@ class RasterSourceConfigManager:
         }
 
     def _merge_defaults(self, data: Dict) -> Dict:
-        """_merge_defaults。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            data (Dict): 输入参数。
-        返回:
-            Dict: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         merged = dict(self._default_payload())
         merged["ui_state"].update(data.get("ui_state", {}))
 
@@ -374,18 +242,6 @@ class RasterSourceConfigManager:
         return merged
 
     def _merge_local_source(self, default_item: Dict, current: Dict) -> Dict:
-        """_merge_local_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            default_item (Dict): 输入参数。
-            current (Dict): 输入参数。
-        返回:
-            Dict: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not default_item.get("builtin"):
             merged = dict(default_item)
             merged.update(current)
@@ -398,18 +254,6 @@ class RasterSourceConfigManager:
         return merged
 
     def _merge_online_source(self, default_item: Dict, current: Dict) -> Dict:
-        """_merge_online_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            default_item (Dict): 输入参数。
-            current (Dict): 输入参数。
-        返回:
-            Dict: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not default_item.get("builtin"):
             merged = dict(default_item)
             merged.update(current)
@@ -422,17 +266,6 @@ class RasterSourceConfigManager:
         return merged
 
     def _load_legacy_settings(self) -> Dict[str, str]:
-        """_load_legacy_settings。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            Dict[str, str]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         candidate_files = [
             Path.home() / ".toolbox" / "dem_acquisition.ini",
             self.config_dir / "dem_acquisition.ini",
@@ -454,18 +287,6 @@ class RasterSourceConfigManager:
         return values
 
     def _apply_legacy_values(self, data: Dict, legacy_values: Dict[str, str]) -> Dict:
-        """_apply_legacy_values。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            data (Dict): 输入参数。
-            legacy_values (Dict[str, str]): 输入参数。
-        返回:
-            Dict: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not legacy_values:
             return data
         for item in data.get("local_sources", []):
@@ -481,110 +302,31 @@ class RasterSourceConfigManager:
         return data
 
     def _save_data(self, data: Dict):
-        """_save_data。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            data (Dict): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         with self.config_file.open("w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
     def save(self):
-        """save。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._save_data(self.data)
 
     def get_local_sources(self) -> List[LocalRasterSourceConfig]:
-        """get_local_sources。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            List[LocalRasterSourceConfig]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return [LocalRasterSourceConfig.from_dict(item) for item in self.data.get("local_sources", [])]
 
     def get_online_sources(self) -> List[OnlineRasterSourceConfig]:
-        """get_online_sources。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            List[OnlineRasterSourceConfig]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return [OnlineRasterSourceConfig.from_dict(item) for item in self.data.get("online_sources", [])]
 
     def get_local_source(self, name: str) -> Optional[LocalRasterSourceConfig]:
-        """get_local_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            name (str): 输入参数。
-        返回:
-            Optional[LocalRasterSourceConfig]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         for item in self.get_local_sources():
             if item.name == name:
                 return item
         return None
 
     def get_online_source(self, name: str) -> Optional[OnlineRasterSourceConfig]:
-        """get_online_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            name (str): 输入参数。
-        返回:
-            Optional[OnlineRasterSourceConfig]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         for item in self.get_online_sources():
             if item.name == name:
                 return item
         return None
 
     def _replace_by_name(self, key: str, name: str, payload: Dict):
-        """_replace_by_name。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            key (str): 输入参数。
-            name (str): 输入参数。
-            payload (Dict): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         items = self.data.get(key, [])
         for index, item in enumerate(items):
             if item.get("name") == name:
@@ -596,18 +338,6 @@ class RasterSourceConfigManager:
         self.save()
 
     def save_local_source(self, config: LocalRasterSourceConfig, original_name: Optional[str] = None):
-        """save_local_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            config (LocalRasterSourceConfig): 输入参数。
-            original_name (Optional[str]): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if config.builtin:
             default = next((item for item in build_default_local_sources() if item.name == config.name), None)
             if default:
@@ -623,18 +353,6 @@ class RasterSourceConfigManager:
         self._replace_by_name("local_sources", config.name, config.to_dict())
 
     def save_online_source(self, config: OnlineRasterSourceConfig, original_name: Optional[str] = None):
-        """save_online_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            config (OnlineRasterSourceConfig): 输入参数。
-            original_name (Optional[str]): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if config.builtin:
             default = next((item for item in build_default_online_sources() if item.name == config.name), None)
             if default:
@@ -648,18 +366,6 @@ class RasterSourceConfigManager:
         self._replace_by_name("online_sources", config.name, config.to_dict())
 
     def delete_local_source(self, name: str, allow_builtin: bool = False) -> bool:
-        """delete_local_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            name (str): 输入参数。
-            allow_builtin (bool): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         sources = self.get_local_sources()
         target = next((item for item in sources if item.name == name), None)
         if not target:
@@ -671,18 +377,6 @@ class RasterSourceConfigManager:
         return True
 
     def delete_online_source(self, name: str, allow_builtin: bool = False) -> bool:
-        """delete_online_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            name (str): 输入参数。
-            allow_builtin (bool): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         sources = self.get_online_sources()
         target = next((item for item in sources if item.name == name), None)
         if not target:
@@ -694,17 +388,6 @@ class RasterSourceConfigManager:
         return True
 
     def duplicate_local_source(self, name: str) -> Optional[LocalRasterSourceConfig]:
-        """duplicate_local_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            name (str): 输入参数。
-        返回:
-            Optional[LocalRasterSourceConfig]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         source = self.get_local_source(name)
         if not source:
             return None
@@ -714,17 +397,6 @@ class RasterSourceConfigManager:
         return cloned
 
     def duplicate_online_source(self, name: str) -> Optional[OnlineRasterSourceConfig]:
-        """duplicate_online_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            name (str): 输入参数。
-        返回:
-            Optional[OnlineRasterSourceConfig]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         source = self.get_online_source(name)
         if not source:
             return None
@@ -734,18 +406,6 @@ class RasterSourceConfigManager:
         return cloned
 
     def generate_unique_name(self, base_name: str, local: bool = True) -> str:
-        """generate_unique_name。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            base_name (str): 输入参数。
-            local (bool): 输入参数。
-        返回:
-            str: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         existing = {item.name for item in (self.get_local_sources() if local else self.get_online_sources())}
         if base_name not in existing:
             return base_name
@@ -755,31 +415,8 @@ class RasterSourceConfigManager:
         return f"{base_name} {index}"
 
     def get_ui_state(self) -> Dict:
-        """get_ui_state。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            Dict: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return dict(self.data.get("ui_state", {}))
 
     def set_ui_state_value(self, key: str, value):
-        """set_ui_state_value。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            key (str): 输入参数。
-            value (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self.data.setdefault("ui_state", {})[key] = value
         self.save()

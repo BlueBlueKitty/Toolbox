@@ -18,17 +18,6 @@ from .base import BaseSegmenter
 
 class MagicWandSegmenter(BaseSegmenter):
     def __init__(self):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         self._flood_mask: np.ndarray | None = None
         self._flood_mask_shape: tuple[int, int] | None = None
 
@@ -38,19 +27,6 @@ class MagicWandSegmenter(BaseSegmenter):
         seed_point: tuple[int, int],
         params: MagicWandParams,
     ) -> PreviewSelection:
-        """run。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            image (np.ndarray): 输入参数。
-            seed_point (tuple[int, int]): 输入参数。
-            params (MagicWandParams): 输入参数。
-        返回:
-            PreviewSelection: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if cv2 is None:
             raise RuntimeError("魔法棒需要 opencv-python 依赖")
 
@@ -68,19 +44,6 @@ class MagicWandSegmenter(BaseSegmenter):
         seed_point: tuple[int, int],
         params: MagicWandParams,
     ) -> PreviewSelection:
-        """run_prepared。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            prepared_image (np.ndarray): 输入参数。
-            seed_point (tuple[int, int]): 输入参数。
-            params (MagicWandParams): 输入参数。
-        返回:
-            PreviewSelection: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if cv2 is None:
             raise RuntimeError("魔法棒需要 opencv-python 依赖")
 
@@ -126,33 +89,9 @@ class MagicWandSegmenter(BaseSegmenter):
         )
 
     def prepare_image(self, image: np.ndarray, params: MagicWandParams) -> np.ndarray:
-        """prepare_image。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            image (np.ndarray): 输入参数。
-            params (MagicWandParams): 输入参数。
-        返回:
-            np.ndarray: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self._prepare_image(image, params)
 
     def _prepare_image(self, image: np.ndarray, params: MagicWandParams) -> np.ndarray:
-        """_prepare_image。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            image (np.ndarray): 输入参数。
-            params (MagicWandParams): 输入参数。
-        返回:
-            np.ndarray: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if image.ndim == 2:
             base = image[..., None]
         else:
@@ -172,41 +111,12 @@ class MagicWandSegmenter(BaseSegmenter):
         return rgb
 
     def _grow_region(self, image: np.ndarray, seed_point: tuple[int, int], params: MagicWandParams) -> np.ndarray:
-        """_grow_region。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            image (np.ndarray): 输入参数。
-            seed_point (tuple[int, int]): 输入参数。
-            params (MagicWandParams): 输入参数。
-        返回:
-            np.ndarray: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         threshold = int(max(0.0, float(params.tolerance)))
         if threshold > 0:
             threshold += 1
         return self._grow_region_flood_fill(image, seed_point, threshold, params.connectivity)
 
     def _grow_region_flood_fill(self, image: np.ndarray, seed_point: tuple[int, int], threshold: int, connectivity: int) -> np.ndarray:
-        """_grow_region_flood_fill。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            image (np.ndarray): 输入参数。
-            seed_point (tuple[int, int]): 输入参数。
-            threshold (int): 输入参数。
-            connectivity (int): 输入参数。
-        返回:
-            np.ndarray: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        复杂度:
-            时间和空间复杂度与输入规模线性或近线性相关。
-        """
         height, width = image.shape[:2]
         work = self._as_uint8_contiguous(image)
         flood_mask = self._reusable_flood_mask(height, width)
@@ -220,17 +130,6 @@ class MagicWandSegmenter(BaseSegmenter):
         return (flood_mask[1:-1, 1:-1] > 0).astype(np.uint8)
 
     def _as_uint8_contiguous(self, image: np.ndarray) -> np.ndarray:
-        """_as_uint8_contiguous。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            image (np.ndarray): 输入参数。
-        返回:
-            np.ndarray: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if image.dtype == np.uint8 and image.flags["C_CONTIGUOUS"]:
             return image
         if image.dtype == np.uint8:
@@ -238,20 +137,6 @@ class MagicWandSegmenter(BaseSegmenter):
         return np.ascontiguousarray(image.astype(np.uint8, copy=False))
 
     def _reusable_flood_mask(self, height: int, width: int) -> np.ndarray:
-        """_reusable_flood_mask。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            height (int): 输入参数。
-            width (int): 输入参数。
-        返回:
-            np.ndarray: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        复杂度:
-            时间和空间复杂度与输入规模线性或近线性相关。
-        """
         shape = (height + 2, width + 2)
         if self._flood_mask is None or self._flood_mask_shape != shape:
             self._flood_mask = np.zeros(shape, dtype=np.uint8)

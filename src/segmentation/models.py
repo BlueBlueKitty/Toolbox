@@ -13,62 +13,18 @@ from src.rendering.models import ImageSourceMetadata, OverviewInfo, ViewportStat
 
 
 def utc_now_iso() -> str:
-    """utc_now_iso。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        无。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 
 def new_id() -> str:
-    """new_id。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        无。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return uuid.uuid4().hex
 
 
 def round_image_coord(value: float) -> float:
-    """round_image_coord。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        value (float): 输入参数。
-    返回:
-        float: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return round(float(value), 3)
 
 
 def round_image_ring(points: list[list[float]]) -> list[list[float]]:
-    """round_image_ring。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        points (list[list[float]]): 输入参数。
-    返回:
-        list[list[float]]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return [[round_image_coord(x), round_image_coord(y)] for x, y in points]
 
 
@@ -96,31 +52,9 @@ class AnnotationObject:
     updated_at: str = field(default_factory=utc_now_iso)
 
     def clone(self) -> "AnnotationObject":
-        """clone。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            'AnnotationObject': 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return AnnotationObject.from_dict(self.to_dict())
 
     def to_dict(self) -> dict[str, Any]:
-        """to_dict。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            dict[str, Any]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         payload = asdict(self)
         payload["exterior"] = round_image_ring(self.exterior)
         payload["holes"] = [round_image_ring(hole) for hole in self.holes]
@@ -137,23 +71,6 @@ class AnnotationObject:
         geom_type: str = "polygon",
         source_tool: str = "polygon",
     ) -> "AnnotationObject":
-        """from_polygon。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            label_id (int): 输入参数。
-            exterior (list[list[float]]): 输入参数。
-            holes (Optional[list[list[list[float]]]]): 输入参数。
-            geom_type (str): 输入参数。
-            source_tool (str): 输入参数。
-        返回:
-            'AnnotationObject': 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        复杂度:
-            时间和空间复杂度与输入规模线性或近线性相关。
-        """
         exterior = round_image_ring(exterior)
         holes = [round_image_ring(hole) for hole in (holes or [])]
         xs = [pt[0] for pt in exterior]
@@ -171,17 +88,6 @@ class AnnotationObject:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "AnnotationObject":
-        """from_dict。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            payload (dict[str, Any]): 输入参数。
-        返回:
-            'AnnotationObject': 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return cls(**_filter_dataclass_payload(cls, payload))
 
 
@@ -226,17 +132,6 @@ class DisplayState:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "DisplayState":
-        """from_dict。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            payload (dict[str, Any]): 输入参数。
-        返回:
-            'DisplayState': 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         payload = dict(payload or {})
         center = payload.get("center", (0.0, 0.0))
         if isinstance(center, (list, tuple)) and len(center) >= 2:
@@ -278,17 +173,6 @@ class SegmentationProject:
     primary_window_id: str = "viewer_1"
 
     def to_dict(self) -> dict[str, Any]:
-        """to_dict。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            dict[str, Any]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         image_asset = asdict(self.image_asset) if self.image_asset else None
         return {
             "project_version": self.project_version,
@@ -308,17 +192,6 @@ class SegmentationProject:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "SegmentationProject":
-        """from_dict。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            payload (dict[str, Any]): 输入参数。
-        返回:
-            'SegmentationProject': 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         image_asset = payload.get("image_asset")
         overview_levels = []
         if image_asset:
@@ -357,17 +230,6 @@ class SegmentationProject:
 
 
 def _normalize_layer_visibility(payload: dict[str, Any]) -> dict[str, bool]:
-    """_normalize_layer_visibility。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        payload (dict[str, Any]): 输入参数。
-    返回:
-        dict[str, bool]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     values = dict(payload or {}) if isinstance(payload, dict) else {}
     if "image" in values and "base_raster" not in values:
         values["base_raster"] = values.pop("image")
@@ -385,18 +247,6 @@ def _normalize_layer_visibility(payload: dict[str, Any]) -> dict[str, bool]:
 
 
 def _filter_dataclass_payload(dataclass_type, payload: dict[str, Any] | None) -> dict[str, Any]:
-    """_filter_dataclass_payload。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        dataclass_type (Any): 输入参数。
-        payload (dict[str, Any] | None): 输入参数。
-    返回:
-        dict[str, Any]: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     source = dict(payload or {})
     allowed = {item.name for item in dataclass_fields(dataclass_type)}
     return {key: value for key, value in source.items() if key in allowed}

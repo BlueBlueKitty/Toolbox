@@ -45,17 +45,6 @@ class SegmentationExportDialog(QDialog):
 
     @classmethod
     def available_vector_formats(cls, has_geo: bool) -> dict[str, str]:
-        """available_vector_formats。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            has_geo (bool): 输入参数。
-        返回:
-            dict[str, str]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if has_geo:
             return dict(cls.VECTOR_FORMATS)
         return {
@@ -66,38 +55,11 @@ class SegmentationExportDialog(QDialog):
 
     @classmethod
     def coordinate_mode_for_format(cls, vector_format: str, has_geo: bool) -> str:
-        """coordinate_mode_for_format。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            vector_format (str): 输入参数。
-            has_geo (bool): 输入参数。
-        返回:
-            str: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if has_geo and vector_format not in cls.DL_VECTOR_FORMATS:
             return "geo"
         return "image"
 
     def __init__(self, default_name: str, default_dir: str, has_geo: bool, prefer_tif_mask: bool, parent=None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            default_name (str): 输入参数。
-            default_dir (str): 输入参数。
-            has_geo (bool): 输入参数。
-            prefer_tif_mask (bool): 输入参数。
-            parent (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__(parent)
         self.setWindowTitle("导出设置")
         self.resize(520, 320)
@@ -165,34 +127,12 @@ class SegmentationExportDialog(QDialog):
         self._update_enabled_state()
 
     def _browse_dir(self) -> None:
-        """_browse_dir。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         current = self.dir_edit.text().strip()
         selected = QFileDialog.getExistingDirectory(self, "选择导出目录", current or str(Path.home()))
         if selected:
             self.dir_edit.setText(selected)
 
     def _update_enabled_state(self) -> None:
-        """_update_enabled_state。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         vector_enabled = self.export_vector_check.isChecked()
         mask_enabled = self.export_mask_check.isChecked()
         self.vector_format_combo.setEnabled(vector_enabled)
@@ -200,17 +140,6 @@ class SegmentationExportDialog(QDialog):
         self.mask_colored_check.setEnabled(mask_enabled and self.mask_format_combo.currentText() == "GeoTIFF")
 
     def _accept(self) -> None:
-        """_accept。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         output_dir = self.dir_edit.text().strip()
         base_name = self.base_name_edit.text().strip()
         if not output_dir:
@@ -238,21 +167,6 @@ class SegmentationExportDialog(QDialog):
 
     @classmethod
     def get_settings(cls, default_name: str, default_dir: str, has_geo: bool, prefer_tif_mask: bool, parent=None):
-        """get_settings。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            default_name (str): 输入参数。
-            default_dir (str): 输入参数。
-            has_geo (bool): 输入参数。
-            prefer_tif_mask (bool): 输入参数。
-            parent (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         dialog = cls(default_name, default_dir, has_geo, prefer_tif_mask, parent)
         if dialog.exec() != QDialog.Accepted:
             return None

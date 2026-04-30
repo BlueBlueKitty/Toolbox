@@ -21,18 +21,6 @@ class GammaFormatSelectorWidget(QGroupBox):
     """GAMMA格式选择组件（可复用）"""
     
     def __init__(self, parent=None, default_format="float32"):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parent (Any): 输入参数。
-            default_format (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__("数据格式", parent)
         
         layout = QVBoxLayout(self)
@@ -63,19 +51,6 @@ class GammaSingleFileDialog(QDialog):
     """GAMMA单文件格式选择对话框"""
     
     def __init__(self, parent=None, default_format="float32", binary_file=None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parent (Any): 输入参数。
-            default_format (Any): 输入参数。
-            binary_file (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__(parent)
         self.binary_file = binary_file
         self.setWindowTitle("GAMMA文件设置")
@@ -202,59 +177,15 @@ class GammaSingleFileDialog(QDialog):
             self.auto_status_label.setStyleSheet("color: red;")
     
     def get_selected_format(self):
-        """get_selected_format。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.format_selector.get_selected_format()
     
     def get_manual_width(self):
-        """get_manual_width。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.manual_width
     
     def get_manual_height(self):
-        """get_manual_height。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.manual_height
     
     def get_selected_par(self):
-        """get_selected_par。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.par_combo.currentData()
 
 
@@ -262,19 +193,6 @@ class GammaTimeSeriesDialog(QDialog):
     """GAMMA时序文件格式选择对话框"""
     
     def __init__(self, parent=None, default_format="float32", file_list=None):
-        """__init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            parent (Any): 输入参数。
-            default_format (Any): 输入参数。
-            file_list (Any): 输入参数。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         super().__init__(parent)
         self.file_list = file_list or []
         self.valid_files = []
@@ -489,57 +407,13 @@ class GammaTimeSeriesDialog(QDialog):
         self.accept()
     
     def get_selected_format(self):
-        """get_selected_format。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.format_selector.get_selected_format()
     
     def get_valid_files(self):
-        """get_valid_files。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.valid_files
     
     def get_width(self):
-        """get_width。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.width
     
     def get_height(self):
-        """get_height。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         return self.height

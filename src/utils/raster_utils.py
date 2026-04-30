@@ -27,19 +27,6 @@ SUPPORTED_RASTER_EXTENSIONS = [".tif", ".tiff", ".hgt", ".img", ".vrt"]
 
 
 def format_coordinate(value: float, pattern: str, is_latitude: bool) -> str:
-    """format_coordinate。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        value (float): 输入参数。
-        pattern (str): 输入参数。
-        is_latitude (bool): 输入参数。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     abs_value = abs(int(round(value)))
     if pattern in ("N00", "E000"):
         prefix = ("N" if value >= 0 else "S") if is_latitude else ("E" if value >= 0 else "W")
@@ -61,33 +48,10 @@ def format_coordinate(value: float, pattern: str, is_latitude: bool) -> str:
 
 
 def _token_display(pattern: str, label: str) -> str:
-    """_token_display。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        pattern (str): 输入参数。
-        label (str): 输入参数。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     return f"[{label}:{pattern}]"
 
 
 def build_rule_preview(config: LocalRasterSourceConfig) -> str:
-    """build_rule_preview。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        config (LocalRasterSourceConfig): 输入参数。
-    返回:
-        str: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    """
     preview = config.relative_path_template.replace("{tile}", config.tile_token_template)
     preview = preview.replace("{lat}", _token_display(config.latitude_format, "纬度"))
     preview = preview.replace("{lon}", _token_display(config.longitude_format, "经度"))
@@ -113,17 +77,6 @@ class RasterSourceTestResult:
     details: List[str] = None
 
     def __post_init__(self):
-        """__post_init__。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            无。
-        返回:
-            None: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if self.details is None:
             self.details = []
 
@@ -131,42 +84,12 @@ class RasterSourceTestResult:
 class RasterTileNaming:
     @staticmethod
     def build_tile_id(config: LocalRasterSourceConfig, anchor_lat: float, anchor_lon: float) -> str:
-        """build_tile_id。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            config (LocalRasterSourceConfig): 输入参数。
-            anchor_lat (float): 输入参数。
-            anchor_lon (float): 输入参数。
-        返回:
-            str: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        复杂度:
-            时间和空间复杂度与输入规模线性或近线性相关。
-        """
         lat_text = format_coordinate(anchor_lat, config.latitude_format, True)
         lon_text = format_coordinate(anchor_lon, config.longitude_format, False)
         return config.tile_token_template.replace("{lat}", lat_text).replace("{lon}", lon_text)
 
     @staticmethod
     def anchor_from_cell(config: LocalRasterSourceConfig, south: float, north: float, west: float, east: float) -> Tuple[float, float]:
-        """anchor_from_cell。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            config (LocalRasterSourceConfig): 输入参数。
-            south (float): 输入参数。
-            north (float): 输入参数。
-            west (float): 输入参数。
-            east (float): 输入参数。
-        返回:
-            Tuple[float, float]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         anchor = config.naming_anchor
         if anchor == "左下角":
             return south, west
@@ -178,19 +101,6 @@ class RasterTileNaming:
 
     @staticmethod
     def cell_for_point(config: LocalRasterSourceConfig, lat: float, lon: float) -> Tuple[float, float, float, float]:
-        """cell_for_point。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            config (LocalRasterSourceConfig): 输入参数。
-            lat (float): 输入参数。
-            lon (float): 输入参数。
-        返回:
-            Tuple[float, float, float, float]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         lat_idx = math.floor(lat / config.latitude_interval)
         lon_idx = math.floor(lon / config.longitude_interval)
         south = lat_idx * config.latitude_interval
@@ -201,23 +111,6 @@ class RasterTileNaming:
 
     @classmethod
     def enumerate_tiles(cls, config: LocalRasterSourceConfig, south: float, north: float, west: float, east: float) -> List[TileRecord]:
-        """enumerate_tiles。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            config (LocalRasterSourceConfig): 输入参数。
-            south (float): 输入参数。
-            north (float): 输入参数。
-            west (float): 输入参数。
-            east (float): 输入参数。
-        返回:
-            List[TileRecord]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        复杂度:
-            时间和空间复杂度与输入规模线性或近线性相关。
-        """
         lat_start = math.floor(south / config.latitude_interval)
         lat_end = math.ceil(north / config.latitude_interval) - 1
         lon_start = math.floor(west / config.longitude_interval)
@@ -252,17 +145,6 @@ class RasterTileNaming:
 class RasterArchiveHelper:
     @staticmethod
     def list_readable_rasters(archive_path: str) -> List[str]:
-        """list_readable_rasters。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            archive_path (str): 输入参数。
-        返回:
-            List[str]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         with zipfile.ZipFile(archive_path, "r") as zf:
             return [
                 name for name in zf.namelist()
@@ -271,18 +153,6 @@ class RasterArchiveHelper:
 
     @staticmethod
     def choose_raster(candidates: List[str], strategy: str) -> Optional[str]:
-        """choose_raster。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            candidates (List[str]): 输入参数。
-            strategy (str): 输入参数。
-        返回:
-            Optional[str]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not candidates:
             return None
         scored = []
@@ -305,38 +175,12 @@ class RasterArchiveHelper:
 
     @staticmethod
     def build_archive_vsimem_path(archive_path: str, inner_path: str) -> str:
-        """build_archive_vsimem_path。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            archive_path (str): 输入参数。
-            inner_path (str): 输入参数。
-        返回:
-            str: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         fixed_inner = inner_path.replace("\\", "/")
         return f"/vsizip/{archive_path.replace(os.sep, '/')}/{fixed_inner}"
 
 
 class LocalRasterProcessor:
     def resolve_tile_source(self, config: LocalRasterSourceConfig, record: TileRecord) -> Tuple[bool, Optional[str], str]:
-        """resolve_tile_source。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            config (LocalRasterSourceConfig): 输入参数。
-            record (TileRecord): 输入参数。
-        返回:
-            Tuple[bool, Optional[str], str]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        复杂度:
-            时间和空间复杂度与输入规模线性或近线性相关。
-        """
         if not os.path.exists(record.source_path):
             return False, None, "文件不存在"
         if not config.is_archive:
@@ -358,23 +202,6 @@ class LocalRasterProcessor:
         west: float,
         east: float,
     ) -> Tuple[List[str], List[str], List[str]]:
-        """collect_tiles。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            config (LocalRasterSourceConfig): 输入参数。
-            south (float): 输入参数。
-            north (float): 输入参数。
-            west (float): 输入参数。
-            east (float): 输入参数。
-        返回:
-            Tuple[List[str], List[str], List[str]]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        复杂度:
-            时间和空间复杂度与输入规模线性或近线性相关。
-        """
         found_files: List[str] = []
         missing_tiles: List[str] = []
         details: List[str] = []
@@ -394,20 +221,6 @@ class LocalRasterProcessor:
         lon: float,
         get_extent: Callable[[str], Tuple[float, float, float, float]],
     ) -> RasterSourceTestResult:
-        """test_config。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            config (LocalRasterSourceConfig): 输入参数。
-            lat (float): 输入参数。
-            lon (float): 输入参数。
-            get_extent (Callable[[str], Tuple[float, float, float, float]]): 输入参数。
-        返回:
-            RasterSourceTestResult: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         if not config.root_dir or not os.path.isdir(config.root_dir):
             return RasterSourceTestResult(False, "根目录错误或不存在")
 
@@ -445,37 +258,12 @@ class LocalRasterProcessor:
 
     @staticmethod
     def get_raster_extent_wgs84(raster_path: str) -> Tuple[float, float, float, float]:
-        """get_raster_extent_wgs84。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            raster_path (str): 输入参数。
-        返回:
-            Tuple[float, float, float, float]: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         from .dem_utils import LocalDEMProcessor
 
         return LocalDEMProcessor.get_raster_extent_wgs84(raster_path)
 
     @staticmethod
     def merge_tiles(input_files: List[str], output_path: str) -> bool:
-        """merge_tiles。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            input_files (List[str]): 输入参数。
-            output_path (str): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        复杂度:
-            时间和空间复杂度与输入规模线性或近线性相关。
-        """
         from .dem_utils import LocalDEMProcessor
 
         return LocalDEMProcessor.merge_dem_tiles(input_files, output_path)
@@ -490,23 +278,6 @@ class LocalRasterProcessor:
         east: float,
         resample_method: str = "双线性插值",
     ) -> bool:
-        """clip_to_bounds。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            input_path (str): 输入参数。
-            output_path (str): 输入参数。
-            south (float): 输入参数。
-            north (float): 输入参数。
-            west (float): 输入参数。
-            east (float): 输入参数。
-            resample_method (str): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         from .dem_utils import LocalDEMProcessor
 
         return LocalDEMProcessor.clip_to_bounds(
@@ -520,20 +291,6 @@ class LocalRasterProcessor:
         output_path: str,
         resample_method: str = "双线性插值",
     ) -> bool:
-        """clip_and_resample_to_reference。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            input_path (str): 输入参数。
-            reference_path (str): 输入参数。
-            output_path (str): 输入参数。
-            resample_method (str): 输入参数。
-        返回:
-            bool: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         from .dem_utils import LocalDEMProcessor
 
         return LocalDEMProcessor.clip_and_resample_to_reference(
@@ -557,17 +314,6 @@ class RasterSourceAutoDetector:
 
     @classmethod
     def detect_from_sample(cls, sample_path: str) -> LocalRasterSourceConfig:
-        """detect_from_sample。
-
-        功能:
-            承担当前方法对应的业务逻辑。
-        参数:
-            sample_path (str): 输入参数。
-        返回:
-            LocalRasterSourceConfig: 方法执行结果。
-        异常:
-            Exception: 依赖组件或输入异常时可能抛出。
-        """
         import re
 
         path = Path(sample_path)

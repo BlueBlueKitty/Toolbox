@@ -24,19 +24,6 @@ except ImportError:
 
 
 def _resolve_resample_alg(method: str):
-    """_resolve_resample_alg。
-
-    功能:
-        承担当前方法对应的业务逻辑。
-    参数:
-        method (str): 输入参数。
-    返回:
-        None: 方法执行结果。
-    异常:
-        Exception: 依赖组件或输入异常时可能抛出。
-    复杂度:
-        时间和空间复杂度与输入规模线性或近线性相关。
-    """
     if not GDAL_AVAILABLE:
         return None
     mapping = {
