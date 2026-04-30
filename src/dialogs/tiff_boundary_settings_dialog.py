@@ -57,6 +57,17 @@ class TiffBoundarySettingsDialog(QDialog):
             return False
         
     def __init__(self, parent=None):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            parent (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super(TiffBoundarySettingsDialog, self).__init__(parent)
         
         self.setWindowTitle("TIFF边界转矢量 - 参数设置")
@@ -177,6 +188,17 @@ class TiffBoundarySettingsDialog(QDialog):
             print(f"保存配置失败: {e}")
     
     def browse_input_file(self):
+        """browse_input_file。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择TIFF文件", self.last_input_dir, "TIFF文件 (*.tif *.tiff);;所有文件 (*.*)"
         )

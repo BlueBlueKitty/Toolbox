@@ -33,6 +33,17 @@ class SegmentationToolController(QObject):
     TOOL_ERASER = "eraser"
 
     def __init__(self, parent=None):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            parent (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().__init__(parent)
         self.active_tool = self.TOOL_BROWSE
         self.annotations: list[AnnotationObject] = []
@@ -56,12 +67,45 @@ class SegmentationToolController(QObject):
         }
 
     def set_annotations(self, annotations: list[AnnotationObject]) -> None:
+        """set_annotations。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotations (list[AnnotationObject]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.annotations = annotations[:]
 
     def set_view_state(self, state: ViewportState) -> None:
+        """set_view_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            state (ViewportState): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._viewport_state = state
 
     def set_tool(self, tool_name: str) -> None:
+        """set_tool。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            tool_name (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.active_tool = tool_name
         if tool_name != self.TOOL_POLYGON:
             self._polygon_points = []
@@ -72,6 +116,17 @@ class SegmentationToolController(QObject):
         self._last_edited_vertex_ref = None
 
     def handle_press(self, payload) -> None:
+        """handle_press。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            payload (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         x, y = payload.x, payload.y
         if payload.button == Qt.RightButton and self.active_tool == self.TOOL_BROWSE:
             self._handle_right_click_insert(x, y)
@@ -98,6 +153,17 @@ class SegmentationToolController(QObject):
         self._handle_selection_press(x, y, bool(payload.modifiers & Qt.ControlModifier))
 
     def handle_move(self, payload) -> None:
+        """handle_move。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            payload (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         x, y = payload.x, payload.y
         if self.active_tool == self.TOOL_POLYGON and bool(payload.buttons & Qt.LeftButton):
             if not self._polygon_points:
@@ -151,6 +217,17 @@ class SegmentationToolController(QObject):
                 self.draft_changed.emit("selection_box", GeometryService.rectangle_to_polygon(x0, y0, x, y))
 
     def handle_release(self, payload) -> None:
+        """handle_release。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            payload (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if payload.button != Qt.LeftButton:
             return
         x, y = payload.x, payload.y
@@ -214,6 +291,19 @@ class SegmentationToolController(QObject):
         self.snap_indicator_changed.emit(None, None)
 
     def finish_polygon(self) -> None:
+        """finish_polygon。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         if len(self._polygon_points) < 3:
             self._polygon_points = []
             self.draft_changed.emit("clear", None)
@@ -224,6 +314,17 @@ class SegmentationToolController(QObject):
         self.polygon_finished.emit(polygon)
 
     def delete_selected(self) -> str | None:
+        """delete_selected。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            str | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         selected = self.selected_annotation_id
         self.selected_annotation_id = None
         self.selected_annotation_ids.clear()
@@ -233,6 +334,17 @@ class SegmentationToolController(QObject):
         return selected
 
     def remove_selected_vertex(self) -> AnnotationObject | None:
+        """remove_selected_vertex。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            AnnotationObject | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if len(self.selected_annotation_ids) != 1:
             if len(self.selected_annotation_ids) > 1:
                 self.message_requested.emit("当前为多选状态。节点编辑仅支持单选对象，请先单选一个对象。")
@@ -255,6 +367,17 @@ class SegmentationToolController(QObject):
         return updated
 
     def editable_annotation_id(self) -> str | None:
+        """editable_annotation_id。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            str | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.active_tool != self.TOOL_BROWSE:
             return None
         if len(self.selected_annotation_ids) != 1 or self.selected_annotation_id is None:
@@ -262,14 +385,52 @@ class SegmentationToolController(QObject):
         return self.selected_annotation_id
 
     def is_node_edit_active(self) -> bool:
+        """is_node_edit_active。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self.editable_annotation_id() is not None
 
     def _append_polygon_point(self, x: float, y: float) -> None:
+        """_append_polygon_point。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (float): 输入参数。
+            y (float): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         point = [x, y]
         if not self._polygon_points or self._distance(self._polygon_points[-1], point) >= 1:
             self._polygon_points.append(point)
 
     def _handle_selection_press(self, x: float, y: float, additive: bool = False) -> None:
+        """_handle_selection_press。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (float): 输入参数。
+            y (float): 输入参数。
+            additive (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         hit_annotation = None
         hit_vertex = None
         for annotation in reversed(self.annotations):
@@ -301,6 +462,17 @@ class SegmentationToolController(QObject):
             self.selection_changed.emit(set(self.selected_annotation_ids))
 
     def _find_annotation(self, annotation_id: str | None) -> AnnotationObject | None:
+        """_find_annotation。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation_id (str | None): 输入参数。
+        返回:
+            AnnotationObject | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if annotation_id is None:
             return None
         for annotation in self.annotations:
@@ -309,6 +481,19 @@ class SegmentationToolController(QObject):
         return None
 
     def _hit_vertex(self, annotation: AnnotationObject, x: float, y: float):
+        """_hit_vertex。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+            x (float): 输入参数。
+            y (float): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         tolerance = self._screen_distance_to_image("vertex", fallback=6.0)
         candidates = []
 
@@ -347,6 +532,19 @@ class SegmentationToolController(QObject):
         return candidates[0][1]
 
     def _hit_segment(self, annotation: AnnotationObject, x: float, y: float):
+        """_hit_segment。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+            x (float): 输入参数。
+            y (float): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         rings = [("exterior", -1, annotation.exterior)] + [
             ("hole", idx, hole) for idx, hole in enumerate(annotation.holes)
         ]
@@ -358,6 +556,18 @@ class SegmentationToolController(QObject):
         return None
 
     def _handle_right_click_insert(self, x: float, y: float) -> None:
+        """_handle_right_click_insert。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (float): 输入参数。
+            y (float): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if len(self.selected_annotation_ids) > 1:
             self.message_requested.emit("当前为多选状态。节点编辑仅支持单选对象，请先单选一个对象。")
             return
@@ -382,6 +592,19 @@ class SegmentationToolController(QObject):
             return
 
     def _distance_to_segment(self, point, start, end) -> float:
+        """_distance_to_segment。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            point (Any): 输入参数。
+            start (Any): 输入参数。
+            end (Any): 输入参数。
+        返回:
+            float: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         px, py = point
         x1, y1 = start
         x2, y2 = end
@@ -395,9 +618,35 @@ class SegmentationToolController(QObject):
         return math.hypot(px - proj_x, py - proj_y)
 
     def _distance(self, p1, p2) -> float:
+        """_distance。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            p1 (Any): 输入参数。
+            p2 (Any): 输入参数。
+        返回:
+            float: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
     def _apply_snapping(self, x: float, y: float, annotation_id: str, vertex_ref) -> tuple[float, float, dict | None]:
+        """_apply_snapping。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (float): 输入参数。
+            y (float): 输入参数。
+            annotation_id (str): 输入参数。
+            vertex_ref (Any): 输入参数。
+        返回:
+            tuple[float, float, dict | None]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         snapped_x, snapped_y = x, y
         vertex_tolerance = self._screen_distance_to_image("vertex")
         edge_tolerance = self._screen_distance_to_image("edge")
@@ -452,6 +701,19 @@ class SegmentationToolController(QObject):
         return snapped_x, snapped_y, snap_meta
 
     def _project_point_to_segment(self, point, start, end):
+        """_project_point_to_segment。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            point (Any): 输入参数。
+            start (Any): 输入参数。
+            end (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         px, py = point
         x1, y1 = start
         x2, y2 = end
@@ -464,6 +726,17 @@ class SegmentationToolController(QObject):
         return [x1 + t * dx, y1 + t * dy]
 
     def _clear_selection_for_new_drawing(self) -> None:
+        """_clear_selection_for_new_drawing。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.selected_annotation_ids or self.selected_vertex_index is not None:
             self.selected_annotation_id = None
             self.selected_annotation_ids.clear()
@@ -474,6 +747,17 @@ class SegmentationToolController(QObject):
         self.snap_indicator_changed.emit(None, None)
 
     def select_all(self) -> None:
+        """select_all。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.selected_annotation_ids = {annotation.id for annotation in self.annotations}
         self.selected_annotation_id = next(iter(self.selected_annotation_ids), None)
         self.selected_vertex_index = None
@@ -482,6 +766,18 @@ class SegmentationToolController(QObject):
         self.snap_indicator_changed.emit(None, None)
 
     def _apply_click_selection(self, annotation_id: str | None, additive: bool) -> None:
+        """_apply_click_selection。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation_id (str | None): 输入参数。
+            additive (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if additive:
             if annotation_id is None:
                 return
@@ -499,6 +795,19 @@ class SegmentationToolController(QObject):
         self._last_edited_vertex_ref = None
 
     def _apply_box_selection(self, start: tuple[float, float], end: tuple[float, float], additive: bool) -> None:
+        """_apply_box_selection。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            start (tuple[float, float]): 输入参数。
+            end (tuple[float, float]): 输入参数。
+            additive (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         x0, y0 = start
         x1, y1 = end
         left, right = sorted((x0, x1))
@@ -522,10 +831,35 @@ class SegmentationToolController(QObject):
         self.snap_indicator_changed.emit(None, None)
 
     def _get_ring_points(self, annotation: AnnotationObject, vertex_ref):
+        """_get_ring_points。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+            vertex_ref (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         ring_type, hole_index, _ = vertex_ref
         return annotation.exterior if ring_type == "exterior" else annotation.holes[hole_index]
 
     def _set_ring_points(self, annotation: AnnotationObject, vertex_ref, points: list[list[float]]) -> None:
+        """_set_ring_points。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+            vertex_ref (Any): 输入参数。
+            points (list[list[float]]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         ring_type, hole_index, _ = vertex_ref
         if ring_type == "exterior":
             annotation.exterior = points
@@ -533,6 +867,20 @@ class SegmentationToolController(QObject):
             annotation.holes[hole_index] = points
 
     def _update_ring_vertex(self, annotation: AnnotationObject, vertex_ref, x: float, y: float) -> None:
+        """_update_ring_vertex。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+            vertex_ref (Any): 输入参数。
+            x (float): 输入参数。
+            y (float): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         ring_type, hole_index, vertex_index = self._normalize_vertex_ref(annotation, vertex_ref)
         points = [point[:] for point in self._get_ring_points(annotation, (ring_type, hole_index, vertex_index))]
         if not points:
@@ -553,6 +901,20 @@ class SegmentationToolController(QObject):
         self._set_ring_points(annotation, (ring_type, hole_index, vertex_index), closed_points)
 
     def _insert_ring_vertex(self, annotation: AnnotationObject, segment_ref, x: float, y: float) -> None:
+        """_insert_ring_vertex。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+            segment_ref (Any): 输入参数。
+            x (float): 输入参数。
+            y (float): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         ring_type, hole_index, segment_index = segment_ref
         base_ref = (ring_type, hole_index, 0)
         points = [point[:] for point in self._get_ring_points(annotation, base_ref)[:-1]]
@@ -560,6 +922,18 @@ class SegmentationToolController(QObject):
         self._set_ring_points(annotation, base_ref, GeometryService.ensure_closed(points))
 
     def _remove_ring_vertex(self, annotation: AnnotationObject, vertex_ref) -> bool:
+        """_remove_ring_vertex。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+            vertex_ref (Any): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         base_ref = (vertex_ref[0], vertex_ref[1], 0)
         points = [point[:] for point in self._get_ring_points(annotation, base_ref)[:-1]]
         if len(points) <= 3:
@@ -569,6 +943,18 @@ class SegmentationToolController(QObject):
         return True
 
     def _screen_distance_to_image(self, snap_type: str, fallback: float | None = None) -> float:
+        """_screen_distance_to_image。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            snap_type (str): 输入参数。
+            fallback (float | None): 输入参数。
+        返回:
+            float: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         base = self._screen_snap_tolerance.get(snap_type, fallback if fallback is not None else 8.0)
         pixel_scale = max(
             float(getattr(self._viewport_state, "scale_x", 1.0) or 1.0),
@@ -577,6 +963,18 @@ class SegmentationToolController(QObject):
         return max(base * pixel_scale, pixel_scale)
 
     def _connected_segment_refs(self, annotation_id: str, vertex_ref) -> set[tuple[str, str, int, int]]:
+        """_connected_segment_refs。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation_id (str): 输入参数。
+            vertex_ref (Any): 输入参数。
+        返回:
+            set[tuple[str, str, int, int]]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         annotation = self._find_annotation(annotation_id)
         if annotation is None:
             return set()
@@ -593,6 +991,18 @@ class SegmentationToolController(QObject):
         }
 
     def _current_vertex_point(self, annotation_id: str, vertex_ref):
+        """_current_vertex_point。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation_id (str): 输入参数。
+            vertex_ref (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         annotation = self._find_annotation(annotation_id)
         if annotation is None:
             return None
@@ -603,6 +1013,18 @@ class SegmentationToolController(QObject):
         return None
 
     def _normalize_vertex_ref(self, annotation: AnnotationObject, vertex_ref):
+        """_normalize_vertex_ref。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+            vertex_ref (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         ring_type, hole_index, vertex_index = vertex_ref
         ring = annotation.exterior if ring_type == "exterior" else annotation.holes[hole_index]
         if not ring:

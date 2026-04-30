@@ -183,16 +183,50 @@ def extract_bounding_box_from_gamma_par(file_path: str) -> Optional[Tuple[float,
 
 
 def _read_text_lines(file_path: str) -> List[str]:
+    """_read_text_lines。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        file_path (str): 输入参数。
+    返回:
+        List[str]: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
         return f.read().splitlines()
 
 
 def _extract_numeric_values_after_colon(line: str) -> List[float]:
+    """_extract_numeric_values_after_colon。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        line (str): 输入参数。
+    返回:
+        List[float]: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     _, value = line.split(":", 1)
     return [float(x) for x in re.findall(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", value)]
 
 
 def _get_gamma_state_vectors(lines: List[str], count: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    """_get_gamma_state_vectors。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        lines (List[str]): 输入参数。
+        count (int): 输入参数。
+    返回:
+        Tuple[List[np.ndarray], List[np.ndarray]]: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     positions: List[np.ndarray] = []
     velocities: List[np.ndarray] = []
     for idx in range(1, count + 1):
@@ -208,6 +242,24 @@ def _get_gamma_state_vectors(lines: List[str], count: int) -> Tuple[List[np.ndar
 def _hermite_interpolate(
     p0: np.ndarray, v0: np.ndarray, p1: np.ndarray, v1: np.ndarray, dt: float, u: float
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """_hermite_interpolate。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        p0 (np.ndarray): 输入参数。
+        v0 (np.ndarray): 输入参数。
+        p1 (np.ndarray): 输入参数。
+        v1 (np.ndarray): 输入参数。
+        dt (float): 输入参数。
+        u (float): 输入参数。
+    返回:
+        Tuple[np.ndarray, np.ndarray]: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    复杂度:
+        时间和空间复杂度与输入规模线性或近线性相关。
+    """
     h00 = 2 * u ** 3 - 3 * u ** 2 + 1
     h10 = u ** 3 - 2 * u ** 2 + u
     h01 = -2 * u ** 3 + 3 * u ** 2
@@ -224,6 +276,21 @@ def _hermite_interpolate(
 
 
 def _interpolate_sensor_state(params: Dict, lines: List[str], az_time: float) -> Tuple[np.ndarray, np.ndarray]:
+    """_interpolate_sensor_state。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        params (Dict): 输入参数。
+        lines (List[str]): 输入参数。
+        az_time (float): 输入参数。
+    返回:
+        Tuple[np.ndarray, np.ndarray]: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    复杂度:
+        时间和空间复杂度与输入规模线性或近线性相关。
+    """
     nstate = int(params["number_of_state_vectors"])
     time0 = float(params["time_of_first_state_vector"])
     interval = float(params["state_vector_interval"])
@@ -237,6 +304,20 @@ def _interpolate_sensor_state(params: Dict, lines: List[str], az_time: float) ->
 
 
 def _gamma_doppler_frequency(params: Dict, lines: List[str], slant_range: float, az_time: float) -> float:
+    """_gamma_doppler_frequency。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        params (Dict): 输入参数。
+        lines (List[str]): 输入参数。
+        slant_range (float): 输入参数。
+        az_time (float): 输入参数。
+    返回:
+        float: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     coeffs = [0.0, 0.0, 0.0, 0.0]
     dot_coeffs = [0.0, 0.0, 0.0, 0.0]
     ddot_coeffs = [0.0, 0.0, 0.0, 0.0]
@@ -263,6 +344,17 @@ def _gamma_doppler_frequency(params: Dict, lines: List[str], slant_range: float,
 
 
 def _ecef_to_llh(xyz: np.ndarray) -> Tuple[float, float, float]:
+    """_ecef_to_llh。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        xyz (np.ndarray): 输入参数。
+    返回:
+        Tuple[float, float, float]: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     source = osr.SpatialReference()
     source.ImportFromEPSG(4978)
     source.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
@@ -275,6 +367,21 @@ def _ecef_to_llh(xyz: np.ndarray) -> Tuple[float, float, float]:
 
 
 def _llh_to_ecef(lat_deg: float, lon_deg: float, height: float, semi_major: float, semi_minor: float) -> np.ndarray:
+    """_llh_to_ecef。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        lat_deg (float): 输入参数。
+        lon_deg (float): 输入参数。
+        height (float): 输入参数。
+        semi_major (float): 输入参数。
+        semi_minor (float): 输入参数。
+    返回:
+        np.ndarray: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     lat = math.radians(lat_deg)
     lon = math.radians(lon_deg)
     e2 = 1.0 - (semi_minor * semi_minor) / (semi_major * semi_major)
@@ -293,6 +400,22 @@ def _initial_local_sphere_guess(
     terrain_height: float,
     look_sign: float,
 ) -> Tuple[float, float]:
+    """_initial_local_sphere_guess。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        params (Dict): 输入参数。
+        lines (List[str]): 输入参数。
+        az_time (float): 输入参数。
+        slant_range (float): 输入参数。
+        terrain_height (float): 输入参数。
+        look_sign (float): 输入参数。
+    返回:
+        Tuple[float, float]: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     sat_pos, sat_vel = _interpolate_sensor_state(params, lines, az_time)
     sat_speed = np.linalg.norm(sat_vel)
     sat_dir = sat_vel / sat_speed
@@ -323,6 +446,24 @@ def _solve_corner_latlon(
     terrain_height: float,
     look_sign: float,
 ) -> Tuple[float, float]:
+    """_solve_corner_latlon。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        params (Dict): 输入参数。
+        lines (List[str]): 输入参数。
+        az_time (float): 输入参数。
+        slant_range (float): 输入参数。
+        terrain_height (float): 输入参数。
+        look_sign (float): 输入参数。
+    返回:
+        Tuple[float, float]: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    复杂度:
+        时间和空间复杂度与输入规模线性或近线性相关。
+    """
     semi_major = float(params["earth_semi_major_axis"])
     semi_minor = float(params["earth_semi_minor_axis"])
     sat_pos, sat_vel = _interpolate_sensor_state(params, lines, az_time)
@@ -367,6 +508,19 @@ def _solve_corner_latlon(
 
 
 def _sort_corner_points(points: List[Tuple[float, float]]) -> Dict[str, Tuple[float, float]]:
+    """_sort_corner_points。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        points (List[Tuple[float, float]]): 输入参数。
+    返回:
+        Dict[str, Tuple[float, float]]: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    复杂度:
+        时间和空间复杂度与输入规模线性或近线性相关。
+    """
     sorted_by_lat = sorted(points, key=lambda p: p[1], reverse=True)
     upper = sorted(sorted_by_lat[:2], key=lambda p: p[0])
     lower = sorted(sorted_by_lat[2:], key=lambda p: p[0])
@@ -376,6 +530,21 @@ def _sort_corner_points(points: List[Tuple[float, float]]) -> Dict[str, Tuple[fl
 
 
 def _solve_gamma_corners(params: Dict, lines: List[str], terrain_height: float = 300.0) -> Dict[str, Tuple[float, float]]:
+    """_solve_gamma_corners。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        params (Dict): 输入参数。
+        lines (List[str]): 输入参数。
+        terrain_height (float): 输入参数。
+    返回:
+        Dict[str, Tuple[float, float]]: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    复杂度:
+        时间和空间复杂度与输入规模线性或近线性相关。
+    """
     required = [
         "start_time",
         "end_time",

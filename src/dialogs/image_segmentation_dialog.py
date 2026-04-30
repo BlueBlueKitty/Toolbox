@@ -95,12 +95,36 @@ class AutosaveWorker(QObject):
     finished = Signal(bool, str)
 
     def __init__(self, project_manager: SegmentationProjectManager, project_snapshot: SegmentationProject, project_path: str):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            project_manager (SegmentationProjectManager): 输入参数。
+            project_snapshot (SegmentationProject): 输入参数。
+            project_path (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().__init__()
         self.project_manager = project_manager
         self.project_snapshot = project_snapshot
         self.project_path = project_path
 
     def run(self) -> None:
+        """run。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         try:
             self.project_manager.save_autosave(self.project_snapshot, self.project_path)
             self.finished.emit(True, "")
@@ -110,6 +134,18 @@ class AutosaveWorker(QObject):
 
 class ImageSegmentationDialog(QDialog):
     def __init__(self, parent=None, pyramid_threshold_mb=DEFAULT_PYRAMID_THRESHOLD_MB):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            parent (Any): 输入参数。
+            pyramid_threshold_mb (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().__init__(parent)
         self.setWindowTitle("图像分割工具")
         self.resize(1600, 900)
@@ -203,6 +239,17 @@ class ImageSegmentationDialog(QDialog):
         self.autosave_timer.timeout.connect(self._autosave_if_needed)
 
     def _create_ui(self) -> None:
+        """_create_ui。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         main_layout = QVBoxLayout(self)
         self.toolbar = QToolBar()
         main_layout.addWidget(self.toolbar)
@@ -361,12 +408,34 @@ class ImageSegmentationDialog(QDialog):
         main_layout.addWidget(self.operation_progress)
 
     def _rebuild_layer_panel_items(self) -> None:
+        """_rebuild_layer_panel_items。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.layer_controller.rebuild_panel_items()
         for layer_id in self.layer_panel.layer_order():
             self.layer_panel.set_window_visibility(layer_id, "viewer_1", self._layer_visible_in_window(layer_id, "viewer_1"))
             self.layer_panel.set_window_visibility(layer_id, "viewer_2", self._layer_visible_in_window(layer_id, "viewer_2"))
 
     def _all_canvases(self) -> list[SegmentationCanvas]:
+        """_all_canvases。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            list[SegmentationCanvas]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         canvases: list[SegmentationCanvas] = []
         for window_id in self.workspace.window_ids:
             canvas = self.workspace.window_canvas(window_id)
@@ -375,12 +444,48 @@ class ImageSegmentationDialog(QDialog):
         return canvases
 
     def _canvas_for_window(self, window_id: str):
+        """_canvas_for_window。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self.workspace.window_canvas(window_id)
 
     def _layer_visible_in_window(self, layer_id: str, window_id: str) -> bool:
+        """_layer_visible_in_window。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_id (str): 输入参数。
+            window_id (str): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return bool(self._layer_window_visibility.get(layer_id, {}).get(window_id, True))
 
     def _set_layer_visible_for_window(self, layer_id: str, window_id: str, visible: bool) -> None:
+        """_set_layer_visible_for_window。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_id (str): 输入参数。
+            window_id (str): 输入参数。
+            visible (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._layer_window_visibility.setdefault(layer_id, {})[window_id] = bool(visible)
         canvas = self._canvas_for_window(window_id)
         if canvas is None:
@@ -389,11 +494,35 @@ class ImageSegmentationDialog(QDialog):
             canvas.set_layer_visible(layer_id, bool(visible))
 
     def _on_layer_window_visibility_changed(self, layer_id: str, window_id: str, visible: bool) -> None:
+        """_on_layer_window_visibility_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_id (str): 输入参数。
+            window_id (str): 输入参数。
+            visible (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         global_visible = bool(self.project.layer_visibility.get(layer_id, True))
         self._set_layer_visible_for_window(layer_id, window_id, bool(visible and global_visible))
         self._set_dirty(True)
 
     def _bind_canvas_signals(self, canvas) -> None:
+        """_bind_canvas_signals。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            canvas (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         canvas.mouse_pressed.connect(self._handle_mouse_press)
         canvas.mouse_moved.connect(self._update_mouse_position)
         canvas.mouse_moved.connect(self._handle_mouse_move)
@@ -403,6 +532,17 @@ class ImageSegmentationDialog(QDialog):
         canvas.tool_wheel_adjust_requested.connect(self._adjust_active_tool_slider)
 
     def _unbind_canvas_signals(self, canvas) -> None:
+        """_unbind_canvas_signals。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            canvas (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         for signal, slot in [
             (canvas.mouse_pressed, self._handle_mouse_press),
             (canvas.mouse_moved, self._update_mouse_position),
@@ -418,6 +558,17 @@ class ImageSegmentationDialog(QDialog):
                 pass
 
     def _on_canvas_view_transformed(self, _state) -> None:
+        """_on_canvas_view_transformed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            _state (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             return
         try:
@@ -426,9 +577,31 @@ class ImageSegmentationDialog(QDialog):
             pass
 
     def _on_workspace_active_window_changed(self, window_id: str) -> None:
+        """_on_workspace_active_window_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._set_active_window(window_id)
 
     def _set_active_window(self, window_id: str) -> None:
+        """_set_active_window。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if window_id == self._active_window_id:
             return
         old_canvas = self.canvas
@@ -454,6 +627,17 @@ class ImageSegmentationDialog(QDialog):
             self.render_sidebar_controller.refresh()
 
     def _toggle_window_count(self) -> None:
+        """_toggle_window_count。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         viewer1 = self._canvas_for_window("viewer_1")
         active_canvas = self.canvas
         preserved_state = None
@@ -488,6 +672,17 @@ class ImageSegmentationDialog(QDialog):
         self.project_manager.settings.setValue("workspace/window_count", int(target_count))
 
     def _toggle_detach_window2(self) -> None:
+        """_toggle_detach_window2。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.workspace.is_window_detached("viewer_2"):
             self.workspace.attach_window("viewer_2")
         else:
@@ -498,6 +693,18 @@ class ImageSegmentationDialog(QDialog):
             self.workspace.detach_window("viewer_2", title="图像分割工具 - 窗口2")
 
     def _on_workspace_window_detached_changed(self, window_id: str, detached: bool) -> None:
+        """_on_workspace_window_detached_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str): 输入参数。
+            detached (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if window_id != "viewer_2":
             return
         self.toggle_detach_window2_action.setText("窗口2回嵌" if detached else "窗口2独立窗口")
@@ -505,6 +712,17 @@ class ImageSegmentationDialog(QDialog):
             self._ensure_window2_ready()
 
     def _toggle_sidebar(self) -> None:
+        """_toggle_sidebar。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not hasattr(self, "render_sidebar") or not hasattr(self, "right_splitter"):
             return
         if self._sidebar_visible:
@@ -523,6 +741,17 @@ class ImageSegmentationDialog(QDialog):
         self._sidebar_visible = True
 
     def _bind_signals(self) -> None:
+        """_bind_signals。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.open_action.triggered.connect(self.open_image)
         self.open_project_action.triggered.connect(self.open_project)
         self.save_project_action.triggered.connect(self.save_project)
@@ -585,6 +814,17 @@ class ImageSegmentationDialog(QDialog):
         self.render_settings.suggest_colormap.connect(self.on_suggest_colormap)
         self.colormap_combo.currentTextChanged.connect(self.on_colormap_changed)
     def _setup_shortcuts(self) -> None:
+        """_setup_shortcuts。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self.undo)
         QShortcut(QKeySequence("Ctrl+Y"), self, activated=self.redo)
         QShortcut(QKeySequence("Ctrl+S"), self, activated=self.save_project)
@@ -599,16 +839,49 @@ class ImageSegmentationDialog(QDialog):
             QShortcut(QKeySequence(str(idx)), self, activated=lambda value=idx: self._activate_label_shortcut(str(value)))
 
     def changeEvent(self, event) -> None:
+        """changeEvent。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if event.type() in (QEvent.PaletteChange, QEvent.ApplicationPaletteChange):
             self._refresh_toolbar_icons()
             self.magic_panel.refresh_icons()
         super().changeEvent(event)
 
     def on_theme_mode_changed(self, _mode: str) -> None:
+        """on_theme_mode_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            _mode (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._refresh_toolbar_icons()
         self.magic_panel.refresh_icons()
 
     def _refresh_toolbar_icons(self) -> None:
+        """_refresh_toolbar_icons。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not hasattr(self, "open_action"):
             return
         self.open_action.setIcon(self._make_tool_icon("image"))
@@ -637,6 +910,18 @@ class ImageSegmentationDialog(QDialog):
             })
 
     def _on_magic_slider_config_changed(self, _key: str, configs: dict) -> None:
+        """_on_magic_slider_config_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            _key (str): 输入参数。
+            configs (dict): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         state = self.project.magic_panel_settings if isinstance(self.project.magic_panel_settings, dict) else {}
         state = dict(state)
         state["slider_configs"] = dict(configs or {})
@@ -644,11 +929,33 @@ class ImageSegmentationDialog(QDialog):
         self._set_dirty(True)
 
     def _sync_magic_panel_state_to_project(self, mark_dirty: bool = False) -> None:
+        """_sync_magic_panel_state_to_project。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mark_dirty (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.project.magic_panel_settings = self.magic_panel.get_panel_state()
         if mark_dirty:
             self._set_dirty(True)
 
     def _cancel_magic_recognition(self) -> None:
+        """_cancel_magic_recognition。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.tool_controller.active_tool != SegmentationToolController.TOOL_MAGIC_WAND:
             return
         if not (self._magic_preview_timer.isActive() or self._magic_preview_in_progress):
@@ -660,6 +967,17 @@ class ImageSegmentationDialog(QDialog):
         self.status_label.setText("已取消魔法棒识别")
 
     def _on_canvas_files_dropped(self, paths: list[str]) -> None:
+        """_on_canvas_files_dropped。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            paths (list[str]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not paths:
             return
         file_path = next((item for item in paths if os.path.isfile(item)), None)
@@ -672,12 +990,36 @@ class ImageSegmentationDialog(QDialog):
         self.open_image(file_path)
 
     def _activate_label_shortcut(self, shortcut: str) -> None:
+        """_activate_label_shortcut。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            shortcut (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         for label in self.project.labels:
             if label.shortcut == shortcut:
                 self._apply_label_choice(label.id)
                 break
 
     def _create_tool_action(self, text: str, tool_name: str, icon: QIcon) -> QAction:
+        """_create_tool_action。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            text (str): 输入参数。
+            tool_name (str): 输入参数。
+            icon (QIcon): 输入参数。
+        返回:
+            QAction: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         action = QAction(icon, text, self)
         action.setCheckable(True)
         action.setData(tool_name)
@@ -686,6 +1028,18 @@ class ImageSegmentationDialog(QDialog):
         return action
 
     def _make_tool_icon(self, icon_name: str, rotation_angle: float = 0) -> QIcon:
+        """_make_tool_icon。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            icon_name (str): 输入参数。
+            rotation_angle (float): 输入参数。
+        返回:
+            QIcon: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if icon_name == "ink_eraser":
             pixmap = QPixmap(20, 20)
             pixmap.fill(Qt.transparent)
@@ -736,11 +1090,34 @@ class ImageSegmentationDialog(QDialog):
         return QIcon(self._rotated_icon_pixmap(pixmap, rotation_angle))
 
     def _rotated_icon_pixmap(self, pixmap: QPixmap, angle: float) -> QPixmap:
+        """_rotated_icon_pixmap。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            pixmap (QPixmap): 输入参数。
+            angle (float): 输入参数。
+        返回:
+            QPixmap: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not angle:
             return pixmap
         return pixmap.transformed(QTransform().rotate(angle), Qt.SmoothTransformation)
 
     def _load_material_icon_font(self) -> str | None:
+        """_load_material_icon_font。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            str | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         font_path = Path(__file__).resolve().parents[2] / "resources" / "fonts" / "MaterialIcons-Regular.ttf"
         if not font_path.exists():
             return None
@@ -751,6 +1128,17 @@ class ImageSegmentationDialog(QDialog):
         return families[0] if families else None
 
     def _set_dirty(self, value: bool = True) -> None:
+        """_set_dirty。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            value (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._dirty = value
         if value:
             self._last_edit_timestamp = time.monotonic()
@@ -760,11 +1148,33 @@ class ImageSegmentationDialog(QDialog):
             self.autosave_timer.stop()
 
     def _load_autosave_interval_ms(self) -> int:
+        """_load_autosave_interval_ms。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            int: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         seconds = self.project_manager.settings.value("autosave/interval_seconds", 60, type=int)
         seconds = max(5, int(seconds))
         return seconds * 1000
 
     def _remove_hillshade_mode(self) -> None:
+        """_remove_hillshade_mode。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         combo = self.render_settings.display_mode_combo
         for index in range(combo.count() - 1, -1, -1):
             if combo.itemText(index) == "晕渲地貌":
@@ -773,9 +1183,31 @@ class ImageSegmentationDialog(QDialog):
             combo.setCurrentText("灰度")
 
     def _show_tool_message(self, text: str) -> None:
+        """_show_tool_message。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            text (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         QMessageBox.information(self, "提示", text)
 
     def _load_render_preferences(self) -> None:
+        """_load_render_preferences。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         settings = self.project_manager.settings
         self._set_display_mode(settings.value("render/display_mode", "灰度", type=str))
         self.render_settings.set_stretch_mode(settings.value("render/stretch_mode", self.render_settings.STRETCH_MIN_MAX, type=str))
@@ -814,6 +1246,17 @@ class ImageSegmentationDialog(QDialog):
         self.on_render_settings_changed()
 
     def _save_render_preferences(self) -> None:
+        """_save_render_preferences。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         settings = self.project_manager.settings
         current = self.render_settings.get_all_settings()
         settings.setValue("render/display_mode", current["display_mode"])
@@ -836,6 +1279,17 @@ class ImageSegmentationDialog(QDialog):
         settings.setValue("workspace/sync_options", json.dumps(self.workspace.sync_options_dict(), ensure_ascii=False))
 
     def _analysis_cache_signature(self):
+        """_analysis_cache_signature。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return (
             self.render_config.display_mode,
             self.render_config.gray_band,
@@ -852,6 +1306,17 @@ class ImageSegmentationDialog(QDialog):
         )
 
     def _clear_analysis_cache(self) -> None:
+        """_clear_analysis_cache。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._analysis_full_rgb_cache = None
         self._analysis_full_rgb_cache_signature = None
         self._analysis_tile_cache.clear()
@@ -860,6 +1325,21 @@ class ImageSegmentationDialog(QDialog):
         self._last_magic_roi_hint = None
 
     def _prepared_analysis_key(self, x0: int, y0: int, width: int, height: int, params) -> tuple:
+        """_prepared_analysis_key。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x0 (int): 输入参数。
+            y0 (int): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+            params (Any): 输入参数。
+        返回:
+            tuple: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return (
             self._analysis_cache_signature(),
             params.similarity_mode,
@@ -878,6 +1358,22 @@ class ImageSegmentationDialog(QDialog):
         height: int,
         params,
     ) -> np.ndarray:
+        """_prepare_magic_analysis_image。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            rgb_image (np.ndarray): 输入参数。
+            x0 (int): 输入参数。
+            y0 (int): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+            params (Any): 输入参数。
+        返回:
+            np.ndarray: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         key = self._prepared_analysis_key(x0, y0, width, height, params)
         cached = self._analysis_prepared_cache.get(key)
         if cached is not None:
@@ -888,6 +1384,18 @@ class ImageSegmentationDialog(QDialog):
         return prepared
 
     def _cache_prepared_analysis_image(self, key: tuple, prepared: np.ndarray) -> None:
+        """_cache_prepared_analysis_image。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            key (tuple): 输入参数。
+            prepared (np.ndarray): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         prepared_size = int(getattr(prepared, "nbytes", 0))
         if prepared_size > self._analysis_prepared_cache_limit_bytes:
             return
@@ -901,6 +1409,19 @@ class ImageSegmentationDialog(QDialog):
             self._analysis_prepared_cache_bytes -= int(getattr(old_value, "nbytes", 0))
 
     def _magic_roi_hint_key(self, x: int, y: int, params) -> tuple:
+        """_magic_roi_hint_key。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+            params (Any): 输入参数。
+        返回:
+            tuple: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return (
             self._analysis_cache_signature(),
             params.similarity_mode,
@@ -910,12 +1431,36 @@ class ImageSegmentationDialog(QDialog):
         )
 
     def _initial_magic_roi_radius(self, x: int, y: int, params) -> int:
+        """_initial_magic_roi_radius。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+            params (Any): 输入参数。
+        返回:
+            int: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         key = self._magic_roi_hint_key(x, y, params)
         if self._last_magic_roi_hint and self._last_magic_roi_hint[0] == key:
             return int(self._last_magic_roi_hint[1])
         return self._viewport_magic_roi_radius()
 
     def _viewport_magic_roi_radius(self) -> int:
+        """_viewport_magic_roi_radius。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            int: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             return 512
         try:
@@ -928,9 +1473,34 @@ class ImageSegmentationDialog(QDialog):
         return max(tile_size, min(radius, self._analysis_max_roi_side()))
 
     def _remember_magic_roi_radius(self, x: int, y: int, params, radius: int) -> None:
+        """_remember_magic_roi_radius。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+            params (Any): 输入参数。
+            radius (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._last_magic_roi_hint = (self._magic_roi_hint_key(x, y, params), int(radius))
 
     def _geo_should_cache_full_render(self) -> bool:
+        """_geo_should_cache_full_render。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None or self.current_source is None:
             return False
         if not isinstance(self.current_source, GdalRasterSource):
@@ -942,6 +1512,17 @@ class ImageSegmentationDialog(QDialog):
         return file_size_mb < max(1, self._geotiff_full_render_cache_limit_mb)
 
     def _ensure_full_analysis_rgb(self) -> np.ndarray | None:
+        """_ensure_full_analysis_rgb。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            np.ndarray | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.current_source is None or self.project.image_asset is None:
             return None
         signature = self._analysis_cache_signature()
@@ -964,15 +1545,53 @@ class ImageSegmentationDialog(QDialog):
         return None
 
     def _analysis_tile_size(self) -> int:
+        """_analysis_tile_size。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            int: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         return 512
 
     def _analysis_max_roi_side(self) -> int:
+        """_analysis_max_roi_side。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            int: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             return 4096
         max_dim = max(self.project.image_asset.width, self.project.image_asset.height)
         return min(max_dim, max(4096, min(16384, 1 << int(np.ceil(np.log2(max(2048, min(max_dim, 16384))))))))
 
     def _fetch_rendered_tile(self, tile_x: int, tile_y: int) -> np.ndarray:
+        """_fetch_rendered_tile。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            tile_x (int): 输入参数。
+            tile_y (int): 输入参数。
+        返回:
+            np.ndarray: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         if self.current_source is None or self.project.image_asset is None:
             return np.zeros((1, 1, 3), dtype=np.uint8)
         tile_size = self._analysis_tile_size()
@@ -996,6 +1615,20 @@ class ImageSegmentationDialog(QDialog):
         return rendered
 
     def _get_analysis_rgb_roi(self, x0: int, y0: int, width: int, height: int) -> np.ndarray:
+        """_get_analysis_rgb_roi。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x0 (int): 输入参数。
+            y0 (int): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+        返回:
+            np.ndarray: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         full_cache = self._ensure_full_analysis_rgb()
         if full_cache is not None:
             return full_cache[y0:y0 + height, x0:x0 + width].copy()
@@ -1022,16 +1655,49 @@ class ImageSegmentationDialog(QDialog):
         return roi
 
     def _set_display_mode(self, mode: str) -> None:
+        """_set_display_mode。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mode (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if mode not in {"灰度", "RGB"}:
             mode = "灰度"
         self.render_settings.display_mode_combo.setCurrentText(mode)
 
     def _update_project_coordinate_mode(self, image_asset) -> None:
+        """_update_project_coordinate_mode。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            image_asset (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         has_georef = bool(getattr(image_asset, "has_georef", False) and getattr(image_asset, "geotransform", None))
         self.project.coordinate_mode = "geo_wgs84" if has_georef else "pixel"
         self.project.primary_window_id = self._active_window_id
 
     def _apply_annotation_coord_ref(self, annotation: AnnotationObject) -> AnnotationObject:
+        """_apply_annotation_coord_ref。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+        返回:
+            AnnotationObject: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         item = annotation.clone()
         coord_ref: dict[str, object] = {
             "mode": self.project.coordinate_mode,
@@ -1072,6 +1738,17 @@ class ImageSegmentationDialog(QDialog):
         return item
 
     def _configure_default_render_for_source(self, source) -> None:
+        """_configure_default_render_for_source。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         metadata = source.metadata()
         style = DefaultRenderStyleFactory.create(metadata)
         config = style_to_legacy_config(style, DefaultRenderStyleFactory.create_display_settings(metadata))
@@ -1089,20 +1766,64 @@ class ImageSegmentationDialog(QDialog):
         self.colormap_combo.setCurrentText(config.colormap_name)
 
     def _current_global_range(self, settings: dict) -> tuple[float, float] | None:
+        """_current_global_range。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            settings (dict): 输入参数。
+        返回:
+            tuple[float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.current_source is None:
             return None
         return self.current_source.value_range_for_settings(settings)
 
     def _set_project_mask(self, mask) -> None:
+        """_set_project_mask。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mask (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.project.mask_data = None if mask is None else np.asarray(mask, dtype=np.uint16).copy()
         self._mark_mask_overlay_dirty()
 
     def _mark_mask_overlay_dirty(self) -> None:
+        """_mark_mask_overlay_dirty。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._mask_overlay_revision += 1
         self._raster_overlay_cache_key = None
         self._raster_overlay_cache_value = (None, None)
 
     def _project_mask_has_foreground(self) -> bool:
+        """_project_mask_has_foreground。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         mask = self.project.mask_data
         if mask is None:
             return False
@@ -1112,28 +1833,98 @@ class ImageSegmentationDialog(QDialog):
         return bool(self._mask_has_nonzero_cached)
 
     def _start_progress(self, message: str, maximum: int = 0) -> None:
+        """_start_progress。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            message (str): 输入参数。
+            maximum (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.operation_progress.start_task(message, maximum)
         QApplication.processEvents()
 
     def _update_progress(self, value: int, message: str | None = None, maximum: int | None = None) -> None:
+        """_update_progress。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            value (int): 输入参数。
+            message (str | None): 输入参数。
+            maximum (int | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.operation_progress.set_progress(value, message, maximum)
         QApplication.processEvents()
 
     def _finish_progress(self, message: str = "完成") -> None:
+        """_finish_progress。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            message (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.operation_progress.finish_task(message)
         QApplication.processEvents()
 
     def _fail_progress(self, message: str) -> None:
+        """_fail_progress。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            message (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.operation_progress.fail_task(message)
         QApplication.processEvents()
 
     def _format_exception_message(self, exc: Exception, default_message: str) -> str:
+        """_format_exception_message。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            exc (Exception): 输入参数。
+            default_message (str): 输入参数。
+        返回:
+            str: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         text = str(exc).strip()
         if text:
             return text
         return f"{default_message}\n可能原因：目标文件正被其他程序占用，或当前没有写入权限。"
 
     def _sync_project_mask_from_annotations(self) -> None:
+        """_sync_project_mask_from_annotations。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             self._set_project_mask(None)
             return
@@ -1152,6 +1943,17 @@ class ImageSegmentationDialog(QDialog):
         self._ensure_project_mask_shape()
 
     def _ensure_project_mask_shape(self) -> None:
+        """_ensure_project_mask_shape。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             return
         height = self.project.image_asset.height
@@ -1169,6 +1971,17 @@ class ImageSegmentationDialog(QDialog):
             self._mark_mask_overlay_dirty()
 
     def _extract_mask_patch(self, bbox: tuple[int, int, int, int] | None) -> np.ndarray | None:
+        """_extract_mask_patch。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            bbox (tuple[int, int, int, int] | None): 输入参数。
+        返回:
+            np.ndarray | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if bbox is None or self.project.image_asset is None:
             return None
         self._ensure_project_mask_shape()
@@ -1178,6 +1991,18 @@ class ImageSegmentationDialog(QDialog):
         return self.project.mask_data[y:y + height, x:x + width].copy()
 
     def _rasterize_annotations_patch(self, annotations, bbox: tuple[int, int, int, int] | None) -> np.ndarray | None:
+        """_rasterize_annotations_patch。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotations (Any): 输入参数。
+            bbox (tuple[int, int, int, int] | None): 输入参数。
+        返回:
+            np.ndarray | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if bbox is None:
             return None
         x, y, width, height = bbox
@@ -1201,6 +2026,18 @@ class ImageSegmentationDialog(QDialog):
         before: AnnotationObject,
         after: AnnotationObject,
     ) -> None:
+        """_update_mask_patch_for_annotation_edit。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            before (AnnotationObject): 输入参数。
+            after (AnnotationObject): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         bbox = GeometryService.affected_bbox_from_annotations(before, after)
         if bbox is None or self.project.image_asset is None:
             return
@@ -1228,6 +2065,18 @@ class ImageSegmentationDialog(QDialog):
         self._mark_mask_overlay_dirty()
 
     def _annotations_after_commands(self, commands, base_annotations=None) -> list[AnnotationObject]:
+        """_annotations_after_commands。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            commands (Any): 输入参数。
+            base_annotations (Any): 输入参数。
+        返回:
+            list[AnnotationObject]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         annotations = [item.clone() for item in (base_annotations if base_annotations is not None else self.project.annotations)]
         for command in commands:
             if isinstance(command, BatchCommand):
@@ -1257,6 +2106,20 @@ class ImageSegmentationDialog(QDialog):
         update_mask: bool = True,
         explicit_mask_patch: tuple[tuple[int, int, int, int], np.ndarray | None, np.ndarray | None] | None = None,
     ) -> None:
+        """_push_commands_with_mask_patch。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            commands (Any): 输入参数。
+            affected_bbox (tuple[int, int, int, int] | None): 输入参数。
+            update_mask (bool): 输入参数。
+            explicit_mask_patch (tuple[tuple[int, int, int, int], np.ndarray | None, np.ndarray | None] | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not commands and explicit_mask_patch is None and not update_mask:
             return
         batch_commands = commands[:]
@@ -1283,6 +2146,18 @@ class ImageSegmentationDialog(QDialog):
         bbox: tuple[int, int, int, int],
         after_patch: np.ndarray | None,
     ) -> None:
+        """_push_mask_only_patch。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            bbox (tuple[int, int, int, int]): 输入参数。
+            after_patch (np.ndarray | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         before_patch = self._extract_mask_patch(bbox)
         self._push_commands_with_mask_patch(
             [],
@@ -1297,6 +2172,19 @@ class ImageSegmentationDialog(QDialog):
         preview_bbox: tuple[int, int, int, int],
         label_id: int,
     ) -> None:
+        """_apply_binary_preview_mask。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            preview_mask (np.ndarray): 输入参数。
+            preview_bbox (tuple[int, int, int, int]): 输入参数。
+            label_id (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         x, y, width, height = preview_bbox
         before_patch = self._extract_mask_patch(preview_bbox)
         after_patch = np.zeros((height, width), dtype=np.uint16) if before_patch is None else before_patch.copy()
@@ -1307,6 +2195,17 @@ class ImageSegmentationDialog(QDialog):
         self,
         annotation: AnnotationObject,
     ) -> None:
+        """_apply_annotation_to_mask。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         bbox = GeometryService.affected_bbox_from_annotations(annotation)
         if bbox is None:
             return
@@ -1323,6 +2222,19 @@ class ImageSegmentationDialog(QDialog):
         preview_mask: np.ndarray,
         preview_bbox: tuple[int, int, int, int],
     ) -> tuple[tuple[int, int, int, int], np.ndarray | None, np.ndarray | None]:
+        """_build_magic_mask_patch。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            new_annotations (list[AnnotationObject]): 输入参数。
+            preview_mask (np.ndarray): 输入参数。
+            preview_bbox (tuple[int, int, int, int]): 输入参数。
+        返回:
+            tuple[tuple[int, int, int, int], np.ndarray | None, np.ndarray | None]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         new_union = GeometryService.annotations_union(new_annotations)
         affected_annotations: list[AnnotationObject] = []
         if new_union is not None and not new_union.is_empty:
@@ -1370,6 +2282,17 @@ class ImageSegmentationDialog(QDialog):
         return bbox, before_patch, after_patch
 
     def _prompt_save_project_if_needed(self) -> bool:
+        """_prompt_save_project_if_needed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._dirty:
             return True
         reply = QMessageBox.question(
@@ -1386,6 +2309,17 @@ class ImageSegmentationDialog(QDialog):
         return True
 
     def _replace_labels(self, labels) -> None:
+        """_replace_labels。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            labels (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.project.labels = labels[:]
         self.label_store.set_labels(labels[:])
         label_ids = {label.id for label in labels}
@@ -1398,9 +2332,31 @@ class ImageSegmentationDialog(QDialog):
         self._set_dirty(True)
 
     def _set_active_label(self, label_id: int) -> None:
+        """_set_active_label。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            label_id (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._apply_label_choice(label_id)
 
     def _apply_label_choice(self, label_id: int) -> None:
+        """_apply_label_choice。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            label_id (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         selected_annotations = [
             item for item in self.project.annotations
             if item.id in self.tool_controller.selected_annotation_ids and item.label_id != label_id
@@ -1420,27 +2376,93 @@ class ImageSegmentationDialog(QDialog):
             canvas.set_tool_color(self._active_label_color())
 
     def _on_brush_size_changed(self, radius: float) -> None:
+        """_on_brush_size_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            radius (float): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         value = max(0.2, float(radius))
         for canvas in self._all_canvases():
             canvas.set_brush_radius(value)
 
     def _refresh_label_ui(self) -> None:
+        """_refresh_label_ui。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.label_panel.blockSignals(True)
         self.label_panel.set_labels(self.project.labels, self.project.active_label_id)
         self.label_panel.blockSignals(False)
 
     def on_colormap_changed(self, colormap_name: str) -> None:
+        """on_colormap_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            colormap_name (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if colormap_name.startswith("━"):
             return
         self._render_update_timer.start()
 
     def on_suggest_colormap(self, colormap_name: str) -> None:
+        """on_suggest_colormap。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            colormap_name (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.colormap_combo.setCurrentText(colormap_name)
 
     def on_render_settings_changed(self) -> None:
+        """on_render_settings_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._render_update_timer.start()
 
     def _apply_render_settings_update(self) -> None:
+        """_apply_render_settings_update。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         settings = self.render_settings.get_all_settings()
         self.colormap_combo.setEnabled(settings.get("display_mode") != "RGB")
         selected_aux_raster = next(
@@ -1500,11 +2522,33 @@ class ImageSegmentationDialog(QDialog):
             self._refresh_canvas()
 
     def _update_render_settings_bands(self) -> None:
+        """_update_render_settings_bands。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             return
         self.render_settings.set_num_bands(max(1, self.project.image_asset.band_count))
 
     def _update_image_stats_to_render_settings(self) -> None:
+        """_update_image_stats_to_render_settings。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         settings = self.render_settings.get_all_settings()
         if not settings.get("auto_range", True):
             return
@@ -1514,6 +2558,17 @@ class ImageSegmentationDialog(QDialog):
         self.render_settings.set_image_stats(*value_range)
 
     def open_image(self, file_path: str | None = None) -> None:
+        """open_image。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._finish_node_edit_session():
             return
         if not self._handle_pending_magic_session():
@@ -1534,6 +2589,17 @@ class ImageSegmentationDialog(QDialog):
         self._load_image(file_path)
 
     def _load_image(self, file_path: str) -> None:
+        """_load_image。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         source = open_raster_source(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
         self._configure_default_render_for_source(source)
         self._apply_source(
@@ -1554,6 +2620,21 @@ class ImageSegmentationDialog(QDialog):
         labels,
         active_label_id,
     ) -> None:
+        """_apply_source。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source (Any): 输入参数。
+            reset_project (bool): 输入参数。
+            annotations (Any): 输入参数。
+            labels (Any): 输入参数。
+            active_label_id (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         meta = source.metadata()
         self.current_source = source
         self._clear_auxiliary_layers()
@@ -1609,6 +2690,17 @@ class ImageSegmentationDialog(QDialog):
                 canvas.fit_image()
 
     def _clear_auxiliary_layers(self) -> None:
+        """_clear_auxiliary_layers。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         for layer in self._auxiliary_layers:
             layer_id = layer.get("id")
             if not layer_id:
@@ -1627,6 +2719,17 @@ class ImageSegmentationDialog(QDialog):
         self._auxiliary_layer_counter = 0
 
     def open_project(self) -> None:
+        """open_project。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._finish_node_edit_session():
             return
         if not self._handle_pending_magic_session():
@@ -1679,6 +2782,17 @@ class ImageSegmentationDialog(QDialog):
         self._set_dirty(False)
 
     def _apply_layer_visual_prefs(self) -> None:
+        """_apply_layer_visual_prefs。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         opacity_map = self.project.export_prefs.get("layer_opacity", {}) if isinstance(self.project.export_prefs, dict) else {}
         blend_map = self.project.export_prefs.get("layer_blend_mode", {}) if isinstance(self.project.export_prefs, dict) else {}
         for canvas in self._all_canvases():
@@ -1693,6 +2807,17 @@ class ImageSegmentationDialog(QDialog):
                     canvas.set_layer_blend_mode(layer_id, str(mode))
 
     def _save_layer_order_to_project(self) -> None:
+        """_save_layer_order_to_project。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not isinstance(self.project.export_prefs, dict):
             self.project.export_prefs = {}
         self.project.export_prefs["layer_order"] = [
@@ -1702,6 +2827,17 @@ class ImageSegmentationDialog(QDialog):
         ]
 
     def _restore_layer_order_from_project(self) -> None:
+        """_restore_layer_order_from_project。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not isinstance(self.project.export_prefs, dict):
             return
         order = self.project.export_prefs.get("layer_order")
@@ -1714,6 +2850,17 @@ class ImageSegmentationDialog(QDialog):
         self._rebuild_layer_panel_items()
 
     def _save_auxiliary_layers_to_project(self) -> None:
+        """_save_auxiliary_layers_to_project。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not isinstance(self.project.export_prefs, dict):
             self.project.export_prefs = {}
         serializable = []
@@ -1741,6 +2888,17 @@ class ImageSegmentationDialog(QDialog):
         self.project.export_prefs["aux_layers"] = serializable
 
     def _restore_auxiliary_layers_from_project(self) -> None:
+        """_restore_auxiliary_layers_from_project。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._clear_auxiliary_layers()
         if not isinstance(self.project.export_prefs, dict):
             return
@@ -1769,6 +2927,17 @@ class ImageSegmentationDialog(QDialog):
                 continue
 
     def save_project(self) -> bool:
+        """save_project。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._finish_node_edit_session():
             return False
         if self.project.image_asset is None:
@@ -1816,6 +2985,17 @@ class ImageSegmentationDialog(QDialog):
         return True
 
     def import_auxiliary_data(self) -> None:
+        """import_auxiliary_data。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             QMessageBox.warning(self, "提示", "请先打开待分割影像，再导入辅助数据。")
             return
@@ -1835,6 +3015,17 @@ class ImageSegmentationDialog(QDialog):
             QMessageBox.warning(self, "导入失败", str(exc))
 
     def _on_layer_panel_files_dropped(self, paths: list[str]) -> None:
+        """_on_layer_panel_files_dropped。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            paths (list[str]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             QMessageBox.warning(self, "提示", "请先打开待分割影像，再导入辅助数据。")
             return
@@ -1847,6 +3038,17 @@ class ImageSegmentationDialog(QDialog):
             QMessageBox.warning(self, "导入失败", str(exc))
 
     def _import_auxiliary_paths(self, file_paths: list[str]) -> None:
+        """_import_auxiliary_paths。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_paths (list[str]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         imported_any = False
         for file_path in file_paths:
             lower = str(file_path).lower()
@@ -1864,10 +3066,32 @@ class ImageSegmentationDialog(QDialog):
             self._set_dirty(True)
 
     def _next_aux_layer_id(self, prefix: str) -> str:
+        """_next_aux_layer_id。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            prefix (str): 输入参数。
+        返回:
+            str: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._auxiliary_layer_counter += 1
         return f"{prefix}_{self._auxiliary_layer_counter}"
 
     def _bump_aux_counter_from_layer_id(self, layer_id: str) -> None:
+        """_bump_aux_counter_from_layer_id。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_id (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         text = str(layer_id or "")
         if "_" not in text:
             return
@@ -1878,10 +3102,32 @@ class ImageSegmentationDialog(QDialog):
         self._auxiliary_layer_counter = max(self._auxiliary_layer_counter, value)
 
     def _base_has_georef(self) -> bool:
+        """_base_has_georef。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         asset = self.project.image_asset
         return bool(asset and asset.has_georef and asset.geotransform and asset.crs_wkt)
 
     def _base_raster_bounds_wgs84(self):
+        """_base_raster_bounds_wgs84。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         asset = self.project.image_asset
         if asset is None:
             return None
@@ -1893,6 +3139,18 @@ class ImageSegmentationDialog(QDialog):
         )
 
     def _import_aux_raster(self, file_path: str, reuse: dict | None = None) -> None:
+        """_import_aux_raster。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+            reuse (dict | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         source = open_raster_source(file_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
         meta = source.metadata()
         aux_has_geo = bool(meta.has_georef and meta.geotransform and meta.crs_wkt)
@@ -1953,6 +3211,18 @@ class ImageSegmentationDialog(QDialog):
             QMessageBox.information(self, "提示", "当前影像无地理信息，辅助栅格含地理信息，已放入独立坐标系显示。")
 
     def _aux_raster_bbox(self, meta, mode: str) -> tuple[float, float, float, float]:
+        """_aux_raster_bbox。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            meta (Any): 输入参数。
+            mode (str): 输入参数。
+        返回:
+            tuple[float, float, float, float]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         width = float(meta.width)
         height = float(meta.height)
         if self.project.image_asset is None:
@@ -1969,6 +3239,17 @@ class ImageSegmentationDialog(QDialog):
         return (base_w + offset, offset, width, height)
 
     def _map_geo_raster_to_base_bbox(self, aux_meta) -> tuple[float, float, float, float] | None:
+        """_map_geo_raster_to_base_bbox。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            aux_meta (Any): 输入参数。
+        返回:
+            tuple[float, float, float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None or self.project.image_asset.geotransform is None:
             return None
         try:
@@ -2002,6 +3283,18 @@ class ImageSegmentationDialog(QDialog):
             return None
 
     def _import_aux_vector(self, file_path: str, reuse: dict | None = None) -> None:
+        """_import_aux_vector。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+            reuse (dict | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         try:
             from osgeo import ogr
         except Exception as exc:
@@ -2070,6 +3363,17 @@ class ImageSegmentationDialog(QDialog):
             QMessageBox.information(self, "提示", "当前影像无地理信息，辅助矢量含地理信息，已放入独立坐标系显示。")
 
     def _collect_vector_fields(self, layer) -> list[dict]:
+        """_collect_vector_fields。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer (Any): 输入参数。
+        返回:
+            list[dict]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         layer_defn = layer.GetLayerDefn()
         fields = []
         for i in range(layer_defn.GetFieldCount()):
@@ -2083,6 +3387,18 @@ class ImageSegmentationDialog(QDialog):
         return fields
 
     def _vector_layer_bounds_wgs84(self, layer, srs) -> tuple[float, float, float, float] | None:
+        """_vector_layer_bounds_wgs84。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer (Any): 输入参数。
+            srs (Any): 输入参数。
+        返回:
+            tuple[float, float, float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         extent = layer.GetExtent()
         if extent is None:
             return None
@@ -2103,6 +3419,19 @@ class ImageSegmentationDialog(QDialog):
         return (min(lon_values), min(lat_values), max(lon_values), max(lat_values))
 
     def _vector_layer_to_annotations(self, layer, srs, mode: str) -> list[AnnotationObject]:
+        """_vector_layer_to_annotations。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer (Any): 输入参数。
+            srs (Any): 输入参数。
+            mode (str): 输入参数。
+        返回:
+            list[AnnotationObject]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             return []
         features = []
@@ -2123,6 +3452,18 @@ class ImageSegmentationDialog(QDialog):
         ) if mode == "align" else None
 
         def map_point(x: float, y: float) -> tuple[float, float] | None:
+            """map_point。
+
+            功能:
+                承担当前方法对应的业务逻辑。
+            参数:
+                x (float): 输入参数。
+                y (float): 输入参数。
+            返回:
+                tuple[float, float] | None: 方法执行结果。
+            异常:
+                Exception: 依赖组件或输入异常时可能抛出。
+            """
             if mode == "align" and base_inv_gt is not None:
                 try:
                     from osgeo import gdal
@@ -2138,6 +3479,19 @@ class ImageSegmentationDialog(QDialog):
             return float(x - min_x + base_w + offset), float(y - min_y + offset)
 
         def convert_polygon(geom) -> AnnotationObject | None:
+            """convert_polygon。
+
+            功能:
+                承担当前方法对应的业务逻辑。
+            参数:
+                geom (Any): 输入参数。
+            返回:
+                AnnotationObject | None: 方法执行结果。
+            异常:
+                Exception: 依赖组件或输入异常时可能抛出。
+            复杂度:
+                时间和空间复杂度与输入规模线性或近线性相关。
+            """
             exterior_ring = geom.GetGeometryRef(0)
             if exterior_ring is None:
                 return None
@@ -2183,6 +3537,17 @@ class ImageSegmentationDialog(QDialog):
         return features
 
     def export_data(self) -> None:
+        """export_data。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._finish_node_edit_session():
             return
         if self.project.image_asset is None:
@@ -2277,6 +3642,17 @@ class ImageSegmentationDialog(QDialog):
             QMessageBox.warning(self, "导出失败", self._format_exception_message(exc, "导出失败。"))
 
     def _build_export_project_from_mask(self):
+        """_build_export_project_from_mask。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             raise RuntimeError("缺少图像信息，无法导出矢量。")
         if self.project.mask_data is None:
@@ -2298,6 +3674,17 @@ class ImageSegmentationDialog(QDialog):
         return export_project
 
     def undo(self) -> None:
+        """undo。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._undo_preview_state():
             return
         if self.tool_controller.is_node_edit_active():
@@ -2312,6 +3699,17 @@ class ImageSegmentationDialog(QDialog):
             self._set_dirty(True)
 
     def redo(self) -> None:
+        """redo。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._redo_preview_state():
             return
         if self.tool_controller.is_node_edit_active():
@@ -2326,6 +3724,17 @@ class ImageSegmentationDialog(QDialog):
             self._set_dirty(True)
 
     def _undo_node_edit_command(self) -> None:
+        """_undo_node_edit_command。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         annotation_id = self._node_edit_session_annotation_id
         if annotation_id is None:
             return
@@ -2342,6 +3751,17 @@ class ImageSegmentationDialog(QDialog):
             self._set_dirty(True)
 
     def _redo_node_edit_command(self) -> None:
+        """_redo_node_edit_command。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         annotation_id = self._node_edit_session_annotation_id
         if annotation_id is None:
             return
@@ -2356,6 +3776,17 @@ class ImageSegmentationDialog(QDialog):
             self._set_dirty(True)
 
     def delete_selected(self) -> None:
+        """delete_selected。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.tool_controller.selected_vertex_index is not None:
             updated = self.tool_controller.remove_selected_vertex()
             if updated is not None:
@@ -2377,6 +3808,17 @@ class ImageSegmentationDialog(QDialog):
         self._set_dirty(True)
 
     def _backspace_action(self) -> None:
+        """_backspace_action。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.tool_controller.active_tool == SegmentationToolController.TOOL_POLYGON:
             if self.tool_controller._polygon_points:
                 self.tool_controller._polygon_points.pop()
@@ -2389,12 +3831,34 @@ class ImageSegmentationDialog(QDialog):
                 self._set_dirty(True)
 
     def _enter_action(self) -> None:
+        """_enter_action。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.tool_controller.active_tool == SegmentationToolController.TOOL_MAGIC_WAND:
             self._confirm_magic_preview()
         else:
             self.tool_controller.finish_polygon()
 
     def _escape_action(self) -> None:
+        """_escape_action。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.tool_controller.active_tool == SegmentationToolController.TOOL_MAGIC_WAND and self._preview_mask is not None:
             self._clear_magic_preview()
         elif self.tool_controller.selected_annotation_ids:
@@ -2403,6 +3867,17 @@ class ImageSegmentationDialog(QDialog):
             self.canvas.update_draft(None)
 
     def _handle_mouse_press(self, payload) -> None:
+        """_handle_mouse_press。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            payload (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if (
             self.tool_controller.active_tool == SegmentationToolController.TOOL_BROWSE
             and payload.button == Qt.LeftButton
@@ -2414,6 +3889,17 @@ class ImageSegmentationDialog(QDialog):
         self.tool_controller.handle_press(payload)
 
     def _show_raster_pixel_menu(self, payload) -> None:
+        """_show_raster_pixel_menu。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            payload (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         x = int(np.floor(float(payload.x)))
         y = int(np.floor(float(payload.y)))
         if self.project.image_asset is None:
@@ -2443,6 +3929,19 @@ class ImageSegmentationDialog(QDialog):
         menu.exec(QCursor.pos())
 
     def _read_aux_raster_pixel(self, layer: dict, image_x: int, image_y: int):
+        """_read_aux_raster_pixel。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer (dict): 输入参数。
+            image_x (int): 输入参数。
+            image_y (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         source = layer.get("source")
         bbox = layer.get("bbox")
         if source is None or bbox is None:
@@ -2468,6 +3967,17 @@ class ImageSegmentationDialog(QDialog):
             return None
 
     def _pixel_value_text(self, value) -> str:
+        """_pixel_value_text。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            value (Any): 输入参数。
+        返回:
+            str: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if value is None:
             return "-"
         arr = np.asarray(value)
@@ -2486,6 +3996,17 @@ class ImageSegmentationDialog(QDialog):
         return "[" + ", ".join(parts) + "]"
 
     def _handle_mouse_move(self, payload) -> None:
+        """_handle_mouse_move。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            payload (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         tool = self.tool_controller.active_tool
         if (
             self._mask_painting
@@ -2495,6 +4016,17 @@ class ImageSegmentationDialog(QDialog):
             self._paint_mask_line_to(payload.x, payload.y, erase=(tool == SegmentationToolController.TOOL_ERASER))
 
     def _handle_mouse_release(self, payload) -> None:
+        """_handle_mouse_release。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            payload (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._handle_mask_paint_payload(payload, end=True):
             return
         self.tool_controller.handle_release(payload)
@@ -2502,6 +4034,19 @@ class ImageSegmentationDialog(QDialog):
         self._refresh_canvas()
 
     def _handle_mask_paint_payload(self, payload, begin: bool = False, end: bool = False) -> bool:
+        """_handle_mask_paint_payload。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            payload (Any): 输入参数。
+            begin (bool): 输入参数。
+            end (bool): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         tool = self.tool_controller.active_tool
         if tool not in {SegmentationToolController.TOOL_BRUSH, SegmentationToolController.TOOL_ERASER}:
             return False
@@ -2521,6 +4066,17 @@ class ImageSegmentationDialog(QDialog):
         return False
 
     def _on_tool_action_triggered(self, action: QAction) -> None:
+        """_on_tool_action_triggered。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            action (QAction): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         target = action.data()
         if not self._handle_pending_magic_session():
             current = self.tool_controller.active_tool
@@ -2547,6 +4103,17 @@ class ImageSegmentationDialog(QDialog):
             self._clear_magic_preview()
 
     def _adjust_active_tool_slider(self, steps: int) -> None:
+        """_adjust_active_tool_slider。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            steps (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         tool = self.tool_controller.active_tool
         if tool == SegmentationToolController.TOOL_MAGIC_WAND:
             slider = self.magic_panel.tolerance_slider
@@ -2560,11 +4127,33 @@ class ImageSegmentationDialog(QDialog):
         slider.setValue(max(slider.minimum(), min(slider.maximum(), slider.value() + delta)))
 
     def _begin_mask_paint_session(self) -> None:
+        """_begin_mask_paint_session。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._mask_paint_bbox = None
         self._mask_paint_before_patch = None
         self._last_mask_paint_point = None
 
     def _commit_mask_paint_session(self) -> None:
+        """_commit_mask_paint_session。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         bbox = self._mask_paint_bbox
         before_patch = self._mask_paint_before_patch
         self._mask_paint_bbox = None
@@ -2584,6 +4173,19 @@ class ImageSegmentationDialog(QDialog):
         self._refresh_canvas()
 
     def _paint_mask_line_to(self, x: float, y: float, erase: bool = False) -> None:
+        """_paint_mask_line_to。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (float): 输入参数。
+            y (float): 输入参数。
+            erase (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         previous = self._last_mask_paint_point
         radius = max(0.2, float(self.magic_panel.brush_size()))
         if previous is None:
@@ -2601,6 +4203,20 @@ class ImageSegmentationDialog(QDialog):
         self._last_mask_paint_point = (x, y)
 
     def _paint_mask_at(self, x: float, y: float, erase: bool = False, refresh: bool = True) -> None:
+        """_paint_mask_at。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (float): 输入参数。
+            y (float): 输入参数。
+            erase (bool): 输入参数。
+            refresh (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             return
         self._ensure_project_mask_shape()
@@ -2642,6 +4258,17 @@ class ImageSegmentationDialog(QDialog):
             self._refresh_canvas()
 
     def _extend_mask_paint_before_patch(self, bbox: tuple[int, int, int, int]) -> None:
+        """_extend_mask_paint_before_patch。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            bbox (tuple[int, int, int, int]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         current_before = self._extract_mask_patch(bbox)
         if current_before is None:
             current_before = np.zeros((bbox[3], bbox[2]), dtype=np.uint16)
@@ -2669,6 +4296,19 @@ class ImageSegmentationDialog(QDialog):
         self._mask_paint_before_patch = union_before.copy()
 
     def _add_polygon_annotation(self, polygon_points) -> None:
+        """_add_polygon_annotation。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            polygon_points (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         if self.project.active_label_id is None:
             return
         annotation = AnnotationObject.from_polygon(
@@ -2686,6 +4326,17 @@ class ImageSegmentationDialog(QDialog):
         self._set_dirty(True)
 
     def _add_rectangle_annotation(self, polygon_points) -> None:
+        """_add_rectangle_annotation。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            polygon_points (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.active_label_id is None:
             return
         annotation = AnnotationObject.from_polygon(
@@ -2704,6 +4355,17 @@ class ImageSegmentationDialog(QDialog):
         self._set_dirty(True)
 
     def _on_selection_changed(self, selection) -> None:
+        """_on_selection_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            selection (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         selection_ids = set(selection or [])
         previous_id = self._node_edit_session_annotation_id
         next_single_id = next(iter(selection_ids), None) if len(selection_ids) == 1 else None
@@ -2726,6 +4388,18 @@ class ImageSegmentationDialog(QDialog):
         self._refresh_label_ui()
 
     def _on_geometry_changed(self, annotation_id: str, updated: AnnotationObject) -> None:
+        """_on_geometry_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation_id (str): 输入参数。
+            updated (AnnotationObject): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._ensure_node_edit_session(annotation_id)
         updated = self._apply_annotation_coord_ref(updated)
         self.project.annotations = [
@@ -2736,6 +4410,19 @@ class ImageSegmentationDialog(QDialog):
         self._refresh_canvas()
 
     def _on_geometry_committed(self, annotation_id: str, before: AnnotationObject, after: AnnotationObject) -> None:
+        """_on_geometry_committed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation_id (str): 输入参数。
+            before (AnnotationObject): 输入参数。
+            after (AnnotationObject): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._ensure_node_edit_session(annotation_id)
         after = self._apply_annotation_coord_ref(after)
         self._push_commands_with_mask_patch(
@@ -2748,6 +4435,18 @@ class ImageSegmentationDialog(QDialog):
         self._refresh_canvas()
 
     def _on_draft_changed(self, draft_type: str, points) -> None:
+        """_on_draft_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            draft_type (str): 输入参数。
+            points (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if draft_type == "clear":
             self.canvas.update_draft(None)
             return
@@ -2757,20 +4456,69 @@ class ImageSegmentationDialog(QDialog):
             self.canvas.update_draft(points, color_name=self._active_label_color())
 
     def _on_snap_indicator_changed(self, snap_type, position) -> None:
+        """_on_snap_indicator_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            snap_type (Any): 输入参数。
+            position (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.canvas.update_snap_indicator(snap_type, position)
 
     def _set_preview_vector_visibility(self, visible: bool, user_initiated: bool = False) -> None:
         # 运行时矢量预览入口暂时关闭，仅保留代码以便后续恢复。
+        """_set_preview_vector_visibility。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            visible (bool): 输入参数。
+            user_initiated (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.project.layer_visibility["preview_vector"] = False
         self._preview_vector_user_enabled = False
 
     def _preview_result_touches_roi_boundary(self, preview, roi_width: int, roi_height: int) -> bool:
+        """_preview_result_touches_roi_boundary。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            preview (Any): 输入参数。
+            roi_width (int): 输入参数。
+            roi_height (int): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         bx, by, bw, bh = preview.bbox
         if bw <= 0 or bh <= 0:
             return False
         return bx <= 0 or by <= 0 or bx + bw >= roi_width or by + bh >= roi_height
 
     def _build_magic_preview_result(self, x: int, y: int):
+        """_build_magic_preview_result。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.current_source is None or self.project.image_asset is None:
             return None, None, None
         params = self.magic_panel.params()
@@ -2848,6 +4596,20 @@ class ImageSegmentationDialog(QDialog):
             }
 
     def _ensure_preview_polygons(self, source_tool: str = "magic_wand_preview", force: bool = False):
+        """_ensure_preview_polygons。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source_tool (str): 输入参数。
+            force (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         if (
             self.preview_selection is None
             or self._preview_mask is None
@@ -2877,6 +4639,20 @@ class ImageSegmentationDialog(QDialog):
         progress_message: str = "正在将Mask矢量化...",
         force: bool = False,
     ):
+        """_refresh_preview_vector。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source_tool (str): 输入参数。
+            show_progress (bool): 输入参数。
+            progress_message (str): 输入参数。
+            force (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if (
             self.preview_selection is None
             or self._preview_mask is None
@@ -2904,6 +4680,18 @@ class ImageSegmentationDialog(QDialog):
             raise
 
     def _run_magic_wand_preview(self, x: int, y: int) -> None:
+        """_run_magic_wand_preview。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.current_source is None or self.project.image_asset is None:
             return
         if self._magic_cancel_requested:
@@ -2982,16 +4770,49 @@ class ImageSegmentationDialog(QDialog):
             self._magic_preview_in_progress = False
 
     def _schedule_magic_preview(self, _params) -> None:
+        """_schedule_magic_preview。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            _params (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._current_magic_seed is None or self.tool_controller.active_tool != SegmentationToolController.TOOL_MAGIC_WAND:
             return
         self._magic_preview_timer.start()
 
     def _trigger_pending_magic_preview(self) -> None:
+        """_trigger_pending_magic_preview。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._current_magic_seed is None:
             return
         self._run_magic_wand_preview(*self._current_magic_seed)
 
     def _on_merge_preview_changed(self, enabled: bool) -> None:
+        """_on_merge_preview_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            enabled (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._sync_magic_panel_state_to_project(mark_dirty=True)
         if not enabled:
             self._merge_preview_entries = []
@@ -3002,6 +4823,17 @@ class ImageSegmentationDialog(QDialog):
             self._update_preview_display()
 
     def _ensure_preview_mask_layer_visible_for_magic(self) -> None:
+        """_ensure_preview_mask_layer_visible_for_magic。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.layer_visibility.get("preview_mask", True):
             return
         self.project.layer_visibility["preview_mask"] = True
@@ -3010,6 +4842,17 @@ class ImageSegmentationDialog(QDialog):
             self.canvas.set_layer_visible("preview_mask", True)
 
     def _snapshot_preview_state(self) -> dict:
+        """_snapshot_preview_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            dict: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         entries = []
         for item in self._merge_preview_entries:
             entries.append(
@@ -3027,6 +4870,17 @@ class ImageSegmentationDialog(QDialog):
         }
 
     def _restore_preview_state(self, state: dict) -> None:
+        """_restore_preview_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            state (dict): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._merge_preview_entries = [
             {
                 "seed": tuple(item["seed"]),
@@ -3055,14 +4909,47 @@ class ImageSegmentationDialog(QDialog):
         self._refresh_canvas()
 
     def _push_preview_history(self) -> None:
+        """_push_preview_history。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._preview_undo_stack.append(self._snapshot_preview_state())
         self._preview_redo_stack.clear()
 
     def _clear_preview_history(self) -> None:
+        """_clear_preview_history。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._preview_undo_stack.clear()
         self._preview_redo_stack.clear()
 
     def _undo_preview_state(self) -> bool:
+        """_undo_preview_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._preview_undo_stack:
             return False
         self._preview_redo_stack.append(self._snapshot_preview_state())
@@ -3074,6 +4961,17 @@ class ImageSegmentationDialog(QDialog):
         return True
 
     def _redo_preview_state(self) -> bool:
+        """_redo_preview_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._preview_redo_stack:
             return False
         self._preview_undo_stack.append(self._snapshot_preview_state())
@@ -3083,6 +4981,19 @@ class ImageSegmentationDialog(QDialog):
         return True
 
     def _upsert_merge_preview_entry(self, seed: tuple[int, int], mask: np.ndarray, bbox: tuple[int, int, int, int]) -> None:
+        """_upsert_merge_preview_entry。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            seed (tuple[int, int]): 输入参数。
+            mask (np.ndarray): 输入参数。
+            bbox (tuple[int, int, int, int]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         for item in self._merge_preview_entries:
             if item["seed"] == seed:
                 item["mask"] = np.asarray(mask, dtype=np.uint8).copy()
@@ -3097,9 +5008,31 @@ class ImageSegmentationDialog(QDialog):
         )
 
     def _merge_preview_has_seed(self, seed: tuple[int, int]) -> bool:
+        """_merge_preview_has_seed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            seed (tuple[int, int]): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return any(item.get("seed") == tuple(seed) for item in self._merge_preview_entries)
 
     def _rebuild_merge_preview_from_entries(self) -> None:
+        """_rebuild_merge_preview_from_entries。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         merged_mask = None
         merged_bbox = None
         for item in self._merge_preview_entries:
@@ -3118,6 +5051,17 @@ class ImageSegmentationDialog(QDialog):
         self._preview_bbox = merged_bbox
 
     def _confirm_magic_preview(self) -> None:
+        """_confirm_magic_preview。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self.preview_selection or self.project.active_label_id is None or self._preview_mask is None or self._preview_bbox is None:
             return
         self._start_progress("正在确认魔法棒预览...", maximum=100)
@@ -3144,6 +5088,17 @@ class ImageSegmentationDialog(QDialog):
             raise
 
     def _clear_magic_preview(self) -> None:
+        """_clear_magic_preview。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._merge_preview_entries = []
         self._clear_preview_history()
         self.preview_selection = None
@@ -3155,6 +5110,18 @@ class ImageSegmentationDialog(QDialog):
         self._refresh_canvas()
 
     def _preview_mask_without_overlap(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None) -> np.ndarray | None:
+        """_preview_mask_without_overlap。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mask (np.ndarray | None): 输入参数。
+            bbox (tuple[int, int, int, int] | None): 输入参数。
+        返回:
+            np.ndarray | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if mask is None or bbox is None:
             return None
         if self.project.mask_data is None:
@@ -3177,6 +5144,18 @@ class ImageSegmentationDialog(QDialog):
         return work if np.any(work > 0) else None
 
     def _layer_visibility_callback(self, layer_name: str, visible: bool) -> None:
+        """_layer_visibility_callback。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_name (str): 输入参数。
+            visible (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.project.layer_visibility[layer_name] = visible
         for window_id in self.workspace.window_ids:
             canvas = self._canvas_for_window(window_id)
@@ -3193,6 +5172,18 @@ class ImageSegmentationDialog(QDialog):
             self._refresh_preview_vector(force=True)
 
     def _layer_order_callback(self, layer_name: str, index: int) -> None:
+        """_layer_order_callback。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_name (str): 输入参数。
+            index (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         for canvas in self._all_canvases():
             if canvas is self.canvas:
                 continue
@@ -3200,6 +5191,18 @@ class ImageSegmentationDialog(QDialog):
                 canvas.move_layer(layer_name, index)
 
     def _layer_opacity_callback(self, layer_name: str, opacity: float) -> None:
+        """_layer_opacity_callback。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_name (str): 输入参数。
+            opacity (float): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not isinstance(self.project.export_prefs, dict):
             self.project.export_prefs = {}
         self.project.export_prefs.setdefault("layer_opacity", {})[layer_name] = float(opacity)
@@ -3210,6 +5213,18 @@ class ImageSegmentationDialog(QDialog):
                 canvas.set_layer_opacity(layer_name, float(opacity))
 
     def _layer_blend_mode_callback(self, layer_name: str, blend_mode: str) -> None:
+        """_layer_blend_mode_callback。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_name (str): 输入参数。
+            blend_mode (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not isinstance(self.project.export_prefs, dict):
             self.project.export_prefs = {}
         self.project.export_prefs.setdefault("layer_blend_mode", {})[layer_name] = str(blend_mode)
@@ -3220,10 +5235,32 @@ class ImageSegmentationDialog(QDialog):
                 canvas.set_layer_blend_mode(layer_name, str(blend_mode))
 
     def _on_layer_controller_changed(self) -> None:
+        """_on_layer_controller_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._refresh_canvas()
         self._set_dirty(True)
 
     def _on_canvas_layer_rendering_changed(self, layer_id: str) -> None:
+        """_on_canvas_layer_rendering_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_id (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None or not layer_id or layer_id == "base_raster":
             return
         target_layer = None
@@ -3238,6 +5275,17 @@ class ImageSegmentationDialog(QDialog):
                 self._refresh_aux_raster_layer(target_layer, canvas=canvas)
 
     def _on_layer_selected(self, layer_id: str | None) -> None:
+        """_on_layer_selected。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_id (str | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._selected_render_layer_id = layer_id
         if not isinstance(self.project.export_prefs, dict):
             self.project.export_prefs = {}
@@ -3246,6 +5294,17 @@ class ImageSegmentationDialog(QDialog):
             self.render_sidebar_controller.refresh()
 
     def _layer_bbox(self, layer_name: str) -> tuple[float, float, float, float] | None:
+        """_layer_bbox。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_name (str): 输入参数。
+        返回:
+            tuple[float, float, float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             return None
         for layer in self._auxiliary_layers:
@@ -3273,6 +5332,17 @@ class ImageSegmentationDialog(QDialog):
         return (0.0, 0.0, float(self.project.image_asset.width), float(self.project.image_asset.height))
 
     def _remove_layer(self, layer_id: str) -> bool:
+        """_remove_layer。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_id (str): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not is_layer_removable(layer_id):
             return False
         target = next((item for item in self._auxiliary_layers if item.get("id") == layer_id), None)
@@ -3293,6 +5363,18 @@ class ImageSegmentationDialog(QDialog):
         return True
 
     def _on_layer_nodata_changed(self, layer_id: str, value) -> None:
+        """_on_layer_nodata_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_id (str): 输入参数。
+            value (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if layer_id == "base_raster":
             self._base_nodata_override = value
             if not isinstance(self.project.export_prefs, dict):
@@ -3311,6 +5393,17 @@ class ImageSegmentationDialog(QDialog):
         self._set_dirty(True)
 
     def _edit_layer_style(self, layer_id: str) -> None:
+        """_edit_layer_style。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_id (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         target = next((item for item in self._auxiliary_layers if item.get("id") == layer_id), None)
         if target is None:
             return
@@ -3318,6 +5411,17 @@ class ImageSegmentationDialog(QDialog):
             self._edit_vector_layer_style(target)
 
     def _show_layer_properties(self, layer_id: str) -> None:
+        """_show_layer_properties。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_id (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         target = next((item for item in self._auxiliary_layers if item.get("id") == layer_id), None)
         if target is not None:
             if target.get("type") == "raster":
@@ -3339,6 +5443,17 @@ class ImageSegmentationDialog(QDialog):
         self._show_copyable_text_dialog("图层属性", text)
 
     def _edit_vector_layer_style(self, layer: dict) -> None:
+        """_edit_vector_layer_style。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer (dict): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         style = dict(layer.get("vector_style") or {})
         dialog = QDialog(self)
         dialog.setWindowTitle("矢量样式")
@@ -3351,6 +5466,17 @@ class ImageSegmentationDialog(QDialog):
         selected_color = {"value": initial_color}
 
         def choose_color() -> None:
+            """choose_color。
+
+            功能:
+                承担当前方法对应的业务逻辑。
+            参数:
+                无。
+            返回:
+                None: 方法执行结果。
+            异常:
+                Exception: 依赖组件或输入异常时可能抛出。
+            """
             color = QColorDialog.getColor(selected_color["value"], dialog, "选择颜色")
             if color.isValid():
                 selected_color["value"] = color
@@ -3381,6 +5507,17 @@ class ImageSegmentationDialog(QDialog):
         self._set_dirty(True)
 
     def _show_raster_layer_properties(self, layer: dict) -> None:
+        """_show_raster_layer_properties。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer (dict): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         source = layer.get("source")
         if source is None:
             return
@@ -3408,6 +5545,17 @@ class ImageSegmentationDialog(QDialog):
         self._show_copyable_text_dialog("栅格属性", "\n".join(text))
 
     def _show_vector_layer_properties(self, layer: dict) -> None:
+        """_show_vector_layer_properties。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer (dict): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         state = self.canvas.layer_manager.layer(layer.get("id"))
         geom_text = str(layer.get("geometry_type_name", layer.get("geometry_type", "-")))
         fields = layer.get("fields") or []
@@ -3427,6 +5575,18 @@ class ImageSegmentationDialog(QDialog):
         self._show_copyable_text_dialog("矢量属性", "\n".join(text))
 
     def _show_copyable_text_dialog(self, title: str, text: str) -> None:
+        """_show_copyable_text_dialog。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            title (str): 输入参数。
+            text (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         dialog = QDialog(self)
         dialog.setWindowTitle(title)
         dialog.resize(620, 460)
@@ -3442,6 +5602,17 @@ class ImageSegmentationDialog(QDialog):
         dialog.exec()
 
     def _crs_brief(self, crs_wkt: str | None) -> str:
+        """_crs_brief。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            crs_wkt (str | None): 输入参数。
+        返回:
+            str: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         text = (crs_wkt or "").strip()
         if not text:
             return "-"
@@ -3458,6 +5629,17 @@ class ImageSegmentationDialog(QDialog):
         return text[:120] + ("..." if len(text) > 120 else "")
 
     def _blend_mode_text(self, mode: str | None) -> str:
+        """_blend_mode_text。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mode (str | None): 输入参数。
+        返回:
+            str: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         mapping = {
             "source_over": "正常",
             "multiply": "正片叠底",
@@ -3468,6 +5650,17 @@ class ImageSegmentationDialog(QDialog):
         return mapping.get(str(mode or "source_over"), str(mode or "source_over"))
 
     def _selected_annotation(self) -> AnnotationObject | None:
+        """_selected_annotation。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            AnnotationObject | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         selected_id = self.tool_controller.selected_annotation_id
         if selected_id is None:
             return None
@@ -3477,6 +5670,17 @@ class ImageSegmentationDialog(QDialog):
         return None
 
     def _find_annotation_by_id(self, annotation_id: str | None) -> AnnotationObject | None:
+        """_find_annotation_by_id。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation_id (str | None): 输入参数。
+        返回:
+            AnnotationObject | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if annotation_id is None:
             return None
         for annotation in self.project.annotations:
@@ -3485,6 +5689,17 @@ class ImageSegmentationDialog(QDialog):
         return None
 
     def _set_controller_selection(self, selection_ids: set[str]) -> None:
+        """_set_controller_selection。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            selection_ids (set[str]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._suspend_selection_sync = True
         self.tool_controller.selected_annotation_ids = set(selection_ids)
         self.tool_controller.selected_annotation_id = next(iter(selection_ids), None)
@@ -3494,6 +5709,17 @@ class ImageSegmentationDialog(QDialog):
         self._suspend_selection_sync = False
 
     def _clear_node_edit_session_state(self, clear_override: bool = False) -> None:
+        """_clear_node_edit_session_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            clear_override (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._node_edit_session_annotation_id = None
         self._node_edit_original_annotation = None
         self._node_edit_session_dirty = False
@@ -3501,6 +5727,17 @@ class ImageSegmentationDialog(QDialog):
         self._node_edit_mask_snapshot = None
 
     def _ensure_node_edit_session(self, annotation_id: str | None) -> None:
+        """_ensure_node_edit_session。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation_id (str | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if annotation_id is None:
             return
         if self._node_edit_session_annotation_id == annotation_id and self._node_edit_original_annotation is not None:
@@ -3515,6 +5752,17 @@ class ImageSegmentationDialog(QDialog):
         self._node_edit_mask_snapshot = None if self.project.mask_data is None else self.project.mask_data.copy()
 
     def _finish_node_edit_session(self) -> bool:
+        """_finish_node_edit_session。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         annotation_id = self._node_edit_session_annotation_id
         original = self._node_edit_original_annotation
         if annotation_id is None or original is None:
@@ -3564,6 +5812,17 @@ class ImageSegmentationDialog(QDialog):
         return True
 
     def _refresh_canvas(self) -> None:
+        """_refresh_canvas。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         label_lookup = {label.id: label for label in self.project.labels}
         annotations = self.project.annotations if self.project.layer_visibility.get("annotations", True) else []
         raster_rgba, raster_bbox = self._current_raster_overlay(label_lookup)
@@ -3599,6 +5858,17 @@ class ImageSegmentationDialog(QDialog):
             self.status_label.setText("像素坐标模式：仅主窗口保证标注精确显示")
 
     def _refresh_auxiliary_layers(self) -> None:
+        """_refresh_auxiliary_layers。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         for canvas in self._all_canvases():
             for layer in self._auxiliary_layers:
                 layer_id = layer.get("id")
@@ -3620,6 +5890,18 @@ class ImageSegmentationDialog(QDialog):
                     )
 
     def _refresh_aux_raster_layer(self, layer: dict, *, canvas=None) -> None:
+        """_refresh_aux_raster_layer。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer (dict): 输入参数。
+            canvas (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         canvas = canvas or self.canvas
         source = layer.get("source")
         bbox = layer.get("bbox")
@@ -3711,6 +5993,17 @@ class ImageSegmentationDialog(QDialog):
         )
 
     def _autosave_if_needed(self) -> None:
+        """_autosave_if_needed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._dirty:
             return
         if not self.current_project_path or (self._autosave_thread is not None and self._autosave_thread.isRunning()):
@@ -3730,10 +6023,33 @@ class ImageSegmentationDialog(QDialog):
         self._autosave_thread.start()
 
     def _on_autosave_finished(self, _success: bool, _message: str) -> None:
+        """_on_autosave_finished。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            _success (bool): 输入参数。
+            _message (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._autosave_worker = None
         self._autosave_thread = None
 
     def _current_raster_overlay(self, label_lookup):
+        """_current_raster_overlay。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            label_lookup (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self.project.image_asset or not self.canvas.last_render or not self.project.layer_visibility.get("mask", True):
             return None, None
         x0, y0, width, height = self.canvas.last_render.source_window
@@ -3774,6 +6090,17 @@ class ImageSegmentationDialog(QDialog):
         return raster_rgba, (x0, y0, clipped_mask.shape[1], clipped_mask.shape[0])
 
     def _on_view_state_changed(self, state) -> None:
+        """_on_view_state_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            state (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.tool_controller.set_view_state(state)
         if self.project.image_asset is None:
             return
@@ -3799,6 +6126,17 @@ class ImageSegmentationDialog(QDialog):
         self._view_overlay_update_timer.start()
 
     def _apply_view_overlay_update(self) -> None:
+        """_apply_view_overlay_update。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             return
         if self._updating_view_overlays:
@@ -3813,6 +6151,17 @@ class ImageSegmentationDialog(QDialog):
             self._updating_view_overlays = False
 
     def _ensure_window2_ready(self) -> None:
+        """_ensure_window2_ready。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         viewer1 = self._canvas_for_window("viewer_1")
         viewer2 = self._canvas_for_window("viewer_2")
         if viewer1 is None or viewer2 is None:
@@ -3823,16 +6172,51 @@ class ImageSegmentationDialog(QDialog):
 
     def _restore_workspace_view_state_after_toggle(self, state: dict, window_count: int) -> None:
         # 切换 splitter 后会经历一次异步布局，做“立即 + 稍后”两次恢复，防止视图范围被二次挤压。
+        """_restore_workspace_view_state_after_toggle。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            state (dict): 输入参数。
+            window_count (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         QTimer.singleShot(0, lambda s=state, count=window_count: self._restore_workspace_view_state_after_layout(s, count))
         QTimer.singleShot(90, lambda s=state, count=window_count: self._restore_workspace_view_state_after_layout(s, count))
         QTimer.singleShot(220, lambda s=state, count=window_count: self._restore_workspace_view_state_after_layout(s, count))
         QTimer.singleShot(420, lambda s=state, count=window_count: self._restore_workspace_view_state_after_layout(s, count))
 
     def _clear_synced_pointers(self) -> None:
+        """_clear_synced_pointers。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if hasattr(self, "workspace"):
             self.workspace.clear_synced_pointers()
 
     def _restore_workspace_view_state_after_layout(self, state: dict, window_count: int) -> None:
+        """_restore_workspace_view_state_after_layout。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            state (dict): 输入参数。
+            window_count (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not isinstance(state, dict):
             return
         viewer1 = self._canvas_for_window("viewer_1")
@@ -3845,6 +6229,18 @@ class ImageSegmentationDialog(QDialog):
         self._layout_view_states[int(window_count)] = dict(state)
 
     def _layout_adjusted_view_state(self, state: dict, canvas) -> dict:
+        """_layout_adjusted_view_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            state (dict): 输入参数。
+            canvas (Any): 输入参数。
+        返回:
+            dict: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         adjusted = dict(state)
         preserve_axis = adjusted.pop("_preserve_axis", None)
         if preserve_axis != "y" or "y_range" not in adjusted:
@@ -3867,17 +6263,50 @@ class ImageSegmentationDialog(QDialog):
         return adjusted
 
     def _sync_display_state_from_canvas(self) -> None:
+        """_sync_display_state_from_canvas。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.image_asset is None:
             return
         self._on_view_state_changed(self.canvas.current_view_state())
         self._apply_view_overlay_update()
 
     def _save_canvas_view_state(self) -> None:
+        """_save_canvas_view_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not isinstance(self.project.export_prefs, dict):
             self.project.export_prefs = {}
         self.project.export_prefs["canvas_view_state"] = self.canvas.capture_view_state()
 
     def _restore_canvas_view_state(self) -> None:
+        """_restore_canvas_view_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         view_state = None
         if isinstance(self.project.export_prefs, dict):
             maybe = self.project.export_prefs.get("canvas_view_state")
@@ -3890,9 +6319,35 @@ class ImageSegmentationDialog(QDialog):
 
     def _build_preview_from_mask(self, mask, bbox, label_id: int | None = None, source_tool: str = "magic_wand_preview", force: bool = False):
         # 运行时矢量预览入口暂时关闭，仅保留代码以便后续恢复。
+        """_build_preview_from_mask。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mask (Any): 输入参数。
+            bbox (Any): 输入参数。
+            label_id (int | None): 输入参数。
+            source_tool (str): 输入参数。
+            force (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return None
 
     def _handle_pending_magic_session(self) -> bool:
+        """_handle_pending_magic_session。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._preview_mask is None:
             return True
         reply = QMessageBox.question(
@@ -3911,6 +6366,24 @@ class ImageSegmentationDialog(QDialog):
         return True
 
     def _map_preview_to_image(self, preview, last_render, rendered_width, rendered_height, win_x, win_y, win_w, win_h):
+        """_map_preview_to_image。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            preview (Any): 输入参数。
+            last_render (Any): 输入参数。
+            rendered_width (Any): 输入参数。
+            rendered_height (Any): 输入参数。
+            win_x (Any): 输入参数。
+            win_y (Any): 输入参数。
+            win_w (Any): 输入参数。
+            win_h (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         bx, by, bw, bh = preview.bbox
         if bw <= 0 or bh <= 0:
             return None, None
@@ -3930,6 +6403,17 @@ class ImageSegmentationDialog(QDialog):
 
     def _build_magic_commit_commands(self, new_annotations):
         # 运行时矢量提交入口暂时关闭，仅保留代码以便后续恢复。
+        """_build_magic_commit_commands。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            new_annotations (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         commands = []
         if not new_annotations:
             return commands, None
@@ -3964,6 +6448,17 @@ class ImageSegmentationDialog(QDialog):
         return commands, GeometryService.affected_bbox_from_annotations(clipped_annotations)
 
     def _update_mouse_position(self, payload) -> None:
+        """_update_mouse_position。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            payload (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if bool(payload.buttons & (Qt.LeftButton | Qt.MiddleButton | Qt.RightButton)):
             return
         if not self.project.image_asset:
@@ -3995,6 +6490,18 @@ class ImageSegmentationDialog(QDialog):
             self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: - | Mask 标签: 无标签")
 
     def _mask_label_name_at(self, col: int, row: int) -> str:
+        """_mask_label_name_at。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            col (int): 输入参数。
+            row (int): 输入参数。
+        返回:
+            str: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.mask_data is None:
             return "无标签"
         if not (0 <= row < self.project.mask_data.shape[0] and 0 <= col < self.project.mask_data.shape[1]):
@@ -4008,6 +6515,17 @@ class ImageSegmentationDialog(QDialog):
         return "无标签"
 
     def _rendered_rgb_from_original(self, original_value):
+        """_rendered_rgb_from_original。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            original_value (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if original_value is None:
             return None
         if isinstance(original_value, list):
@@ -4025,6 +6543,17 @@ class ImageSegmentationDialog(QDialog):
         return [int(rgb[0, 0, 0]), int(rgb[0, 0, 1]), int(rgb[0, 0, 2])]
 
     def clear_all_annotations(self) -> None:
+        """clear_all_annotations。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.project.mask_data is None or not np.any(self.project.mask_data):
             return
         reply = QMessageBox.question(
@@ -4048,15 +6577,48 @@ class ImageSegmentationDialog(QDialog):
             self._set_dirty(True)
 
     def _select_all_annotations(self) -> None:
+        """_select_all_annotations。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.tool_controller.select_all()
 
     def _active_label_color(self) -> str:
+        """_active_label_color。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            str: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         for label in self.project.labels:
             if label.id == self.project.active_label_id:
                 return label.color
         return "#ffd43b"
 
     def _update_preview_display(self) -> None:
+        """_update_preview_display。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         color = self._active_label_color()
         display_mask = self._preview_mask
         if self.magic_panel.only_show_new_region_enabled():
@@ -4069,6 +6631,17 @@ class ImageSegmentationDialog(QDialog):
             canvas.update_preview_polygons([], color)
 
     def closeEvent(self, event) -> None:
+        """closeEvent。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._finish_node_edit_session():
             event.ignore()
             return

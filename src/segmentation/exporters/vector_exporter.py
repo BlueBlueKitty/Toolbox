@@ -19,6 +19,20 @@ def export_vector_file(
     driver_name: str,
     coordinate_mode: str = "image",
 ) -> None:
+    """export_vector_file。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        project (SegmentationProject): 输入参数。
+        output_path (str): 输入参数。
+        driver_name (str): 输入参数。
+        coordinate_mode (str): 输入参数。
+    返回:
+        None: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     if project.image_asset is None:
         raise RuntimeError("缺少图像信息，无法导出矢量。")
     if project.mask_data is None:
@@ -91,6 +105,19 @@ def export_vector_file(
 
 
 def _delete_existing_vector_output(output_path: str, driver_name: str, driver) -> None:
+    """_delete_existing_vector_output。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        output_path (str): 输入参数。
+        driver_name (str): 输入参数。
+        driver (Any): 输入参数。
+    返回:
+        None: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     path = Path(output_path)
     if driver_name == "ESRI Shapefile":
         stem = path.with_suffix("")
@@ -105,12 +132,37 @@ def _delete_existing_vector_output(output_path: str, driver_name: str, driver) -
 
 
 def _polygon_to_geo_coords(polygon, project: SegmentationProject):
+    """_polygon_to_geo_coords。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        polygon (Any): 输入参数。
+        project (SegmentationProject): 输入参数。
+    返回:
+        None: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    复杂度:
+        时间和空间复杂度与输入规模线性或近线性相关。
+    """
     if project.image_asset is None or project.image_asset.geotransform is None:
         return polygon
 
     geotransform = project.image_asset.geotransform
 
     def transform_ring(coords):
+        """transform_ring。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            coords (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         transformed = []
         for x, y in coords:
             map_x, map_y = gdal.ApplyGeoTransform(geotransform, x, y)
@@ -124,6 +176,20 @@ def _polygon_to_geo_coords(polygon, project: SegmentationProject):
 
 
 def _reproject_polygon_to_wgs84(polygon, project: SegmentationProject):
+    """_reproject_polygon_to_wgs84。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        polygon (Any): 输入参数。
+        project (SegmentationProject): 输入参数。
+    返回:
+        None: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    复杂度:
+        时间和空间复杂度与输入规模线性或近线性相关。
+    """
     if project.image_asset is None or not project.image_asset.crs_wkt:
         return polygon
     source_ref = osr.SpatialReference()
@@ -135,6 +201,17 @@ def _reproject_polygon_to_wgs84(polygon, project: SegmentationProject):
     transform = osr.CoordinateTransformation(source_ref, target_ref)
 
     def transform_ring(coords):
+        """transform_ring。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            coords (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         result = []
         for x, y in coords:
             tx, ty, _tz = transform.TransformPoint(float(x), float(y))
@@ -148,13 +225,49 @@ def _reproject_polygon_to_wgs84(polygon, project: SegmentationProject):
 
 
 def _round_polygon_coords(polygon, geo: bool):
+    """_round_polygon_coords。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        polygon (Any): 输入参数。
+        geo (bool): 输入参数。
+    返回:
+        None: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    复杂度:
+        时间和空间复杂度与输入规模线性或近线性相关。
+    """
     if polygon is None:
         return polygon
 
     def round_value(value: float) -> float:
+        """round_value。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            value (float): 输入参数。
+        返回:
+            float: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return round(float(value), 9) if geo else round(float(value), 3)
 
     def round_ring(coords):
+        """round_ring。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            coords (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return [(round_value(x), round_value(y)) for x, y in coords]
 
     return Polygon(

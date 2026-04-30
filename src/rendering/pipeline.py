@@ -15,9 +15,36 @@ from .styles import LayerDisplaySettings, stable_style_hash
 
 class RasterRenderPipeline:
     def __init__(self):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._render_cache: dict[tuple, RenderTileResult] = {}
 
     def build_cache_key(self, source, request, style, display_settings: LayerDisplaySettings, layer_id: str | None = None, layer_revision: int = 0):
+        """build_cache_key。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source (Any): 输入参数。
+            request (Any): 输入参数。
+            style (Any): 输入参数。
+            display_settings (LayerDisplaySettings): 输入参数。
+            layer_id (str | None): 输入参数。
+            layer_revision (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         metadata = source.metadata()
         try:
             mtime = os.path.getmtime(metadata.path)
@@ -45,6 +72,22 @@ class RasterRenderPipeline:
         )
 
     def render_source(self, source, request, style, display_settings: LayerDisplaySettings, *, layer_id: str | None = None, layer_revision: int = 0):
+        """render_source。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source (Any): 输入参数。
+            request (Any): 输入参数。
+            style (Any): 输入参数。
+            display_settings (LayerDisplaySettings): 输入参数。
+            layer_id (str | None): 输入参数。
+            layer_revision (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         style = self._resolve_stable_style_ranges(source, style)
         cache_key = self.build_cache_key(source, request, style, display_settings, layer_id=layer_id, layer_revision=layer_revision)
         cached = self._render_cache.get(cache_key)
@@ -67,6 +110,17 @@ class RasterRenderPipeline:
         return result
 
     def invalidate_layer(self, layer_id: str | None = None):
+        """invalidate_layer。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_id (str | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if layer_id is None:
             self._render_cache.clear()
             return
@@ -75,6 +129,20 @@ class RasterRenderPipeline:
             self._render_cache.pop(key, None)
 
     def _resolve_stable_style_ranges(self, source, style):
+        """_resolve_stable_style_ranges。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source (Any): 输入参数。
+            style (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         stretch = getattr(style, "stretch", None)
         band_indices = tuple(getattr(style, "band_indices", ()) or ())
         if stretch is None or not getattr(stretch, "auto_range", False):
@@ -108,6 +176,19 @@ class RasterRenderPipeline:
         return replace(style, stretch=resolved_stretch)
 
     def _apply_display_settings(self, arr: np.ndarray, raw_block, display_settings: LayerDisplaySettings):
+        """_apply_display_settings。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            arr (np.ndarray): 输入参数。
+            raw_block (Any): 输入参数。
+            display_settings (LayerDisplaySettings): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         display = np.asarray(arr)
         if display.ndim == 3 and display.shape[2] == 4:
             rgba = display.astype(np.uint8, copy=True)

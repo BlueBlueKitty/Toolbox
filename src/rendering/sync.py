@@ -22,24 +22,80 @@ class SyncOptions:
 
 class ViewportSyncGroup:
     def __init__(self, options: SyncOptions | None = None):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            options (SyncOptions | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.options = options or SyncOptions()
         self._canvases = []
 
     def add_canvas(self, canvas) -> None:
+        """add_canvas。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            canvas (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if canvas in self._canvases:
             return
         self._canvases.append(canvas)
 
     def remove_canvas(self, canvas) -> None:
+        """remove_canvas。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            canvas (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if canvas in self._canvases:
             self._canvases.remove(canvas)
 
     def canvases(self):
+        """canvases。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return list(self._canvases)
 
 
 class MultiCanvasSyncController:
     def __init__(self, canvases=None, options: SyncOptions | None = None):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            canvases (Any): 输入参数。
+            options (SyncOptions | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.group = ViewportSyncGroup(options=options)
         self._updating = False
         self._enabled = True
@@ -47,18 +103,63 @@ class MultiCanvasSyncController:
             self.add_canvas(canvas)
 
     def add_canvas(self, canvas) -> None:
+        """add_canvas。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            canvas (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.group.add_canvas(canvas)
         canvas.view_transformed.connect(lambda transform, source=canvas: self._on_view_transformed(source, transform))
         canvas.cursor_changed.connect(lambda cursor, source=canvas: self._on_cursor_changed(source, cursor))
         canvas.scroll_changed.connect(lambda h, v, source=canvas: self._on_scroll_changed(source, h, v))
 
     def set_active_canvases(self, canvases) -> None:
+        """set_active_canvases。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            canvases (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.group._canvases = list(canvases or [])
 
     def set_enabled(self, enabled: bool) -> None:
+        """set_enabled。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            enabled (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._enabled = bool(enabled)
 
     def _on_view_transformed(self, source, _transform):
+        """_on_view_transformed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source (Any): 输入参数。
+            _transform (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._enabled:
             return
         if not (self.group.options.sync_pan or self.group.options.sync_zoom or self.group.options.sync_geographic_extent):
@@ -92,6 +193,18 @@ class MultiCanvasSyncController:
             self._updating = False
 
     def _on_cursor_changed(self, source, cursor):
+        """_on_cursor_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source (Any): 输入参数。
+            cursor (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._enabled:
             return
         if self._updating or not self.group.options.sync_cursor:
@@ -105,6 +218,19 @@ class MultiCanvasSyncController:
             self._updating = False
 
     def _on_scroll_changed(self, source, h_value, v_value):
+        """_on_scroll_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source (Any): 输入参数。
+            h_value (Any): 输入参数。
+            v_value (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._enabled:
             return
         if self._updating:
@@ -120,4 +246,16 @@ class MultiCanvasSyncController:
 
 class MultiCanvasWidget:
     def __init__(self, canvases=None, options: SyncOptions | None = None):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            canvases (Any): 输入参数。
+            options (SyncOptions | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.sync_controller = MultiCanvasSyncController(canvases=canvases or [], options=options)

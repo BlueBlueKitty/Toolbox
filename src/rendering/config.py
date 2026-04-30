@@ -31,6 +31,17 @@ class RasterRenderConfig:
     segmentation_source: str = "display_rgb"
 
     def to_settings(self) -> dict:
+        """to_settings。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            dict: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         value_range = self.global_value_range if self.auto_range and self.global_value_range else self.value_range
         return {
             "stretch_mode": self.stretch_mode,
@@ -51,6 +62,18 @@ class RasterRenderConfig:
 
 
 def default_raster_render_config(band_count: int = 1, has_color_table: bool = False) -> RasterRenderConfig:
+    """default_raster_render_config。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        band_count (int): 输入参数。
+        has_color_table (bool): 输入参数。
+    返回:
+        RasterRenderConfig: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     config = RasterRenderConfig()
     if has_color_table:
         config.display_mode = "灰度"
@@ -76,6 +99,23 @@ def render_raster_rgb(
     projection=None,
     downsample_factor=1,
 ) -> np.ndarray:
+    """render_raster_rgb。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        raw_array (np.ndarray): 输入参数。
+        config (RasterRenderConfig): 输入参数。
+        nodata_value (Any): 输入参数。
+        color_table (list[tuple[int, int, int, int]] | None): 输入参数。
+        geotransform (Any): 输入参数。
+        projection (Any): 输入参数。
+        downsample_factor (Any): 输入参数。
+    返回:
+        np.ndarray: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     metadata = ImageSourceMetadata(
         id="legacy",
         path="",

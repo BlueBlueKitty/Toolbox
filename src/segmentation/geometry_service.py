@@ -47,6 +47,22 @@ class GeometryService:
 
     @staticmethod
     def rectangle_to_polygon(x1: float, y1: float, x2: float, y2: float) -> list[list[float]]:
+        """rectangle_to_polygon。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x1 (float): 输入参数。
+            y1 (float): 输入参数。
+            x2 (float): 输入参数。
+            y2 (float): 输入参数。
+        返回:
+            list[list[float]]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         left, right = sorted((x1, x2))
         top, bottom = sorted((y1, y2))
         return [
@@ -59,6 +75,17 @@ class GeometryService:
 
     @staticmethod
     def ensure_closed(points: list[list[float]]) -> list[list[float]]:
+        """ensure_closed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            points (list[list[float]]): 输入参数。
+        返回:
+            list[list[float]]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not points:
             return []
         if points[0] != points[-1]:
@@ -67,6 +94,20 @@ class GeometryService:
 
     @staticmethod
     def _polygon_from_ring(exterior: list[list[float]], holes: list[list[list[float]]] | None = None):
+        """_polygon_from_ring。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            exterior (list[list[float]]): 输入参数。
+            holes (list[list[list[float]]] | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         if Polygon is None:
             return None
         shell = GeometryService.ensure_closed(exterior)
@@ -88,6 +129,20 @@ class GeometryService:
 
     @staticmethod
     def _simplify_polygon_geometry(geometry, tolerance: float | None = None):
+        """_simplify_polygon_geometry。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            geometry (Any): 输入参数。
+            tolerance (float | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         if geometry is None or getattr(geometry, "is_empty", True):
             return geometry
         epsilon = GeometryService._SIMPLIFY_EPSILON if tolerance is None else max(0.0, float(tolerance))
@@ -102,10 +157,34 @@ class GeometryService:
 
     @staticmethod
     def annotation_to_polygon(annotation: AnnotationObject):
+        """annotation_to_polygon。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         return GeometryService._polygon_from_ring(annotation.exterior, annotation.holes)
 
     @staticmethod
     def is_annotation_geometry_valid(annotation: AnnotationObject) -> bool:
+        """is_annotation_geometry_valid。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if Polygon is None:
             return bool(annotation.exterior and len(annotation.exterior) >= 4)
         shell = GeometryService.ensure_closed(annotation.exterior)
@@ -120,6 +199,17 @@ class GeometryService:
 
     @staticmethod
     def refresh_annotation_metadata(annotation: AnnotationObject) -> None:
+        """refresh_annotation_metadata。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotation (AnnotationObject): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         annotation.exterior = [[round(float(pt[0]), 3), round(float(pt[1]), 3)] for pt in annotation.exterior]
         annotation.holes = [
             [[round(float(pt[0]), 3), round(float(pt[1]), 3)] for pt in hole]
@@ -135,6 +225,17 @@ class GeometryService:
 
     @staticmethod
     def annotations_union(annotations: Iterable[AnnotationObject]):
+        """annotations_union。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotations (Iterable[AnnotationObject]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         polygons = [GeometryService.annotation_to_polygon(item) for item in annotations]
         polygons = [item for item in polygons if item is not None and not item.is_empty]
         if not polygons or unary_union is None:
@@ -143,6 +244,21 @@ class GeometryService:
 
     @staticmethod
     def polygon_to_annotation_objects(polygon, label_id: int, source_tool: str) -> list[AnnotationObject]:
+        """polygon_to_annotation_objects。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            polygon (Any): 输入参数。
+            label_id (int): 输入参数。
+            source_tool (str): 输入参数。
+        返回:
+            list[AnnotationObject]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         if Polygon is None or polygon is None or polygon.is_empty:
             return []
         polygons = GeometryService._extract_polygon_geometries(polygon)
@@ -167,6 +283,19 @@ class GeometryService:
 
     @staticmethod
     def _extract_polygon_geometries(geometry) -> list:
+        """_extract_polygon_geometries。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            geometry (Any): 输入参数。
+        返回:
+            list: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         if Polygon is None or geometry is None:
             return []
         if isinstance(geometry, Polygon):
@@ -188,6 +317,21 @@ class GeometryService:
         connectivity: int = 8,
         source_tool: str = "magic_wand",
     ) -> list[AnnotationObject]:
+        """mask_to_annotations。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mask (np.ndarray): 输入参数。
+            bbox (tuple[int, int, int, int]): 输入参数。
+            label_id (int): 输入参数。
+            connectivity (int): 输入参数。
+            source_tool (str): 输入参数。
+        返回:
+            list[AnnotationObject]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         annotations = GeometryService._mask_to_annotations_gdal(
             mask,
             bbox,
@@ -201,6 +345,18 @@ class GeometryService:
 
     @staticmethod
     def fill_small_holes(mask: np.ndarray, max_hole_area: int) -> np.ndarray:
+        """fill_small_holes。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mask (np.ndarray): 输入参数。
+            max_hole_area (int): 输入参数。
+        返回:
+            np.ndarray: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         binary = (mask > 0).astype(np.uint8)
         if max_hole_area <= 0 or cv2 is None or binary.size == 0:
             return binary
@@ -243,6 +399,17 @@ class GeometryService:
 
     @staticmethod
     def fill_all_holes(mask: np.ndarray) -> np.ndarray:
+        """fill_all_holes。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mask (np.ndarray): 输入参数。
+        返回:
+            np.ndarray: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         binary = (mask > 0).astype(np.uint8)
         if cv2 is None or binary.size == 0:
             return binary
@@ -269,6 +436,21 @@ class GeometryService:
         connectivity: int,
         source_tool: str,
     ) -> list[AnnotationObject] | None:
+        """_mask_to_annotations_gdal。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mask (np.ndarray): 输入参数。
+            bbox (tuple[int, int, int, int]): 输入参数。
+            label_id (int): 输入参数。
+            connectivity (int): 输入参数。
+            source_tool (str): 输入参数。
+        返回:
+            list[AnnotationObject] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if gdal is None or ogr is None or shapely_wkb is None:
             return None
         try:
@@ -321,6 +503,20 @@ class GeometryService:
         height: int,
         binary_label_id: int | None = None,
     ) -> np.ndarray:
+        """rasterize_annotations。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotations (Iterable[AnnotationObject]): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+            binary_label_id (int | None): 输入参数。
+        返回:
+            np.ndarray: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if gdal is None or ogr is None or osr is None:
             raise RuntimeError("rasterize_annotations 需要 GDAL 依赖")
 
@@ -354,6 +550,17 @@ class GeometryService:
 
     @staticmethod
     def affected_bbox_from_annotations(*annotations_or_lists) -> tuple[int, int, int, int] | None:
+        """affected_bbox_from_annotations。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            *annotations_or_lists (Any): 输入参数。
+        返回:
+            tuple[int, int, int, int] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         boxes = []
         for item in annotations_or_lists:
             if item is None:
@@ -375,6 +582,18 @@ class GeometryService:
 
     @staticmethod
     def bbox_intersects(bbox_a: list[float] | tuple[float, float, float, float] | None, bbox_b: tuple[float, float, float, float] | None) -> bool:
+        """bbox_intersects。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            bbox_a (list[float] | tuple[float, float, float, float] | None): 输入参数。
+            bbox_b (tuple[float, float, float, float] | None): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if bbox_a is None or bbox_b is None:
             return False
         ax0, ay0, ax1, ay1 = bbox_a
@@ -385,6 +604,18 @@ class GeometryService:
 
     @staticmethod
     def colorize_mask(mask: np.ndarray, label_lookup: dict[int, object]) -> np.ndarray:
+        """colorize_mask。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mask (np.ndarray): 输入参数。
+            label_lookup (dict[int, object]): 输入参数。
+        返回:
+            np.ndarray: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         rgba = np.zeros((mask.shape[0], mask.shape[1], 4), dtype=np.uint8)
         for label_id, label in label_lookup.items():
             if label_id == 0:
@@ -406,6 +637,21 @@ class GeometryService:
         incoming_bbox: tuple[int, int, int, int],
         mode: str,
     ) -> tuple[np.ndarray, tuple[int, int, int, int]]:
+        """merge_mask_bbox。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            base_mask (np.ndarray | None): 输入参数。
+            base_bbox (tuple[int, int, int, int] | None): 输入参数。
+            incoming_mask (np.ndarray): 输入参数。
+            incoming_bbox (tuple[int, int, int, int]): 输入参数。
+            mode (str): 输入参数。
+        返回:
+            tuple[np.ndarray, tuple[int, int, int, int]]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if base_mask is None or base_bbox is None or mode == "replace":
             return incoming_mask.copy(), incoming_bbox
 

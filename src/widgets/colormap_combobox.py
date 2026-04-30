@@ -103,6 +103,17 @@ class ColormapComboBox(QComboBox):
     """Colormap选择器，显示颜色渐变，按分类组织"""
     
     def __init__(self, parent=None):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            parent (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().__init__(parent)
         
         # 设置自定义代理
@@ -197,6 +208,17 @@ class ColormapComboBox(QComboBox):
         return self.available_colormaps[0] if self.available_colormaps else 'gray'
 
     def _apply_icons(self):
+        """_apply_icons。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         for index in range(self.count()):
             name = self.itemText(index)
             if name not in self.available_colormaps:
@@ -204,6 +226,17 @@ class ColormapComboBox(QComboBox):
             self.setItemIcon(index, QIcon(self._create_colormap_pixmap(name)))
 
     def _create_colormap_pixmap(self, colormap_name: str) -> QPixmap:
+        """_create_colormap_pixmap。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            colormap_name (str): 输入参数。
+        返回:
+            QPixmap: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         width, height = 94, 14
         pixmap = QPixmap(width, height)
         pixmap.fill(Qt.transparent)

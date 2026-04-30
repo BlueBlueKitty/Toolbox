@@ -21,6 +21,17 @@ from src.widgets.render_sidebar_widget import (
 @runtime_checkable
 class CanvasFactoryProtocol(Protocol):
     def __call__(self, window_id: str):
+        """__call__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         ...
 
 
@@ -41,6 +52,24 @@ class MultiCanvasWorkspace(QWidget):
         pointer_sync: bool = False,
         parent=None,
     ):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            canvas_factory (CanvasFactoryProtocol): 输入参数。
+            window_ids (list[str] | None): 输入参数。
+            window_labels (dict[str, str] | None): 输入参数。
+            panel_factory (Callable[[str, object], QWidget] | None): 输入参数。
+            sync_options (SyncOptions | None): 输入参数。
+            render_binding_layer_mode (str): 输入参数。
+            pointer_sync (bool): 输入参数。
+            parent (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().__init__(parent)
         self._window_ids = list(window_ids or ["viewer_1", "viewer_2"])
         self._window_labels = dict(window_labels or {})
@@ -90,22 +119,88 @@ class MultiCanvasWorkspace(QWidget):
 
     @property
     def window_ids(self) -> list[str]:
+        """window_ids。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            list[str]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return list(self._window_ids)
 
     def window_canvas(self, window_id: str | int):
+        """window_canvas。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str | int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         resolved = self._resolve_window_id(window_id)
         return self._window_canvases.get(resolved)
 
     def current_target_id(self) -> str:
+        """current_target_id。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            str: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self._active_window_id
 
     def current_canvas(self):
+        """current_canvas。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self._window_canvases.get(self._active_window_id)
 
     def window_count(self) -> int:
+        """window_count。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            int: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self._window_count
 
     def set_window_count(self, count: int) -> None:
+        """set_window_count。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            count (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.viewport_sync_controller.set_enabled(False)
         count = 1 if int(count) <= 1 else 2
         count = min(count, len(self._window_ids))
@@ -129,6 +224,17 @@ class MultiCanvasWorkspace(QWidget):
             self.clear_synced_pointers()
 
     def set_active_window(self, window_id: str | int) -> None:
+        """set_active_window。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str | int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         resolved = self._resolve_window_id(window_id)
         if resolved not in self._window_ids:
             return
@@ -143,6 +249,21 @@ class MultiCanvasWorkspace(QWidget):
         self.active_window_changed.emit(resolved)
 
     def set_source(self, window_id: str | int, source, *, reset_view: bool = True, refresh: bool = True, nodata_value=None) -> None:
+        """set_source。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str | int): 输入参数。
+            source (Any): 输入参数。
+            reset_view (bool): 输入参数。
+            refresh (bool): 输入参数。
+            nodata_value (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         canvas = self.window_canvas(window_id)
         if canvas is None:
             return
@@ -152,6 +273,17 @@ class MultiCanvasWorkspace(QWidget):
             canvas.set_raster_source(source, reset_view=reset_view, refresh=refresh, nodata_value=nodata_value)
 
     def sync_options_dict(self) -> dict[str, bool]:
+        """sync_options_dict。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            dict[str, bool]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         options = self.viewport_sync_controller.group.options
         return {
             "sync_pan": bool(options.sync_pan),
@@ -164,6 +296,17 @@ class MultiCanvasWorkspace(QWidget):
         }
 
     def apply_sync_options(self, options: dict[str, bool] | None) -> None:
+        """apply_sync_options。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            options (dict[str, bool] | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not options:
             return
         target = self.viewport_sync_controller.group.options
@@ -172,6 +315,19 @@ class MultiCanvasWorkspace(QWidget):
                 setattr(target, key, bool(value))
 
     def _resolve_window_id(self, window_id: str | int) -> str:
+        """_resolve_window_id。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str | int): 输入参数。
+        返回:
+            str: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         if isinstance(window_id, int):
             if window_id <= 1:
                 return self._window_ids[0]
@@ -179,10 +335,33 @@ class MultiCanvasWorkspace(QWidget):
         return str(window_id)
 
     def is_window_detached(self, window_id: str | int) -> bool:
+        """is_window_detached。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str | int): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         resolved = self._resolve_window_id(window_id)
         return resolved in self._detached_dialogs
 
     def detach_window(self, window_id: str | int, title: str | None = None) -> None:
+        """detach_window。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str | int): 输入参数。
+            title (str | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         resolved = self._resolve_window_id(window_id)
         if resolved not in self._window_widgets or resolved in self._detached_dialogs:
             return
@@ -205,6 +384,17 @@ class MultiCanvasWorkspace(QWidget):
         self._rebalance_splitter()
 
     def attach_window(self, window_id: str | int) -> None:
+        """attach_window。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str | int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         resolved = self._resolve_window_id(window_id)
         if resolved not in self._detached_dialogs:
             return
@@ -220,6 +410,17 @@ class MultiCanvasWorkspace(QWidget):
         self.window_detached_changed.emit(resolved, False)
 
     def _rebalance_splitter(self) -> None:
+        """_rebalance_splitter。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._window_count <= 1:
             self.windows_splitter.setSizes([max(1, self.width()), 0])
             return
@@ -228,6 +429,18 @@ class MultiCanvasWorkspace(QWidget):
         self.windows_splitter.setSizes([half, max(1, total - half)])
 
     def _bind_pointer_sync(self, window_id: str, canvas) -> None:
+        """_bind_pointer_sync。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str): 输入参数。
+            canvas (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not hasattr(canvas, "mouse_moved") or not hasattr(canvas, "update_synced_pointer"):
             return
         try:
@@ -236,6 +449,18 @@ class MultiCanvasWorkspace(QWidget):
             pass
 
     def _on_canvas_mouse_moved(self, source_window_id: str, *args) -> None:
+        """_on_canvas_mouse_moved。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source_window_id (str): 输入参数。
+            *args (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._window_count < 2:
             self.clear_synced_pointers()
             return
@@ -273,6 +498,17 @@ class MultiCanvasWorkspace(QWidget):
 
     @staticmethod
     def _extract_pointer_xy(*args) -> tuple[float | None, float | None]:
+        """_extract_pointer_xy。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            *args (Any): 输入参数。
+        返回:
+            tuple[float | None, float | None]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not args:
             return None, None
         first = args[0]
@@ -289,6 +525,17 @@ class MultiCanvasWorkspace(QWidget):
         return None, None
 
     def clear_synced_pointers(self) -> None:
+        """clear_synced_pointers。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         for canvas in self._window_canvases.values():
             if hasattr(canvas, "update_synced_pointer"):
                 canvas.update_synced_pointer(None, None, visible=False)

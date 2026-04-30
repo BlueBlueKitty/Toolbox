@@ -46,6 +46,17 @@ class SegmentationCanvas(LayeredRasterCanvas):
     _MAX_RENDER_TARGET_PIXELS = 3_000_000
 
     def __init__(self, parent=None):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            parent (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().__init__(parent)
         # 分割工具单窗工作区更大，沿用通用画布的超大预取边距会显著放大
         # 每次交互后的重采样面积，导致同数据下比其它查看器更容易感觉到延迟。
@@ -105,10 +116,33 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self.graphics.viewport().setCursor(Qt.CrossCursor)
 
     def set_raster_source(self, source, reset_view: bool = True) -> None:
+        """set_raster_source。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source (Any): 输入参数。
+            reset_view (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().set_raster_source(source, reset_view=reset_view)
         self._dynamic_source = bool(getattr(source.metadata(), "overview_levels", []))
 
     def set_interaction_mode(self, tool_name: str) -> None:
+        """set_interaction_mode。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            tool_name (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._interaction_mode = tool_name
         self.view_box.setMouseEnabled(x=True, y=True)
         self.view_box.setMouseMode(pg.ViewBox.PanMode)
@@ -116,11 +150,33 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self._brush_range_item.setVisible(False)
 
     def set_brush_radius(self, radius: float) -> None:
+        """set_brush_radius。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            radius (float): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._brush_radius = max(0.2, float(radius))
         if self._last_pointer_payload is not None:
             self._update_brush_range_indicator(self._last_pointer_payload)
 
     def set_tool_color(self, color_name: str) -> None:
+        """set_tool_color。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            color_name (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         color = QColor(color_name)
         if not color.isValid():
             color = QColor("#ffd43b")
@@ -135,6 +191,17 @@ class SegmentationCanvas(LayeredRasterCanvas):
             self._update_brush_range_indicator(self._last_pointer_payload)
 
     def set_tool_icons(self, icons: dict[str, QIcon]) -> None:
+        """set_tool_icons。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            icons (dict[str, QIcon]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._tool_icon_sources = {
             tool_name: icon
             for tool_name, icon in icons.items()
@@ -144,6 +211,17 @@ class SegmentationCanvas(LayeredRasterCanvas):
 
     def _rebuild_tool_cursors(self) -> None:
         # 旋转图标以适应光标方向
+        """_rebuild_tool_cursors。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         mapping = {
             "magic_wand": ("magic_wand", -90),
             "brush": ("brush", 90),
@@ -156,10 +234,32 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self.graphics.viewport().setCursor(self._cursor_for_tool(self._interaction_mode))
 
     def refresh_view(self):
+        """refresh_view。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().refresh_view()
         self.view_state_changed.emit(self.current_view_state())
 
     def current_render_request(self):
+        """current_render_request。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         request = super().current_render_request()
         if request is None:
             return None
@@ -175,6 +275,18 @@ class SegmentationCanvas(LayeredRasterCanvas):
         return replace(request, screen_width=screen_width, screen_height=screen_height)
 
     def eventFilter(self, obj, event):
+        """eventFilter。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            obj (Any): 输入参数。
+            event (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if obj is self.graphics.viewport():
             if event.type() == QEvent.Wheel and self._handle_tool_wheel_adjust(event):
                 return True
@@ -218,9 +330,31 @@ class SegmentationCanvas(LayeredRasterCanvas):
         return super().eventFilter(obj, event)
 
     def fit_image(self) -> None:
+        """fit_image。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.fit_in_view()
 
     def restore_view_state(self, state) -> bool:
+        """restore_view_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            state (Any): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         result = super().restore_view_state(state)
         # 对动态源交由 rangeChanged 定时刷新，避免双窗同步时“立即刷新 + 定时刷新”双重开销。
         if result and self.source is None:
@@ -235,7 +369,33 @@ class SegmentationCanvas(LayeredRasterCanvas):
         editable_annotation_id: str | None = None,
         active_vertex=None,
     ) -> None:
+        """update_annotations。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotations (Any): 输入参数。
+            label_lookup (Any): 输入参数。
+            selected_ids (set[str] | None): 输入参数。
+            editable_annotation_id (str | None): 输入参数。
+            active_vertex (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         def style(annotation):
+            """style。
+
+            功能:
+                承担当前方法对应的业务逻辑。
+            参数:
+                annotation (Any): 输入参数。
+            返回:
+                None: 方法执行结果。
+            异常:
+                Exception: 依赖组件或输入异常时可能抛出。
+            """
             label = label_lookup.get(annotation.label_id)
             return label.color if label is not None else "#ffd43b"
 
@@ -250,9 +410,36 @@ class SegmentationCanvas(LayeredRasterCanvas):
         )
 
     def update_preview_mask(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None, color_name: str = "#ffd43b") -> None:
+        """update_preview_mask。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mask (np.ndarray | None): 输入参数。
+            bbox (tuple[int, int, int, int] | None): 输入参数。
+            color_name (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.preview_mask_item.update_mask(mask, bbox, color_name)
 
     def update_preview_polygons(self, annotations, color_name: str = "#ffd43b") -> None:
+        """update_preview_polygons。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            annotations (Any): 输入参数。
+            color_name (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         self.set_vector_overlay(
             self.LAYER_PREVIEW_VECTOR,
             annotations or [],
@@ -261,25 +448,96 @@ class SegmentationCanvas(LayeredRasterCanvas):
         )
 
     def update_draft(self, points: list[list[float]] | None, color_name: str = "#ffd43b", fill_alpha: int = 40) -> None:
+        """update_draft。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            points (list[list[float]] | None): 输入参数。
+            color_name (str): 输入参数。
+            fill_alpha (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.draft_item.update_style(color_name, fill_alpha=fill_alpha)
         self.draft_item.update_geometry(points)
 
     def update_raster_mask(self, rgba_mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None = None) -> None:
+        """update_raster_mask。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            rgba_mask (np.ndarray | None): 输入参数。
+            bbox (tuple[int, int, int, int] | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.set_raster_overlay(self.LAYER_MASK, rgba_mask, bbox, name="Mask", opacity=0.45)
 
     def update_snap_indicator(self, snap_type: str | None, position: tuple[float, float] | None = None) -> None:
+        """update_snap_indicator。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            snap_type (str | None): 输入参数。
+            position (tuple[float, float] | None): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if snap_type is None or position is None:
             self.snap_item.clear()
             return
         self.snap_item.update_indicator(snap_type, position[0], position[1])
 
     def viewport_image(self) -> np.ndarray | None:
+        """viewport_image。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            np.ndarray | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return None if self.last_render is None else self.last_render.display_rgb
 
     def raw_viewport_image(self) -> np.ndarray | None:
+        """raw_viewport_image。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            np.ndarray | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return None if self.last_render is None else self.last_render.raw_array
 
     def rendered_rgb_at(self, x: int, y: int):
+        """rendered_rgb_at。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.last_render is None:
             return None
         x0, y0, width, height = self.last_render.source_window
@@ -300,10 +558,32 @@ class SegmentationCanvas(LayeredRasterCanvas):
         return [gray, gray, gray]
 
     def _begin_pan_interaction(self) -> None:
+        """_begin_pan_interaction。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._is_panning = True
         self._refresh_timer.stop()
 
     def _end_pan_interaction(self) -> None:
+        """_end_pan_interaction。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         was_panning = self._is_panning
         self._is_panning = False
         if was_panning:
@@ -311,15 +591,60 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self.graphics.viewport().setCursor(self._cursor_for_tool(self._interaction_mode))
 
     def _should_forward_mouse_event(self, event) -> bool:
+        """_should_forward_mouse_event。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (Any): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return hasattr(event, "button") and event.button() in (Qt.LeftButton, Qt.RightButton)
 
     def _should_consume_left_mouse(self, event) -> bool:
+        """_should_consume_left_mouse。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (Any): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self._should_forward_mouse_event(event)
 
     def _should_consume_left_drag(self, event) -> bool:
+        """_should_consume_left_drag。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (Any): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return hasattr(event, "buttons") and bool(event.buttons() & Qt.LeftButton)
 
     def _payload_from_event(self, event, double_click: bool = False) -> CanvasMousePayload:
+        """_payload_from_event。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (Any): 输入参数。
+            double_click (bool): 输入参数。
+        返回:
+            CanvasMousePayload: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         scene_pos = self.graphics.mapToScene(event.position().toPoint())
         image_pos = self.view_box.mapSceneToView(scene_pos)
         return CanvasMousePayload(
@@ -332,11 +657,33 @@ class SegmentationCanvas(LayeredRasterCanvas):
         )
 
     def _cursor_for_tool(self, tool_name: str):
+        """_cursor_for_tool。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            tool_name (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if tool_name == "browse":
             return Qt.ArrowCursor
         return self._tool_cursors.get(tool_name, Qt.CrossCursor)
 
     def _make_tool_cursor(self, kind: str) -> QCursor:
+        """_make_tool_cursor。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            kind (str): 输入参数。
+        返回:
+            QCursor: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         pixmap = QPixmap(32, 32)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
@@ -384,6 +731,19 @@ class SegmentationCanvas(LayeredRasterCanvas):
         return QCursor(pixmap, self._CURSOR_HOTSPOT_X, self._CURSOR_HOTSPOT_Y)
 
     def _make_cursor_from_icon(self, icon: QIcon, angle: float, color: QColor | None = None) -> QCursor:
+        """_make_cursor_from_icon。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            icon (QIcon): 输入参数。
+            angle (float): 输入参数。
+            color (QColor | None): 输入参数。
+        返回:
+            QCursor: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         pixmap = QPixmap(36, 36)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
@@ -415,6 +775,17 @@ class SegmentationCanvas(LayeredRasterCanvas):
         return QCursor(pixmap, self._CURSOR_HOTSPOT_X, self._CURSOR_HOTSPOT_Y)
 
     def _update_brush_range_indicator(self, payload: CanvasMousePayload) -> None:
+        """_update_brush_range_indicator。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            payload (CanvasMousePayload): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._interaction_mode not in {"brush", "eraser"}:
             self._brush_range_item.setVisible(False)
             return
@@ -425,6 +796,20 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self.graphics.viewport().update()
 
     def _emit_mouse_moved(self, x: int, y: int, _value, event=None) -> None:
+        """_emit_mouse_moved。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+            _value (Any): 输入参数。
+            event (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if event is not None:
             payload = self._payload_from_event(event)
         else:
@@ -440,6 +825,17 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self._update_brush_range_indicator(payload)
 
     def _handle_tool_wheel_adjust(self, event) -> bool:
+        """_handle_tool_wheel_adjust。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (Any): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._interaction_mode not in {"magic_wand", "brush", "eraser"}:
             return False
         if not (event.modifiers() & Qt.ControlModifier):
@@ -451,6 +847,17 @@ class SegmentationCanvas(LayeredRasterCanvas):
         return True
 
     def _on_view_range_changed(self, *_args) -> None:
+        """_on_view_range_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            *_args (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._update_current_zoom_from_view_range()
         if self._suspend_range_signal:
             return

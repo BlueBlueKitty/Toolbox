@@ -27,6 +27,17 @@ from src.dialogs.gamma_dialogs import GammaTimeSeriesDialog
 
 # 配置文件路径
 def get_settings():
+    """get_settings。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        无。
+    返回:
+        None: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     config_dir = Path.home() / ".toolbox"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_file = config_dir / "pixel_time_series_viewer.ini"
@@ -163,6 +174,18 @@ class PixelTimeSeriesViewerDialog(QDialog):
     """像素时序查看器对话框"""
     
     def __init__(self, parent=None, pyramid_threshold_mb=DEFAULT_PYRAMID_THRESHOLD_MB):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            parent (Any): 输入参数。
+            pyramid_threshold_mb (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().__init__(parent)
         
         # 显示金字塔配置
@@ -244,6 +267,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
             button.setDefault(False)
 
     def keyPressEvent(self, event):
+        """keyPressEvent。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if event.key() == Qt.Key_Escape:
             event.ignore()
             return
@@ -380,6 +414,18 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._load_workspace_preferences()
 
     def _create_viewer_panel_for_workspace(self, window_id: str, viewer) -> QWidget:
+        """_create_viewer_panel_for_workspace。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            window_id (str): 输入参数。
+            viewer (Any): 输入参数。
+        返回:
+            QWidget: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if window_id == "viewer_1":
             return self._create_image_viewer_panel("窗口1", 1, viewer=viewer)
         return self._create_image_viewer_panel("窗口2", 2, viewer=viewer)
@@ -486,6 +532,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return panel
 
     def _load_workspace_preferences(self) -> None:
+        """_load_workspace_preferences。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         settings = get_settings()
         active_window = settings.value("workspace/active_window", "viewer_1", type=str)
         sync_options_raw = settings.value("workspace/sync_options", "", type=str)
@@ -503,12 +560,34 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._active_render_viewer_id = 1 if self.workspace.current_target_id() == "viewer_1" else 2
 
     def _save_workspace_preferences(self) -> None:
+        """_save_workspace_preferences。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         settings = get_settings()
         settings.setValue("workspace/window_count", 2)
         settings.setValue("workspace/active_window", self.workspace.current_target_id())
         settings.setValue("workspace/sync_options", json.dumps(self.workspace.sync_options_dict(), ensure_ascii=False))
 
     def _toggle_window_layout(self) -> None:
+        """_toggle_window_layout。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         target = 1 if self.workspace.window_count() == 2 else 2
         self.workspace.set_window_count(target)
         if target == 1:
@@ -516,11 +595,33 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._save_workspace_preferences()
 
     def _on_workspace_active_window_changed(self, target_id: str) -> None:
+        """_on_workspace_active_window_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            target_id (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         target_viewer_id = 1 if target_id == "viewer_1" else 2
         if target_viewer_id != self._active_render_viewer_id:
             self._set_active_render_viewer(target_viewer_id)
 
     def on_theme_mode_changed(self, _mode: str) -> None:
+        """on_theme_mode_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            _mode (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._theme_mode = _mode
         for viewer_id in (1, 2):
             viewer = getattr(self, f"image_viewer_{viewer_id}", None)
@@ -529,6 +630,18 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._update_sidebar_toggle_icon()
 
     def _on_viewer_files_dropped(self, viewer_id: int, paths: list[str]) -> None:
+        """_on_viewer_files_dropped。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            viewer_id (int): 输入参数。
+            paths (list[str]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         mode, target = self._classify_drop_target(paths)
         if mode == "files":
             self.load_images(target, target_viewer_id=viewer_id, append=True)
@@ -545,6 +658,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         QMessageBox.warning(self, "拖拽打开失败", "未识别拖入数据类型，无法打开。")
 
     def _classify_drop_target(self, paths: list[str]):
+        """_classify_drop_target。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            paths (list[str]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not paths:
             return None, None
         local_paths = [str(Path(item)) for item in paths if os.path.exists(item)]
@@ -620,6 +744,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         target_viewer.sync_scroll(h_value, v_value)
 
     def _default_render_settings_for_band_count(self, band_count: int) -> dict:
+        """_default_render_settings_for_band_count。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            band_count (int): 输入参数。
+        返回:
+            dict: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         cfg = default_raster_render_config(max(1, int(band_count or 1)))
         settings = cfg.to_settings()
         settings["display_mode"] = cfg.display_mode
@@ -638,6 +773,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return settings
 
     def _viewer_band_count(self, viewer_id: int) -> int:
+        """_viewer_band_count。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            viewer_id (int): 输入参数。
+        返回:
+            int: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         source = getattr(self, f'_cached_source_{viewer_id}', None)
         if source is not None:
             try:
@@ -650,6 +796,18 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return int(data.shape[2]) if data.ndim == 3 else 1
 
     def _normalized_settings_for_band_count(self, settings: dict | None, band_count: int) -> dict:
+        """_normalized_settings_for_band_count。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            settings (dict | None): 输入参数。
+            band_count (int): 输入参数。
+        返回:
+            dict: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         base = self._default_render_settings_for_band_count(band_count)
         if isinstance(settings, dict):
             base.update(settings)
@@ -666,6 +824,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return base
 
     def _store_active_render_state(self) -> None:
+        """_store_active_render_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         viewer_id = self._active_render_viewer_id
         self._viewer_render_settings[viewer_id] = self._normalized_settings_for_band_count(
             self.render_settings.get_all_settings(),
@@ -674,6 +843,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._viewer_colormaps[viewer_id] = self.colormap_combo.currentText()
 
     def _apply_render_state_to_controls(self, viewer_id: int) -> None:
+        """_apply_render_state_to_controls。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            viewer_id (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         settings = self._normalized_settings_for_band_count(
             self._viewer_render_settings.get(viewer_id),
             self._viewer_band_count(viewer_id),
@@ -703,6 +883,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.colormap_combo.setEnabled(not is_rgb)
 
     def _set_active_render_viewer(self, viewer_id: int) -> None:
+        """_set_active_render_viewer。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            viewer_id (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         viewer_id = 1 if int(viewer_id) == 1 else 2
         if hasattr(self, "workspace") and self.workspace.window_count() == 1:
             viewer_id = 1
@@ -728,6 +919,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._save_workspace_preferences()
 
     def _on_sidebar_target_changed(self, target_id: str) -> None:
+        """_on_sidebar_target_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            target_id (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if target_id == "viewer_1":
             self._set_active_render_viewer(1)
         elif target_id == "viewer_2":
@@ -802,6 +1004,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._hide_loading_indicator()
 
     def closeEvent(self, event):
+        """closeEvent。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         try:
             if hasattr(self, "_render_update_timer") and isValid(self._render_update_timer):
                 self._render_update_timer.stop()
@@ -813,6 +1026,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         super().closeEvent(event)
 
     def _navigation_item_label(self, index):
+        """_navigation_item_label。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            index (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         prefix = f"{index + 1:04d}"
         entry = self._get_layer_entry(index)
         if entry is not None:
@@ -821,6 +1045,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return prefix
 
     def _refresh_navigation_controls(self):
+        """_refresh_navigation_controls。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         has_images = self.image_count > 0
         for viewer_id in [1, 2]:
             slider = getattr(self, f'image_slider_{viewer_id}', None)
@@ -1055,12 +1290,36 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._h5_pixel_series_cache.clear()
 
     def _set_viewer_has_image(self, viewer_id: int, has_image: bool, *, index: Optional[int] = None) -> None:
+        """_set_viewer_has_image。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            viewer_id (int): 输入参数。
+            has_image (bool): 输入参数。
+            index (Optional[int]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         viewer_id = 1 if int(viewer_id) == 1 else 2
         self._viewer_has_image[viewer_id] = bool(has_image)
         if index is not None:
             setattr(self, f'current_image_index_{viewer_id}', int(index))
 
     def _clear_viewer_display(self, viewer_id: int) -> None:
+        """_clear_viewer_display。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            viewer_id (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         viewer = getattr(self, f'image_viewer_{viewer_id}', None)
         if viewer is not None:
             viewer.clear_raster()
@@ -1085,6 +1344,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
 
     @staticmethod
     def _normalized_full_path(file_path: str) -> str:
+        """_normalized_full_path。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+        返回:
+            str: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return os.path.normcase(os.path.abspath(file_path))
 
     def _dedupe_file_paths(self, file_paths: list[str], *, existing_paths: list[str] | None = None) -> tuple[list[str], int]:
@@ -1108,6 +1378,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return deduped, duplicate_count
 
     def _show_loading_indicator(self, message: str):
+        """_show_loading_indicator。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            message (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.setWindowTitle(f"{self._loading_title_text} - 加载中")
         if hasattr(self, "operation_progress") and self.operation_progress is not None:
             self.operation_progress.start_task(message.replace("\n", " | "), 0)
@@ -1122,6 +1403,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.operation_progress.message_label.setText(text)
 
     def _sync_db_toggle_widgets(self, checked: Optional[bool] = None) -> None:
+        """_sync_db_toggle_widgets。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            checked (Optional[bool]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         checked = bool(self._converted_to_db) if checked is None else bool(checked)
         if hasattr(self, "db_toggle_check") and self.db_toggle_check is not None:
             self.db_toggle_check.blockSignals(True)
@@ -1131,6 +1423,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self.render_sidebar.set_db_checked(checked)
 
     def _hide_loading_indicator(self):
+        """_hide_loading_indicator。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not isValid(self):
             return
         self.setWindowTitle(self._loading_title_text)
@@ -1148,6 +1451,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._set_series_status_text(f"已加载 {self.image_count} 张图像")
 
     def _toggle_sidebar(self):
+        """_toggle_sidebar。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not hasattr(self, "render_sidebar") or not hasattr(self, "outer_splitter"):
             return
         if self._sidebar_visible:
@@ -1166,6 +1480,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
             self._sidebar_visible = True
 
     def _load_material_icon_font(self) -> str | None:
+        """_load_material_icon_font。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            str | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         font_path = Path(__file__).resolve().parents[2] / "resources" / "fonts" / "MaterialIcons-Regular.ttf"
         if not font_path.exists():
             return None
@@ -1176,6 +1501,19 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return families[0] if families else None
 
     def _material_icon(self, icon_name: str, *, size: int = 20, rotation_angle: float = 0.0) -> QIcon:
+        """_material_icon。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            icon_name (str): 输入参数。
+            size (int): 输入参数。
+            rotation_angle (float): 输入参数。
+        返回:
+            QIcon: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self._material_icon_family:
             return QIcon()
         pixmap = QPixmap(size, size)
@@ -1194,10 +1532,32 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return QIcon(pixmap)
 
     def _update_sidebar_toggle_icon(self) -> None:
+        """_update_sidebar_toggle_icon。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if hasattr(self, "toggle_sidebar_btn") and self.toggle_sidebar_btn is not None:
             self.toggle_sidebar_btn.setIcon(self._material_icon("tune"))
 
     def _on_db_toggled(self, enabled: bool) -> None:
+        """_on_db_toggled。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            enabled (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if enabled == bool(self._converted_to_db):
             if hasattr(self, "db_toggle_check") and self.db_toggle_check.isChecked() != bool(enabled):
                 self.db_toggle_check.blockSignals(True)
@@ -1225,15 +1585,49 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return None
 
     def _get_layer_entry(self, index: int) -> Optional[TimeSeriesLayerEntry]:
+        """_get_layer_entry。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            index (int): 输入参数。
+        返回:
+            Optional[TimeSeriesLayerEntry]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if 0 <= int(index) < len(self.time_series_layers):
             return self.time_series_layers[int(index)]
         return None
 
     def _layer_has_geo(self, index: int) -> bool:
+        """_layer_has_geo。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            index (int): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         entry = self._get_layer_entry(index)
         return bool(entry and entry.metadata.get("has_geo"))
 
     def _build_layer_metadata_from_source(self, source, source_path: str) -> dict[str, Any]:
+        """_build_layer_metadata_from_source。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source (Any): 输入参数。
+            source_path (str): 输入参数。
+        返回:
+            dict[str, Any]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         metadata = source.metadata()
         geotransform = metadata.geotransform
         projection = metadata.crs_wkt
@@ -1288,6 +1682,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         }
 
     def _build_file_layer_entry(self, file_path: str) -> Optional[TimeSeriesLayerEntry]:
+        """_build_file_layer_entry。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+        返回:
+            Optional[TimeSeriesLayerEntry]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         normalized_path = os.path.abspath(file_path)
         source = open_raster_source(normalized_path, pyramid_threshold_mb=self.pyramid_threshold_mb)
         metadata = self._build_layer_metadata_from_source(source, normalized_path)
@@ -1312,6 +1717,22 @@ class PixelTimeSeriesViewerDialog(QDialog):
         width: int,
         height: int,
     ) -> list[TimeSeriesLayerEntry]:
+        """_build_h5_layer_entries。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+            date_list (list[str]): 输入参数。
+            start_index (int): 输入参数。
+            num_dates (int): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+        返回:
+            list[TimeSeriesLayerEntry]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         entries: list[TimeSeriesLayerEntry] = []
         metadata = {
             "path": os.path.abspath(file_path),
@@ -1347,6 +1768,20 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return entries
 
     def _build_gamma_layer_entries(self, file_paths: list[str], gamma_format: str, width: int, height: int) -> list[TimeSeriesLayerEntry]:
+        """_build_gamma_layer_entries。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_paths (list[str]): 输入参数。
+            gamma_format (str): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+        返回:
+            list[TimeSeriesLayerEntry]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         entries: list[TimeSeriesLayerEntry] = []
         extracted_dates = extract_dates_from_filenames(file_paths) or []
         for index, file_path in enumerate(file_paths):
@@ -1376,6 +1811,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return entries
 
     def _validate_time_series_layers(self, entries: list[TimeSeriesLayerEntry]) -> tuple[bool, str]:
+        """_validate_time_series_layers。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            entries (list[TimeSeriesLayerEntry]): 输入参数。
+        返回:
+            tuple[bool, str]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not entries:
             return False, "没有可用图层。"
 
@@ -1394,6 +1840,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return True, ""
 
     def _update_shared_scene_rect(self) -> None:
+        """_update_shared_scene_rect。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         scene_rects = [
             entry.metadata.get("scene_rect")
             for entry in self.time_series_layers
@@ -1409,6 +1866,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.shared_scene_rect = (min_x, min_y, max_x - min_x, max_y - min_y)
 
     def _sync_derived_series_state(self) -> None:
+        """_sync_derived_series_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.image_count = len(self.time_series_layers)
         self.image_metadata = [entry.metadata for entry in self.time_series_layers]
         self.image_files = [entry.source_path for entry in self.time_series_layers]
@@ -1433,6 +1901,21 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._update_shared_scene_rect()
 
     def _resolve_pixel_for_layer(self, index: int, pixel: Optional[tuple[int, int]] = None, lonlat: Optional[tuple[float, float]] = None) -> Optional[tuple[int, int]]:
+        """_resolve_pixel_for_layer。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            index (int): 输入参数。
+            pixel (Optional[tuple[int, int]]): 输入参数。
+            lonlat (Optional[tuple[float, float]]): 输入参数。
+        返回:
+            Optional[tuple[int, int]]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        复杂度:
+            时间和空间复杂度与输入规模线性或近线性相关。
+        """
         query_pixel = pixel if pixel is not None else self.selected_pixel
         query_lonlat = lonlat if lonlat is not None else self.selected_geo
         if query_lonlat is not None and self._layer_has_geo(index):
@@ -1607,6 +2090,19 @@ class PixelTimeSeriesViewerDialog(QDialog):
         clear_selection: bool,
         reset_render: bool,
     ) -> bool:
+        """_apply_folder_series_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            layer_entries (list[TimeSeriesLayerEntry]): 输入参数。
+            clear_selection (bool): 输入参数。
+            reset_render (bool): 输入参数。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         is_valid, error_message = self._validate_time_series_layers(layer_entries)
         if not is_valid:
             QMessageBox.critical(self, "错误", error_message)
@@ -1634,6 +2130,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return True
 
     def _refresh_viewers_after_series_change(self, *, reset_view: bool) -> None:
+        """_refresh_viewers_after_series_change。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            reset_view (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         shown_any = False
         for viewer_id in (1, 2):
             if self._viewer_has_image.get(viewer_id, False) and self.image_count > 0:
@@ -1939,6 +2446,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return image_data, original_size
 
     def _convert_block_to_db(self, block):
+        """_convert_block_to_db。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            block (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         data_copy = np.asarray(block).copy()
         nodata_value = self.nodata_value
         if self.is_gamma_timeseries or nodata_value == 0:
@@ -1954,6 +2472,17 @@ class PixelTimeSeriesViewerDialog(QDialog):
         return (10 * np.log10(data_copy)).astype(np.float32)
 
     def _get_image_source(self, index):
+        """_get_image_source。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            index (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         try:
             entry = self._get_layer_entry(index)
             if entry is None:

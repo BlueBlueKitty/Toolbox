@@ -41,6 +41,23 @@ class OnlineRasterDownloadWorker(QThread):
     error_occurred = Signal(str)
 
     def __init__(self, client, dataset_name, south, north, west, east, output_path):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            client (Any): 输入参数。
+            dataset_name (Any): 输入参数。
+            south (Any): 输入参数。
+            north (Any): 输入参数。
+            west (Any): 输入参数。
+            east (Any): 输入参数。
+            output_path (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().__init__()
         self.client = client
         self.dataset_name = dataset_name
@@ -52,6 +69,17 @@ class OnlineRasterDownloadWorker(QThread):
         self.is_running = True
 
     def run(self):
+        """run。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         try:
             self.progress_updated.emit(10, "正在验证区域...")
             validation = self.client.validate_area_for_dataset(self.south, self.north, self.west, self.east, self.dataset_name)
@@ -80,6 +108,17 @@ class OnlineRasterDownloadWorker(QThread):
             self.error_occurred.emit(f"下载错误: {exc}")
 
     def stop(self):
+        """stop。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.is_running = False
 
 
@@ -88,11 +127,33 @@ class OnlineSourceTestWorker(QThread):
     test_completed = Signal(bool, str)
 
     def __init__(self, api_key: str):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            api_key (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().__init__()
         self.api_key = api_key
         self.is_running = True
 
     def run(self):
+        """run。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         try:
             client = OpenTopographyClient(self.api_key)
             ok = client.validate_api_key(
@@ -104,6 +165,17 @@ class OnlineSourceTestWorker(QThread):
             self.test_completed.emit(False, f"测试失败: {exc}")
 
     def stop(self):
+        """stop。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.is_running = False
 
 
@@ -114,6 +186,25 @@ class LocalRasterWorker(QThread):
     files_found = Signal(list)
 
     def __init__(self, source_config, south, north, west, east, output_path, clip_to_bounds=False, reference_tif=None, resample_method="双线性插值"):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source_config (Any): 输入参数。
+            south (Any): 输入参数。
+            north (Any): 输入参数。
+            west (Any): 输入参数。
+            east (Any): 输入参数。
+            output_path (Any): 输入参数。
+            clip_to_bounds (Any): 输入参数。
+            reference_tif (Any): 输入参数。
+            resample_method (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().__init__()
         self.source_config = source_config
         self.south = south
@@ -127,6 +218,17 @@ class LocalRasterWorker(QThread):
         self.is_running = True
 
     def run(self):
+        """run。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         try:
             processor = LocalRasterProcessor()
             if not self.is_running:
@@ -174,11 +276,33 @@ class LocalRasterWorker(QThread):
             self.error_occurred.emit(str(exc))
 
     def stop(self):
+        """stop。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.is_running = False
 
 
 class RasterDataAcquisitionDialog(QDialog):
     def __init__(self, parent=None):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            parent (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().__init__(parent)
         self.setWindowTitle("栅格数据获取工具")
         self.resize(1180, 700)
@@ -210,6 +334,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self.log("栅格数据获取工具已就绪")
 
     def _create_ui(self):
+        """_create_ui。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         layout = QHBoxLayout(self)
         self.splitter = QSplitter(Qt.Horizontal)
         layout.addWidget(self.splitter)
@@ -249,6 +384,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self.splitter.setStretchFactor(1, 4)
 
     def _create_region_group(self):
+        """_create_region_group。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         group = QGroupBox("区域选择")
         group.setMaximumHeight(250)
         group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
@@ -288,6 +434,17 @@ class RasterDataAcquisitionDialog(QDialog):
         return group
 
     def _create_admin_tab(self):
+        """_create_admin_tab。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         widget = QWidget()
         layout = QVBoxLayout(widget)
         row = QHBoxLayout()
@@ -311,11 +468,36 @@ class RasterDataAcquisitionDialog(QDialog):
 
     @staticmethod
     def _limit_info_label(label, max_height=42):
+        """_limit_info_label。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            label (Any): 输入参数。
+            max_height (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         label.setWordWrap(True)
         label.setMaximumHeight(max_height)
         label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
     def _create_file_tab(self, label_text, browse_handler, file_type):
+        """_create_file_tab。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            label_text (Any): 输入参数。
+            browse_handler (Any): 输入参数。
+            file_type (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         widget = QWidget()
         layout = QHBoxLayout(widget)
         left = QVBoxLayout()
@@ -359,6 +541,17 @@ class RasterDataAcquisitionDialog(QDialog):
         return widget
 
     def _create_source_group(self):
+        """_create_source_group。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         group = QGroupBox("数据源选择")
         group.setMinimumHeight(255)
         group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
@@ -408,6 +601,17 @@ class RasterDataAcquisitionDialog(QDialog):
         return group
 
     def _create_output_group(self):
+        """_create_output_group。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         group = QGroupBox("输出设置")
         layout = QVBoxLayout(group)
         row = QHBoxLayout()
@@ -426,6 +630,17 @@ class RasterDataAcquisitionDialog(QDialog):
         return group
 
     def _create_log_group(self):
+        """_create_log_group。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         group = QGroupBox("日志")
         layout = QVBoxLayout(group)
         self.log_text = QTextEdit(); self.log_text.setReadOnly(True); self.log_text.setMinimumHeight(70)
@@ -433,6 +648,17 @@ class RasterDataAcquisitionDialog(QDialog):
         return group
 
     def _init_admin_data(self):
+        """_init_admin_data。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.province_combo.clear()
         self.city_combo.clear()
         self.district_combo.clear()
@@ -450,6 +676,17 @@ class RasterDataAcquisitionDialog(QDialog):
             self.admin_selector = None
 
     def _on_province_changed(self, province_name):
+        """_on_province_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            province_name (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self.admin_selector or province_name == "选择省份":
             return
         self.city_combo.clear()
@@ -461,6 +698,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self._update_admin_bounds(province_name, None, None)
 
     def _on_city_changed(self, city_name):
+        """_on_city_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            city_name (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         province = self.province_combo.currentText()
         if not self.admin_selector or province == "选择省份" or city_name == "选择城市":
             return
@@ -471,6 +719,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self._update_admin_bounds(province, city_name, None)
 
     def _on_district_changed(self, district_name):
+        """_on_district_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            district_name (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         province = self.province_combo.currentText()
         city = self.city_combo.currentText()
         if not self.admin_selector or province == "选择省份":
@@ -480,6 +739,19 @@ class RasterDataAcquisitionDialog(QDialog):
         self._update_admin_bounds(province, city, district)
 
     def _update_admin_bounds(self, province, city, district):
+        """_update_admin_bounds。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            province (Any): 输入参数。
+            city (Any): 输入参数。
+            district (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self.admin_selector:
             return
         boundary = self.admin_selector.get_boundary(province, city, district)
@@ -491,6 +763,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self._show_bounds_on_map(south, north, west, east)
 
     def _load_sources(self):
+        """_load_sources。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         state = self.config_manager.get_ui_state()
         self.local_source_combo.clear()
         self.online_source_combo.clear()
@@ -513,12 +796,34 @@ class RasterDataAcquisitionDialog(QDialog):
 
     def _load_settings(self):
         # 输出选项不持久化：每次打开都回到默认“仅合并瓦片”
+        """_load_settings。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.merge_only_checkbox.setChecked(True)
         self.clip_to_bounds_checkbox.setChecked(False)
         self.resample_to_tif_checkbox.setChecked(False)
         self._update_resample_option_state()
 
     def _save_settings(self):
+        """_save_settings。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.settings.setValue("last_vector_dir", self._last_vector_dir)
         self.settings.setValue("last_tif_dir", self._last_tif_dir)
         self.settings.setValue("last_gamma_par_dir", self._last_gamma_par_dir)
@@ -528,6 +833,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self.config_manager.set_ui_state_value("selected_online_source", self.online_source_combo.currentText())
 
     def _update_local_summary(self):
+        """_update_local_summary。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         source = self.config_manager.get_local_source(self.local_source_combo.currentText())
         if not source:
             self.local_summary_label.setPlainText("未选择本地数据源")
@@ -543,6 +859,17 @@ class RasterDataAcquisitionDialog(QDialog):
         )
 
     def _update_online_summary(self):
+        """_update_online_summary。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         source = self.config_manager.get_online_source(self.online_source_combo.currentText())
         if not source:
             self.online_summary_label.setPlainText("未选择在线数据源")
@@ -556,6 +883,17 @@ class RasterDataAcquisitionDialog(QDialog):
         )
 
     def _update_source_mode(self):
+        """_update_source_mode。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         local_enabled = self.local_radio.isChecked()
         self.local_source_combo.setEnabled(local_enabled)
         self.online_source_combo.setEnabled(not local_enabled)
@@ -566,6 +904,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self._update_resample_option_state()
 
     def _open_local_config(self):
+        """_open_local_config。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         previous_name = self.local_source_combo.currentText()
         dialog = LocalRasterSourceConfigDialog(self, manager=self.config_manager, selected_name=self.local_source_combo.currentText())
         dialog.exec()
@@ -573,6 +922,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self.local_source_combo.setCurrentText(dialog.selected_name or previous_name)
 
     def _open_online_config(self):
+        """_open_online_config。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         previous_name = self.online_source_combo.currentText()
         dialog = OnlineRasterSourceConfigDialog(self, manager=self.config_manager, selected_name=self.online_source_combo.currentText())
         dialog.exec()
@@ -580,6 +940,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self.online_source_combo.setCurrentText(dialog.selected_name or previous_name)
 
     def _test_local_source(self):
+        """_test_local_source。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         source = self.config_manager.get_local_source(self.local_source_combo.currentText())
         if not source:
             QMessageBox.warning(self, "提示", "请先选择本地数据源")
@@ -591,6 +962,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self.log(f"本地数据源测试: {source.name} -> {result.message}")
 
     def _test_online_source(self):
+        """_test_online_source。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         source = self.config_manager.get_online_source(self.online_source_combo.currentText())
         if not source:
             QMessageBox.warning(self, "提示", "请先选择在线数据源")
@@ -619,12 +1001,37 @@ class RasterDataAcquisitionDialog(QDialog):
         self.log(f"开始测试在线数据源: {source.name}")
 
     def _on_online_test_progress(self, progress: int, message: str):
+        """_on_online_test_progress。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            progress (int): 输入参数。
+            message (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.online_test_progress_dialog:
             self.online_test_progress_dialog.setLabelText(message)
             self.online_test_progress_dialog.setValue(max(0, min(progress, 100)))
         self.log(f"[测试 {progress}%] {message}")
 
     def _on_online_test_finished(self, source_name: str, ok: bool, message: str):
+        """_on_online_test_finished。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            source_name (str): 输入参数。
+            ok (bool): 输入参数。
+            message (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.online_test_progress_dialog:
             self.online_test_progress_dialog.setValue(100)
             self.online_test_progress_dialog.close()
@@ -637,6 +1044,17 @@ class RasterDataAcquisitionDialog(QDialog):
             QMessageBox.warning(self, "测试结果", message)
 
     def _browse_output_file(self):
+        """_browse_output_file。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         file_path, _ = QFileDialog.getSaveFileName(self, "保存栅格文件", self._last_output_dir, "GeoTIFF (*.tif)")
         if file_path:
             if not file_path.lower().endswith(".tif"):
@@ -645,24 +1063,68 @@ class RasterDataAcquisitionDialog(QDialog):
             self._last_output_dir = os.path.dirname(file_path)
 
     def _browse_vector_file(self):
+        """_browse_vector_file。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         file_path, _ = QFileDialog.getOpenFileName(self, "选择矢量文件", self._last_vector_dir, "矢量文件 (*.json *.geojson *.kml *.kmz *.shp *.gpkg)")
         if not file_path:
             return
         self._load_vector_file(file_path)
 
     def _browse_tif_file(self):
+        """_browse_tif_file。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         file_path, _ = QFileDialog.getOpenFileName(self, "选择 TIF 文件", self._last_tif_dir, "TIF文件 (*.tif *.tiff)")
         if not file_path:
             return
         self._load_tif_file(file_path)
 
     def _browse_gamma_par_file(self):
+        """_browse_gamma_par_file。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         file_path, _ = QFileDialog.getOpenFileName(self, "选择 GAMMA par 文件", self._last_gamma_par_dir, "PAR文件 (*.par);;所有文件 (*.*)")
         if not file_path:
             return
         self._load_gamma_par_file(file_path)
 
     def _load_vector_file(self, file_path: str):
+        """_load_vector_file。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._last_vector_dir = os.path.dirname(file_path)
         self.vector_file_edit.setText(file_path)
         result = extract_bounding_box_from_vector(file_path)
@@ -672,6 +1134,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self._set_file_bounds(result, vector=True)
 
     def _load_tif_file(self, file_path: str):
+        """_load_tif_file。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._last_tif_dir = os.path.dirname(file_path)
         self.tif_file_edit.setText(file_path)
         self.reference_tif_path = file_path
@@ -683,6 +1156,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self._update_resample_option_state()
 
     def _load_gamma_par_file(self, file_path: str):
+        """_load_gamma_par_file。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._last_gamma_par_dir = os.path.dirname(file_path)
         self.gamma_par_file_edit.setText(file_path)
         result = extract_bounding_box_from_gamma_par(file_path)
@@ -722,6 +1206,18 @@ class RasterDataAcquisitionDialog(QDialog):
         self._show_bounds_on_map(expanded_south, expanded_north, expanded_west, expanded_east)
 
     def _set_file_bounds(self, result, vector):
+        """_set_file_bounds。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            result (Any): 输入参数。
+            vector (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         west, south, east, north = result
         bounds = (south, north, west, east)
         if vector:
@@ -735,6 +1231,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self._show_bounds_on_map(south, north, west, east)
 
     def _update_manual_area(self):
+        """_update_manual_area。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         south, north, west, east = self.south_spin.value(), self.north_spin.value(), self.west_spin.value(), self.east_spin.value()
         if south < north and west < east:
             self.manual_area_label.setText(f"区域面积: {calculate_area_km2(south, north, west, east):.2f} km²")
@@ -743,15 +1250,54 @@ class RasterDataAcquisitionDialog(QDialog):
             self.manual_area_label.setText("区域面积: -- km²")
 
     def _on_map_bounds_drawn(self, south, north, west, east):
+        """_on_map_bounds_drawn。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            south (Any): 输入参数。
+            north (Any): 输入参数。
+            west (Any): 输入参数。
+            east (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.saved_map_bounds = (south, north, west, east)
         self.map_info_label.setText(f"边界: 南={south:.6f}, 北={north:.6f}, 西={west:.6f}, 东={east:.6f}")
         self.map_area_label.setText(f"区域面积: {calculate_area_km2(south, north, west, east):.2f} km²")
 
     def _show_bounds_on_map(self, south, north, west, east):
+        """_show_bounds_on_map。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            south (Any): 输入参数。
+            north (Any): 输入参数。
+            west (Any): 输入参数。
+            east (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.map_widget and self.map_widget.is_available():
             self.map_widget.show_bounds(south, north, west, east)
 
     def _on_output_option_changed(self):
+        """_on_output_option_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         sender = self.sender()
         if sender is self.merge_only_checkbox and self.merge_only_checkbox.isChecked():
             self.clip_to_bounds_checkbox.setChecked(False); self.resample_to_tif_checkbox.setChecked(False)
@@ -767,21 +1313,87 @@ class RasterDataAcquisitionDialog(QDialog):
             self.merge_only_checkbox.setChecked(True)
 
     def _tab_offset(self) -> int:
+        """_tab_offset。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            int: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return 1 if WEBENGINE_AVAILABLE and self.map_widget else 0
 
     def _vector_tab_index(self) -> int:
+        """_vector_tab_index。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            int: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return 2 + self._tab_offset()
 
     def _tif_tab_index(self) -> int:
+        """_tif_tab_index。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            int: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return 3 + self._tab_offset()
 
     def _gamma_tab_index(self) -> int:
+        """_gamma_tab_index。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            int: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return 4 + self._tab_offset()
 
     def _is_tif_region_selected(self) -> bool:
+        """_is_tif_region_selected。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self.region_tab.currentIndex() == self._tif_tab_index()
 
     def _can_use_resample_option(self) -> bool:
+        """_can_use_resample_option。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            bool: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not self.reference_tif_path or not os.path.exists(self.reference_tif_path):
             QMessageBox.warning(self, "提示", "请先导入有效的 TIF 文件后再使用“裁剪重采样至相同范围和分辨率”。")
             return False
@@ -791,6 +1403,17 @@ class RasterDataAcquisitionDialog(QDialog):
         return True
 
     def _update_resample_option_state(self):
+        """_update_resample_option_state。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         enabled = self.reference_tif_path is not None and os.path.exists(self.reference_tif_path) and self._is_tif_region_selected()
         self.resample_to_tif_checkbox.setEnabled(enabled)
         if not enabled and self.resample_to_tif_checkbox.isChecked():
@@ -799,9 +1422,31 @@ class RasterDataAcquisitionDialog(QDialog):
                 self.merge_only_checkbox.setChecked(True)
 
     def _on_region_tab_changed(self, _index: int):
+        """_on_region_tab_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            _index (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._update_resample_option_state()
 
     def _get_region_bounds(self) -> Optional[Tuple[float, float, float, float]]:
+        """_get_region_bounds。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            Optional[Tuple[float, float, float, float]]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         current = self.region_tab.currentIndex()
         offset = self._tab_offset()
         if WEBENGINE_AVAILABLE and self.map_widget and current == 0:
@@ -851,6 +1496,17 @@ class RasterDataAcquisitionDialog(QDialog):
         return None
 
     def start_acquisition(self):
+        """start_acquisition。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.resample_to_tif_checkbox.isChecked() and not self._can_use_resample_option():
             return
         bounds = self._get_region_bounds()
@@ -899,26 +1555,82 @@ class RasterDataAcquisitionDialog(QDialog):
         self.stop_button.setEnabled(True)
 
     def _on_files_found(self, files: List[str]):
+        """_on_files_found。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            files (List[str]): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if files:
             self.log("使用以下本地栅格文件:")
             for path in files[:10]:
                 self.log(f"  - {os.path.basename(path)}")
 
     def _on_progress_updated(self, progress, message):
+        """_on_progress_updated。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            progress (Any): 输入参数。
+            message (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.log(f"[{progress}%] {message}")
 
     def _on_completed(self, output_path):
+        """_on_completed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            output_path (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._reset_ui()
         self.log(f"处理完成: {output_path}")
         self._show_result_on_map(output_path)
         QMessageBox.information(self, "完成", f"栅格数据已保存至:\n{output_path}")
 
     def _on_error(self, message):
+        """_on_error。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            message (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self._reset_ui()
         self.log(f"错误: {message}")
         QMessageBox.critical(self, "错误", message)
 
     def _show_result_on_map(self, raster_path):
+        """_show_result_on_map。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            raster_path (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         try:
             bounds_list = []
             selected = self._get_region_bounds()
@@ -935,10 +1647,32 @@ class RasterDataAcquisitionDialog(QDialog):
             self.log(f"结果显示失败: {exc}")
 
     def _reset_ui(self):
+        """_reset_ui。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
 
     def stop_acquisition(self):
+        """stop_acquisition。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.download_worker:
             self.download_worker.stop()
             self.download_worker = None
@@ -949,6 +1683,17 @@ class RasterDataAcquisitionDialog(QDialog):
         self.log("当前操作已停止")
 
     def dragEnterEvent(self, event: QDragEnterEvent):
+        """dragEnterEvent。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (QDragEnterEvent): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
             if urls:
@@ -959,6 +1704,17 @@ class RasterDataAcquisitionDialog(QDialog):
         event.ignore()
 
     def dropEvent(self, event: QDropEvent):
+        """dropEvent。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (QDropEvent): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not event.mimeData().hasUrls():
             event.ignore()
             return
@@ -986,17 +1742,50 @@ class RasterDataAcquisitionDialog(QDialog):
         event.ignore()
 
     def log(self, text):
+        """log。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            text (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.log_text.append(text)
         sb = self.log_text.verticalScrollBar()
         sb.setValue(sb.maximum())
 
     def closeEvent(self, event):
+        """closeEvent。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.online_test_worker and self.online_test_worker.isRunning():
             self.online_test_worker.stop()
         self._save_settings()
         super().closeEvent(event)
 
     def showEvent(self, event):
+        """showEvent。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().showEvent(event)
         QTimer.singleShot(100, lambda: self.splitter.setSizes([700, 480]))
 

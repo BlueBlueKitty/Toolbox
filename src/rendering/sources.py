@@ -36,12 +36,47 @@ _ALIGN_EPS = 1e-6
 
 class RasterImageSource:
     def metadata(self) -> ImageSourceMetadata:
+        """metadata。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            ImageSourceMetadata: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         raise NotImplementedError
 
     def read_block(self, request: RenderRequest, style=None) -> RawRasterBlock:
+        """read_block。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            request (RenderRequest): 输入参数。
+            style (Any): 输入参数。
+        返回:
+            RawRasterBlock: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         raise NotImplementedError
 
     def render(self, request: RenderRequest, render_config: RasterRenderConfig) -> RenderTileResult:
+        """render。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            request (RenderRequest): 输入参数。
+            render_config (RasterRenderConfig): 输入参数。
+        返回:
+            RenderTileResult: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         metadata = self.metadata()
         style = legacy_config_to_style(render_config, metadata)
         display_settings = default_display_settings(nodata_value=metadata.nodata)
@@ -55,18 +90,77 @@ class RasterImageSource:
         )
 
     def read_pixel(self, x: int, y: int):
+        """read_pixel。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         raise NotImplementedError
 
     def read_window_native(self, x: int, y: int, width: int, height: int):
+        """read_window_native。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         raise NotImplementedError
 
     def build_overviews(self, progress_callback=None) -> tuple[bool, list[int]]:
+        """build_overviews。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            progress_callback (Any): 输入参数。
+        返回:
+            tuple[bool, list[int]]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return False, []
 
     def band_minmax(self, band_index: int) -> tuple[float, float] | None:
+        """band_minmax。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            band_index (int): 输入参数。
+        返回:
+            tuple[float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         raise NotImplementedError
 
     def value_range_for_settings(self, settings: dict) -> tuple[float, float] | None:
+        """value_range_for_settings。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            settings (dict): 输入参数。
+        返回:
+            tuple[float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if settings.get("display_mode") == "RGB":
             ranges = [self.band_value_range(index, settings) for index in settings.get("rgb_bands", (1, 2, 3))]
             ranges = [item for item in ranges if item is not None]
@@ -76,6 +170,18 @@ class RasterImageSource:
         return self.band_value_range(settings.get("gray_band", 1), settings)
 
     def band_value_range(self, band_index: int, settings: dict) -> tuple[float, float] | None:
+        """band_value_range。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            band_index (int): 输入参数。
+            settings (dict): 输入参数。
+        返回:
+            tuple[float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self.band_minmax(band_index)
 
 
@@ -87,6 +193,20 @@ class GdalRasterSource(RasterImageSource):
         pyramid_threshold_mb: int | float | None = DEFAULT_PYRAMID_THRESHOLD_MB,
         auto_build_overviews: bool = True,
     ):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+            source_path (str | None): 输入参数。
+            pyramid_threshold_mb (int | float | None): 输入参数。
+            auto_build_overviews (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.file_path = str(file_path)
         self.source_path = str(source_path or file_path)
         if auto_build_overviews and has_gdal_overviews(self.file_path):
@@ -100,6 +220,17 @@ class GdalRasterSource(RasterImageSource):
         self._refresh_metadata()
 
     def _refresh_metadata(self) -> None:
+        """_refresh_metadata。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         ds = self.dataset
         band = ds.GetRasterBand(1)
         color_table = None
@@ -142,9 +273,32 @@ class GdalRasterSource(RasterImageSource):
         )
 
     def metadata(self) -> ImageSourceMetadata:
+        """metadata。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            ImageSourceMetadata: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self._metadata
 
     def read_block(self, request: RenderRequest, style=None) -> RawRasterBlock:
+        """read_block。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            request (RenderRequest): 输入参数。
+            style (Any): 输入参数。
+        返回:
+            RawRasterBlock: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         x0, y0, width, height, req_rect = self._clip_request(request)
         req_x, req_y, req_width, req_height = req_rect
         target_pixel_x = max(float(request.width) / max(request.screen_width, 1), 1e-9)
@@ -197,6 +351,18 @@ class GdalRasterSource(RasterImageSource):
         )
 
     def read_pixel(self, x: int, y: int):
+        """read_pixel。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not (0 <= x < self._metadata.width and 0 <= y < self._metadata.height):
             return None
         values = []
@@ -206,6 +372,20 @@ class GdalRasterSource(RasterImageSource):
         return values[0] if len(values) == 1 else np.array(values)
 
     def read_window_native(self, x: int, y: int, width: int, height: int):
+        """read_window_native。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         x0 = max(0, int(x))
         y0 = max(0, int(y))
         width = max(1, int(min(self._metadata.width - x0, width)))
@@ -216,6 +396,17 @@ class GdalRasterSource(RasterImageSource):
         return arrays[0] if len(arrays) == 1 else np.stack(arrays, axis=-1)
 
     def build_overviews(self, progress_callback=None) -> tuple[bool, list[int]]:
+        """build_overviews。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            progress_callback (Any): 输入参数。
+        返回:
+            tuple[bool, list[int]]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         success, levels = build_overviews(self.file_path, progress_callback=progress_callback)
         if success:
             self.dataset = gdal.Open(self.file_path)
@@ -223,6 +414,17 @@ class GdalRasterSource(RasterImageSource):
         return success, levels
 
     def band_minmax(self, band_index: int) -> tuple[float, float] | None:
+        """band_minmax。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            band_index (int): 输入参数。
+        返回:
+            tuple[float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         band = self.dataset.GetRasterBand(min(max(int(band_index), 1), self._metadata.band_count))
         try:
             stats = band.GetStatistics(True, True)
@@ -234,6 +436,18 @@ class GdalRasterSource(RasterImageSource):
         return None if not min_max else (float(min_max[0]), float(min_max[1]))
 
     def band_value_range(self, band_index: int, settings: dict) -> tuple[float, float] | None:
+        """band_value_range。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            band_index (int): 输入参数。
+            settings (dict): 输入参数。
+        返回:
+            tuple[float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         values = self._sample_band_values(band_index)
         if values is None or values.size == 0:
             return self.band_minmax(band_index)
@@ -249,6 +463,18 @@ class GdalRasterSource(RasterImageSource):
         return float(np.min(values)), float(np.max(values))
 
     def _sample_band_values(self, band_index: int, max_side: int = 1024):
+        """_sample_band_values。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            band_index (int): 输入参数。
+            max_side (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         band = self.dataset.GetRasterBand(min(max(int(band_index), 1), self._metadata.band_count))
         source_band = band
         if band.GetOverviewCount() > 0:
@@ -280,6 +506,17 @@ class GdalRasterSource(RasterImageSource):
         return arr[valid]
 
     def _clip_request(self, request: RenderRequest):
+        """_clip_request。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            request (RenderRequest): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         max_w = float(self._metadata.width)
         max_h = float(self._metadata.height)
         req_x0 = max(0.0, min(float(request.x), max_w))
@@ -300,6 +537,18 @@ class GdalRasterSource(RasterImageSource):
         return x0, y0, max(1, x1 - x0), max(1, y1 - y0), (req_x0, req_y0, req_x1 - req_x0, req_y1 - req_y0)
 
     def _select_bands(self, request: RenderRequest, style):
+        """_select_bands。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            request (RenderRequest): 输入参数。
+            style (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if request.bands:
             return request.bands
         if style is not None and getattr(style, "band_indices", None):
@@ -309,6 +558,21 @@ class GdalRasterSource(RasterImageSource):
 
 class GammaVrtRasterSource(GdalRasterSource):
     def __init__(self, file_path: str, width: int, height: int, gamma_format: str, pyramid_threshold_mb=None):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+            gamma_format (str): 输入参数。
+            pyramid_threshold_mb (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not validate_dimensions(file_path, int(width), int(height), gamma_format):
             raise ValueError(f"GAMMA行列数/数据类型与文件体积不匹配: {width}x{height}, {gamma_format}")
         self.gamma_file_path = file_path
@@ -323,10 +587,36 @@ class GammaVrtRasterSource(GdalRasterSource):
         })
 
     def read_pixel(self, x: int, y: int):
+        """read_pixel。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         value = read_gamma_pixel(self.gamma_file_path, x, y, self._metadata.width, self._metadata.height, self.gamma_format)
         return np.angle(value) if self.gamma_format.lower().startswith("cpx") else value
 
     def read_window_native(self, x: int, y: int, width: int, height: int):
+        """read_window_native。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         data = read_gamma_region(self.gamma_file_path, x, y, x + width, y + height, self._metadata.width, self._metadata.height, self.gamma_format)
         return np.angle(data) if self.gamma_format.lower().startswith("cpx") else data
 
@@ -335,39 +625,160 @@ class HillshadeCompositeRasterSource(RasterImageSource):
     """兼容层：保留旧的晕渲缓存数据源接口。"""
 
     def __init__(self, base_source: RasterImageSource, hillshade_source: RasterImageSource):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            base_source (RasterImageSource): 输入参数。
+            hillshade_source (RasterImageSource): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.base_source = base_source
         self.hillshade_source = hillshade_source
 
     def metadata(self) -> ImageSourceMetadata:
+        """metadata。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            ImageSourceMetadata: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self.base_source.metadata()
 
     def read_block(self, request: RenderRequest, style=None) -> RawRasterBlock:
+        """read_block。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            request (RenderRequest): 输入参数。
+            style (Any): 输入参数。
+        返回:
+            RawRasterBlock: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self.base_source.read_block(request, style=style)
 
     def render(self, request: RenderRequest, render_config: RasterRenderConfig) -> RenderTileResult:
+        """render。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            request (RenderRequest): 输入参数。
+            render_config (RasterRenderConfig): 输入参数。
+        返回:
+            RenderTileResult: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         metadata = self.metadata()
         style = legacy_config_to_style(render_config, metadata)
         display_settings = default_display_settings(nodata_value=metadata.nodata)
         return DEFAULT_RENDER_PIPELINE.render_source(self.base_source, request, style, display_settings, layer_id=getattr(request, "layer_id", None))
 
     def read_pixel(self, x: int, y: int):
+        """read_pixel。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self.base_source.read_pixel(x, y)
 
     def read_window_native(self, x: int, y: int, width: int, height: int):
+        """read_window_native。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self.base_source.read_window_native(x, y, width, height)
 
     def build_overviews(self, progress_callback=None) -> tuple[bool, list[int]]:
+        """build_overviews。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            progress_callback (Any): 输入参数。
+        返回:
+            tuple[bool, list[int]]: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self.base_source.build_overviews(progress_callback=progress_callback)
 
     def band_minmax(self, band_index: int) -> tuple[float, float] | None:
+        """band_minmax。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            band_index (int): 输入参数。
+        返回:
+            tuple[float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self.base_source.band_minmax(band_index)
 
     def band_value_range(self, band_index: int, settings: dict) -> tuple[float, float] | None:
+        """band_value_range。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            band_index (int): 输入参数。
+            settings (dict): 输入参数。
+        返回:
+            tuple[float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self.base_source.band_value_range(band_index, settings)
 
 
 class H5DatasetRasterSource(GdalRasterSource):
     def __init__(self, file_path: str, dataset_name: str, frame_index: Optional[int] = None, pyramid_threshold_mb=None):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+            dataset_name (str): 输入参数。
+            frame_index (Optional[int]): 输入参数。
+            pyramid_threshold_mb (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.h5_file_path = file_path
         self.dataset_name = dataset_name
         self.frame_index = frame_index
@@ -383,6 +794,18 @@ class H5DatasetRasterSource(GdalRasterSource):
         })
 
     def read_pixel(self, x: int, y: int):
+        """read_pixel。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         with h5py.File(self.h5_file_path, "r") as h5f:
             ds = h5f[self.dataset_name]
             if ds.ndim == 2:
@@ -394,6 +817,20 @@ class H5DatasetRasterSource(GdalRasterSource):
             return ds[0, y, x]
 
     def read_window_native(self, x: int, y: int, width: int, height: int):
+        """read_window_native。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         with h5py.File(self.h5_file_path, "r") as h5f:
             ds = h5f[self.dataset_name]
             if ds.ndim == 2:
@@ -409,6 +846,20 @@ class H5TimeSeriesRasterSource(H5DatasetRasterSource):
     """HDF5 时序二维切片数据源。"""
 
     def __init__(self, file_path: str, dataset_name: str, time_index: int, pyramid_threshold_mb=None):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+            dataset_name (str): 输入参数。
+            time_index (int): 输入参数。
+            pyramid_threshold_mb (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.time_index = int(time_index)
         super().__init__(file_path, dataset_name, frame_index=self.time_index, pyramid_threshold_mb=pyramid_threshold_mb)
         self._metadata = replace(
@@ -423,6 +874,17 @@ class H5TimeSeriesRasterSource(H5DatasetRasterSource):
 
 class StandardImageSource(RasterImageSource):
     def __init__(self, file_path: str):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            file_path (str): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.file_path = file_path
         with Image.open(file_path) as image:
             self._array = np.array(image)
@@ -449,9 +911,32 @@ class StandardImageSource(RasterImageSource):
         )
 
     def metadata(self) -> ImageSourceMetadata:
+        """metadata。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            ImageSourceMetadata: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         return self._metadata
 
     def read_block(self, request: RenderRequest, style=None) -> RawRasterBlock:
+        """read_block。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            request (RenderRequest): 输入参数。
+            style (Any): 输入参数。
+        返回:
+            RawRasterBlock: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         x0 = max(0, int(np.floor(request.x)))
         y0 = max(0, int(np.floor(request.y)))
         x1 = min(self._array.shape[1], max(x0 + 1, int(np.ceil(request.x + request.width))))
@@ -467,12 +952,36 @@ class StandardImageSource(RasterImageSource):
         )
 
     def render(self, request: RenderRequest, render_config: RasterRenderConfig) -> RenderTileResult:
+        """render。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            request (RenderRequest): 输入参数。
+            render_config (RasterRenderConfig): 输入参数。
+        返回:
+            RenderTileResult: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         metadata = self.metadata()
         style = legacy_config_to_style(render_config, metadata)
         display_settings = default_display_settings(nodata_value=metadata.nodata)
         return DEFAULT_RENDER_PIPELINE.render_source(self, request, style, display_settings, layer_id=getattr(request, "layer_id", None))
 
     def read_pixel(self, x: int, y: int):
+        """read_pixel。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not (0 <= x < self._array.shape[1] and 0 <= y < self._array.shape[0]):
             return None
         value = self._array[y, x]
@@ -481,6 +990,20 @@ class StandardImageSource(RasterImageSource):
         return value.item() if hasattr(value, "item") else value
 
     def read_window_native(self, x: int, y: int, width: int, height: int):
+        """read_window_native。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            x (int): 输入参数。
+            y (int): 输入参数。
+            width (int): 输入参数。
+            height (int): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         x0 = max(0, int(x))
         y0 = max(0, int(y))
         x1 = min(self._array.shape[1], x0 + max(1, int(width)))
@@ -488,6 +1011,17 @@ class StandardImageSource(RasterImageSource):
         return self._array[y0:y1, x0:x1].copy()
 
     def band_minmax(self, band_index: int) -> tuple[float, float] | None:
+        """band_minmax。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            band_index (int): 输入参数。
+        返回:
+            tuple[float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._array.ndim == 2:
             data = self._array
         else:
@@ -500,6 +1034,18 @@ class StandardImageSource(RasterImageSource):
         return float(np.min(valid_data)), float(np.max(valid_data))
 
     def band_value_range(self, band_index: int, settings: dict) -> tuple[float, float] | None:
+        """band_value_range。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            band_index (int): 输入参数。
+            settings (dict): 输入参数。
+        返回:
+            tuple[float, float] | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._array.ndim == 2:
             data = self._array
         else:
@@ -522,6 +1068,18 @@ class StandardImageSource(RasterImageSource):
 
 
 def _file_meets_threshold(file_path: str, threshold_mb) -> bool:
+    """_file_meets_threshold。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        file_path (str): 输入参数。
+        threshold_mb (Any): 输入参数。
+    返回:
+        bool: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     if threshold_mb is None:
         threshold_mb = DEFAULT_PYRAMID_THRESHOLD_MB
     if threshold_mb <= 0:
@@ -533,6 +1091,21 @@ def _file_meets_threshold(file_path: str, threshold_mb) -> bool:
 
 
 def _embed_array_in_request(array: np.ndarray, target_shape: tuple[int, int], x: int, y: int, nodata_value) -> np.ndarray:
+    """_embed_array_in_request。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        array (np.ndarray): 输入参数。
+        target_shape (tuple[int, int]): 输入参数。
+        x (int): 输入参数。
+        y (int): 输入参数。
+        nodata_value (Any): 输入参数。
+    返回:
+        np.ndarray: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     if array is None:
         return np.full(target_shape, np.nan, dtype=np.float32)
     arr = np.asarray(array)
@@ -554,6 +1127,19 @@ def _embed_array_in_request(array: np.ndarray, target_shape: tuple[int, int], x:
 
 
 def _h5_band_count(file_path: str, dataset_name: str, frame_index: Optional[int]) -> int:
+    """_h5_band_count。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        file_path (str): 输入参数。
+        dataset_name (str): 输入参数。
+        frame_index (Optional[int]): 输入参数。
+    返回:
+        int: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     with h5py.File(file_path, "r") as h5f:
         ds = h5f[dataset_name]
         if ds.ndim == 3 and frame_index is None and ds.shape[0] < ds.shape[1] and ds.shape[0] < ds.shape[2]:

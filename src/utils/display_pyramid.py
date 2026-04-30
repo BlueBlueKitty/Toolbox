@@ -45,6 +45,17 @@ def default_cache_dir() -> Path:
 
 
 def _normalize_cache_dir(path_value: str | os.PathLike | None) -> Path:
+    """_normalize_cache_dir。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        path_value (str | os.PathLike | None): 输入参数。
+    返回:
+        Path: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     if path_value is None:
         return default_cache_dir()
     path_text = str(path_value).strip()
@@ -75,6 +86,17 @@ def set_cache_dir(path_value: str | os.PathLike | None) -> Path:
 
 
 def _is_inside_cache_dir(path: Path) -> bool:
+    """_is_inside_cache_dir。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        path (Path): 输入参数。
+    返回:
+        bool: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     try:
         path.resolve().relative_to(get_cache_dir())
         return True
@@ -85,6 +107,18 @@ def _is_inside_cache_dir(path: Path) -> bool:
 
 
 def needs_display_pyramid(file_path: str, threshold_mb: int | float | None) -> bool:
+    """needs_display_pyramid。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        file_path (str): 输入参数。
+        threshold_mb (int | float | None): 输入参数。
+    返回:
+        bool: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     if not file_path or not os.path.exists(file_path):
         return False
     threshold = DEFAULT_PYRAMID_THRESHOLD_MB if threshold_mb is None else float(threshold_mb)
@@ -94,6 +128,17 @@ def needs_display_pyramid(file_path: str, threshold_mb: int | float | None) -> b
 
 
 def has_gdal_overviews(file_path: str) -> bool:
+    """has_gdal_overviews。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        file_path (str): 输入参数。
+    返回:
+        bool: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     if not file_path or not os.path.exists(file_path):
         return False
     ds = gdal.Open(os.path.normpath(file_path), gdal.GA_ReadOnly)
@@ -107,6 +152,17 @@ def has_gdal_overviews(file_path: str) -> bool:
 
 
 def _remove_external_overview(file_path: str) -> None:
+    """_remove_external_overview。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        file_path (str): 输入参数。
+    返回:
+        None: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     try:
         Path(f"{os.path.normpath(file_path)}.ovr").unlink(missing_ok=True)
     except OSError:
@@ -171,6 +227,20 @@ def read_gamma_pyramid_display(
 
 
 def ensure_gamma_vrt(file_path: str, width: int, height: int, gamma_format: str) -> str:
+    """ensure_gamma_vrt。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        file_path (str): 输入参数。
+        width (int): 输入参数。
+        height (int): 输入参数。
+        gamma_format (str): 输入参数。
+    返回:
+        str: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     dtype, is_complex = _parse_format(gamma_format)
     gdal_type = _gamma_gdal_type(dtype, is_complex)
     bytes_per_pixel = dtype.itemsize * (2 if is_complex else 1)
@@ -260,6 +330,19 @@ def read_h5_timeseries_frame_pyramid_display(
     frame_index: int,
     threshold_mb: int | float | None = DEFAULT_PYRAMID_THRESHOLD_MB,
 ) -> Tuple[Optional[np.ndarray], Optional[Tuple[int, int]], int, str]:
+    """read_h5_timeseries_frame_pyramid_display。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        file_path (str): 输入参数。
+        frame_index (int): 输入参数。
+        threshold_mb (int | float | None): 输入参数。
+    返回:
+        Tuple[Optional[np.ndarray], Optional[Tuple[int, int]], int, str]: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     return read_h5_dataset_pyramid_display(file_path, "timeseries", frame_index, threshold_mb)
 
 
@@ -268,6 +351,19 @@ def ensure_gdal_overviews(
     levels: Optional[list[int]] = None,
     force_external: bool = True,
 ) -> tuple[bool, list[int]]:
+    """ensure_gdal_overviews。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        file_path (str): 输入参数。
+        levels (Optional[list[int]]): 输入参数。
+        force_external (bool): 输入参数。
+    返回:
+        tuple[bool, list[int]]: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     normalized = os.path.normpath(file_path)
     external_ovr = f"{normalized}.ovr"
     ds = gdal.Open(normalized, gdal.GA_ReadOnly)
@@ -308,6 +404,19 @@ def ensure_gdal_overviews(
 
 
 def _read_h5_display_source(file_path: str, dataset_name: str, frame_index: Optional[int]):
+    """_read_h5_display_source。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        file_path (str): 输入参数。
+        dataset_name (str): 输入参数。
+        frame_index (Optional[int]): 输入参数。
+    返回:
+        None: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     with h5py.File(file_path, "r") as h5f:
         if dataset_name not in h5f:
             return None, None, 0
@@ -332,6 +441,19 @@ def _read_h5_display_source(file_path: str, dataset_name: str, frame_index: Opti
 
 
 def _h5_dataset_layout(file_path: str, dataset_name: str, frame_index: Optional[int]):
+    """_h5_dataset_layout。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        file_path (str): 输入参数。
+        dataset_name (str): 输入参数。
+        frame_index (Optional[int]): 输入参数。
+    返回:
+        None: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     with h5py.File(file_path, "r") as h5f:
         if dataset_name not in h5f:
             return None
@@ -364,6 +486,21 @@ def _write_h5_dataset_geotiff_cache(
     frame_index: Optional[int],
     band_count: int,
 ) -> None:
+    """_write_h5_dataset_geotiff_cache。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        path (Path): 输入参数。
+        file_path (str): 输入参数。
+        dataset_name (str): 输入参数。
+        frame_index (Optional[int]): 输入参数。
+        band_count (int): 输入参数。
+    返回:
+        None: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(file_path, "r") as h5f:
         ds = h5f[dataset_name]
@@ -406,6 +543,18 @@ def _write_h5_dataset_geotiff_cache(
 
 
 def _write_array_geotiff(path: Path, data: np.ndarray) -> None:
+    """_write_array_geotiff。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        path (Path): 输入参数。
+        data (np.ndarray): 输入参数。
+    返回:
+        None: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     if data.ndim == 2:
         height, width = data.shape
@@ -433,18 +582,54 @@ def _write_array_geotiff(path: Path, data: np.ndarray) -> None:
 
 
 def _cache_is_stale(cache_path: Path, source_path: str) -> bool:
+    """_cache_is_stale。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        cache_path (Path): 输入参数。
+        source_path (str): 输入参数。
+    返回:
+        bool: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     if not cache_path.exists():
         return True
     return cache_path.stat().st_mtime < Path(source_path).stat().st_mtime
 
 
 def _h5_cache_path(file_path: str, dataset_name: str, frame_index: Optional[int]) -> Path:
+    """_h5_cache_path。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        file_path (str): 输入参数。
+        dataset_name (str): 输入参数。
+        frame_index (Optional[int]): 输入参数。
+    返回:
+        Path: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     key = f"{Path(file_path).resolve()}::{dataset_name}::{frame_index}"
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
     return get_cache_dir() / f"{digest}.tif"
 
 
 def cleanup_pyramid_cache(max_age_days: int = CACHE_MAX_AGE_DAYS) -> None:
+    """cleanup_pyramid_cache。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        max_age_days (int): 输入参数。
+    返回:
+        None: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     cache_dir = get_cache_dir()
     if not cache_dir.exists():
         return
@@ -464,6 +649,17 @@ def cleanup_pyramid_cache_async(max_age_days: int = CACHE_MAX_AGE_DAYS) -> None:
         return
 
     def _worker() -> None:
+        """_worker。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         with _cleanup_lock:
             cleanup_pyramid_cache(max_age_days)
 
@@ -472,12 +668,36 @@ def cleanup_pyramid_cache_async(max_age_days: int = CACHE_MAX_AGE_DAYS) -> None:
 
 
 def derived_cache_path(source_path: str, operation_key: str) -> Path:
+    """derived_cache_path。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        source_path (str): 输入参数。
+        operation_key (str): 输入参数。
+    返回:
+        Path: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     key = f"{Path(source_path).resolve()}::{Path(source_path).stat().st_mtime_ns if Path(source_path).exists() else 0}::{operation_key}"
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
     return get_cache_dir() / f"derived_{digest}.tif"
 
 
 def stable_derived_cache_path(source_path: str, operation_key: str) -> Path:
+    """stable_derived_cache_path。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        source_path (str): 输入参数。
+        operation_key (str): 输入参数。
+    返回:
+        Path: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     key = f"{Path(source_path).resolve()}::{operation_key}"
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
     return get_cache_dir() / f"derived_{digest}.tif"
@@ -624,6 +844,18 @@ def write_full_derived_raster_cache(
 
 
 def _gamma_gdal_type(dtype: np.dtype, is_complex: bool) -> str:
+    """_gamma_gdal_type。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        dtype (np.dtype): 输入参数。
+        is_complex (bool): 输入参数。
+    返回:
+        str: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     base = np.dtype(dtype).name.replace(">", "").replace("<", "")
     if is_complex:
         if base == "float64":
@@ -640,6 +872,17 @@ def _gamma_gdal_type(dtype: np.dtype, is_complex: bool) -> str:
 
 
 def _xml_escape(value: str) -> str:
+    """_xml_escape。
+
+    功能:
+        承担当前方法对应的业务逻辑。
+    参数:
+        value (str): 输入参数。
+    返回:
+        str: 方法执行结果。
+    异常:
+        Exception: 依赖组件或输入异常时可能抛出。
+    """
     return (
         value.replace("&", "&amp;")
         .replace("<", "&lt;")

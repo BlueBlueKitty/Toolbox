@@ -41,6 +41,17 @@ class UpdateCheckWorker(QThread):
     error_occurred = Signal(str, bool)
 
     def run(self):
+        """run。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         checker = UpdateChecker()
         try:
             update_info = checker.check_for_updates()
@@ -58,6 +69,17 @@ class UpdateCheckWorker(QThread):
 
 class MainWindow(QMainWindow):
     def __init__(self):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super(MainWindow, self).__init__()
         
         # 初始化设置
@@ -437,6 +459,17 @@ class MainWindow(QMainWindow):
         dialog.activateWindow()
 
     def _load_material_icon_font(self) -> str | None:
+        """_load_material_icon_font。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            str | None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         font_path = Path(__file__).resolve().parents[1] / "resources" / "fonts" / "MaterialIcons-Regular.ttf"
         if not font_path.exists():
             return None
@@ -447,6 +480,18 @@ class MainWindow(QMainWindow):
         return families[0] if families else None
 
     def _material_icon(self, icon_name: str, *, color: QColor | None = None) -> QIcon:
+        """_material_icon。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            icon_name (str): 输入参数。
+            color (QColor | None): 输入参数。
+        返回:
+            QIcon: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self._material_icon_family:
             pixmap = QPixmap(22, 22)
             pixmap.fill(Qt.transparent)
@@ -462,6 +507,17 @@ class MainWindow(QMainWindow):
         return QIcon()
 
     def _update_theme_toggle_icon(self) -> None:
+        """_update_theme_toggle_icon。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not hasattr(self, "theme_toggle_button"):
             return
         icon_name = "light_mode" if self.theme_mode == "dark" else "dark_mode"
@@ -476,10 +532,32 @@ class MainWindow(QMainWindow):
             self.theme_toggle_button.setStyleSheet("QToolButton{border:1px solid #b9c3d0;border-radius:15px;background:#ffffff;}QToolButton:hover{background:#f3f6fb;}")
 
     def _toggle_theme_mode(self) -> None:
+        """_toggle_theme_mode。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         next_mode = "light" if self.theme_mode == "dark" else "dark"
         self._apply_theme(next_mode, persist=True)
 
     def _build_palette(self, mode: str) -> QPalette:
+        """_build_palette。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mode (str): 输入参数。
+        返回:
+            QPalette: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         dark = mode == "dark"
         palette = QPalette()
         if dark:
@@ -511,6 +589,18 @@ class MainWindow(QMainWindow):
         return palette
 
     def _apply_theme(self, mode: str, persist: bool = True) -> None:
+        """_apply_theme。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            mode (str): 输入参数。
+            persist (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         app = QApplication.instance()
         if app is None:
             return
@@ -566,6 +656,17 @@ class MainWindow(QMainWindow):
         menubar.installEventFilter(self)
 
     def _update_help_menu_dot_position(self):
+        """_update_help_menu_dot_position。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if not getattr(self, "help_menu_action", None):
             return
         menubar = self.menuBar()
@@ -578,6 +679,18 @@ class MainWindow(QMainWindow):
         self.help_menu_dot.move(x, y)
 
     def eventFilter(self, obj, event):
+        """eventFilter。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            obj (Any): 输入参数。
+            event (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if obj is self.menuBar() and event.type() in (QEvent.Resize, QEvent.Show, QEvent.LayoutRequest, QEvent.ActionChanged):
             if getattr(self, "help_menu_dot", None):
                 self._update_help_menu_dot_position()
@@ -655,6 +768,17 @@ class MainWindow(QMainWindow):
             self.statusBar().clearMessage()
 
     def _on_auto_update_found(self, update_info: dict):
+        """_on_auto_update_found。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            update_info (dict): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.statusBar().clearMessage()
         self._set_update_indicator(True, update_info)
         if self._is_update_reminder_suppressed(update_info):
@@ -664,10 +788,33 @@ class MainWindow(QMainWindow):
         self._show_update_dialog(update_info, checker, allow_suppress=True)
 
     def _on_auto_no_update(self):
+        """_on_auto_no_update。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.statusBar().clearMessage()
 
     def _on_auto_update_error(self, message: str, is_network: bool):
         # 自动检查失败不打扰用户，仅在状态栏提示
+        """_on_auto_update_error。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            message (str): 输入参数。
+            is_network (bool): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.statusBar().showMessage("自动检查更新失败")
         QTimer.singleShot(5000, self.statusBar().clearMessage)
 
@@ -787,6 +934,18 @@ class MainWindow(QMainWindow):
         downloaded_file = None
         
         def update_progress(downloaded: int, total: int):
+            """update_progress。
+
+            功能:
+                承担当前方法对应的业务逻辑。
+            参数:
+                downloaded (int): 输入参数。
+                total (int): 输入参数。
+            返回:
+                None: 方法执行结果。
+            异常:
+                Exception: 依赖组件或输入异常时可能抛出。
+            """
             if progress.wasCanceled():
                 raise UpdateError("用户取消下载")
             percent = int((downloaded / total) * 100) if total > 0 else 0
@@ -860,6 +1019,18 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
 
         def parameter_label(text: str, tooltip: str) -> QLabel:
+            """parameter_label。
+
+            功能:
+                承担当前方法对应的业务逻辑。
+            参数:
+                text (str): 输入参数。
+                tooltip (str): 输入参数。
+            返回:
+                QLabel: 方法执行结果。
+            异常:
+                Exception: 依赖组件或输入异常时可能抛出。
+            """
             label = QLabel(f'{text}<sup><span style="color:#3498db;"> ⓘ</span></sup>')
             label.setTextFormat(Qt.RichText)
             label.setToolTip(tooltip)
@@ -920,6 +1091,17 @@ class MainWindow(QMainWindow):
         reset_cache_button = QPushButton("恢复默认")
 
         def browse_cache_dir():
+            """browse_cache_dir。
+
+            功能:
+                承担当前方法对应的业务逻辑。
+            参数:
+                无。
+            返回:
+                None: 方法执行结果。
+            异常:
+                Exception: 依赖组件或输入异常时可能抛出。
+            """
             start_dir = cache_dir_edit.text().strip() or str(default_cache_dir())
             selected = QFileDialog.getExistingDirectory(dialog, "选择显示缓存目录", start_dir)
             if selected:

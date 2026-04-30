@@ -18,16 +18,49 @@ class DeferredApplyDoubleSpinBox(QDoubleSpinBox):
     committed = Signal()
 
     def __init__(self, parent=None):
+        """__init__。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            parent (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().__init__(parent)
         self.setKeyboardTracking(False)
         self._committed_value = super().value()
         self.lineEdit().returnPressed.connect(self._commit_if_changed)
 
     def setValue(self, value):
+        """setValue。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            value (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         super().setValue(value)
         self._committed_value = super().value()
 
     def stepBy(self, steps):
+        """stepBy。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            steps (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         old_value = super().value()
         super().stepBy(steps)
         if super().value() != old_value:
@@ -35,11 +68,33 @@ class DeferredApplyDoubleSpinBox(QDoubleSpinBox):
             self.committed.emit()
 
     def focusOutEvent(self, event):
+        """focusOutEvent。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            event (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.lineEdit().isModified():
             self._commit_if_changed()
         super().focusOutEvent(event)
 
     def _commit_if_changed(self):
+        """_commit_if_changed。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         self.interpretText()
         new_value = super().value()
         if new_value != self._committed_value:
@@ -47,6 +102,17 @@ class DeferredApplyDoubleSpinBox(QDoubleSpinBox):
             self.committed.emit()
 
     def commit_pending(self):
+        """commit_pending。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            无。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if self.lineEdit().isModified():
             self._commit_if_changed()
             self.lineEdit().setModified(False)
@@ -646,6 +712,18 @@ class RenderSettingsWidget(QWidget):
             self.max_spin.commit_pending()
 
     def eventFilter(self, obj, event):
+        """eventFilter。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            obj (Any): 输入参数。
+            event (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         if event.type() == QEvent.MouseButtonPress and hasattr(self, "min_spin"):
             focus = QApplication.focusWidget()
             focused_spin = None
@@ -669,6 +747,18 @@ class RenderSettingsWidget(QWidget):
         return super().eventFilter(obj, event)
 
     def _is_descendant(self, obj, parent):
+        """_is_descendant。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            obj (Any): 输入参数。
+            parent (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         widget = obj if isinstance(obj, QWidget) else None
         while widget is not None:
             if widget is parent:

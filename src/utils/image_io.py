@@ -1403,6 +1403,18 @@ def list_h5_datasets(file_path: str, min_ndim: int = 2) -> List[Tuple[str, str, 
     try:
         with h5py.File(file_path, 'r') as h5f:
             def find_datasets(name, obj):
+                """find_datasets。
+
+                功能:
+                    承担当前方法对应的业务逻辑。
+                参数:
+                    name (Any): 输入参数。
+                    obj (Any): 输入参数。
+                返回:
+                    None: 方法执行结果。
+                异常:
+                    Exception: 依赖组件或输入异常时可能抛出。
+                """
                 if isinstance(obj, h5py.Dataset):
                     if obj.ndim >= min_ndim:
                         shape_str = f"({', '.join(map(str, obj.shape))})"

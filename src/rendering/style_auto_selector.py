@@ -18,6 +18,17 @@ from .styles import (
 class DefaultRenderStyleFactory:
     @classmethod
     def create(cls, metadata):
+        """create。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            metadata (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         source_kind = str((getattr(metadata, "custom_properties", {}) or {}).get("source_kind", "")).lower()
         if getattr(metadata, "has_color_table", False) and getattr(metadata, "color_table", None):
             return PalettedRenderStyle(
@@ -54,6 +65,17 @@ class DefaultRenderStyleFactory:
 
     @classmethod
     def create_display_settings(cls, metadata):
+        """create_display_settings。
+
+        功能:
+            承担当前方法对应的业务逻辑。
+        参数:
+            metadata (Any): 输入参数。
+        返回:
+            None: 方法执行结果。
+        异常:
+            Exception: 依赖组件或输入异常时可能抛出。
+        """
         source_kind = str((getattr(metadata, "custom_properties", {}) or {}).get("source_kind", "")).lower()
         is_categorical = bool((getattr(metadata, "custom_properties", {}) or {}).get("categorical", False))
         resampling = "nearest" if getattr(metadata, "has_color_table", False) or is_categorical or source_kind.startswith("mask") else "bilinear"
