@@ -61,11 +61,14 @@ RUN arch="$(dpkg --print-architecture)" \
         arm64) conda_arch="aarch64" ;; \
         *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
     esac \
-    && wget -q -O /tmp/miniconda.sh "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${conda_arch}.sh" \
-    && bash /tmp/miniconda.sh -b -p "${CONDA_DIR}" \
-    && rm -f /tmp/miniconda.sh \
+    && wget -q -O /tmp/miniforge.sh "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${conda_arch}.sh" \
+    && bash /tmp/miniforge.sh -b -p "${CONDA_DIR}" \
+    && rm -f /tmp/miniforge.sh \
     && conda config --system --set auto_update_conda false \
     && conda config --system --set show_channel_urls true \
-    && conda config --system --add channels conda-forge
+    && conda config --system --remove-key default_channels || true \
+    && conda config --system --remove-key channels || true \
+    && conda config --system --add channels conda-forge \
+    && conda config --system --set channel_priority strict
 
 WORKDIR /workspace

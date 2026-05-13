@@ -66,6 +66,7 @@ jobs:
             -w /workspace \
             toolbox-linux-builder:x86_64 \
             bash -lc '
+              set -euo pipefail
               source /opt/conda/etc/profile.d/conda.sh
               conda env create -n toolbox-build -f environment-build.yml
               conda activate toolbox-build
@@ -100,6 +101,7 @@ jobs:
             -w /workspace \
             toolbox-linux-builder:arm64 \
             bash -lc '
+              set -euo pipefail
               source /opt/conda/etc/profile.d/conda.sh
               conda env create -n toolbox-build -f environment-build.yml
               conda activate toolbox-build
