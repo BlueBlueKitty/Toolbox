@@ -174,13 +174,24 @@ function Build-WithPyInstaller {
         Remove-Item $pyinstallerLog -Force
     }
 
-    # 实时打印 PyInstaller 日志，并同时写入文件，方便交互和排错
+    # 运行 PyInstaller 并写入日志文件。
+    # 在 GitHub Actions(PowerShell) 中，原生命令向 stderr 输出 INFO 日志时，
+    # 可能触发 NativeCommandError（即使进程实际成功），因此这里避免使用管道实时转发。
     Push-Location $SCRIPT_DIR
+    $oldNativeErrorPref = $null
     try {
-        & python -m PyInstaller --clean --noconfirm Toolbox.spec 2>&1 | Tee-Object -FilePath $pyinstallerLog
+        if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+            $oldNativeErrorPref = $PSNativeCommandUseErrorActionPreference
+            $PSNativeCommandUseErrorActionPreference = $false
+        }
+
+        & python -m PyInstaller --clean --noconfirm Toolbox.spec *> $pyinstallerLog
         $pyinstallerExitCode = $LASTEXITCODE
     }
     finally {
+        if ($null -ne $oldNativeErrorPref -and (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue)) {
+            $PSNativeCommandUseErrorActionPreference = $oldNativeErrorPref
+        }
         Pop-Location
     }
     
@@ -193,6 +204,9 @@ function Build-WithPyInstaller {
     }
     
     if (Test-Path $expectedOutput) {
+        if (Test-Path $pyinstallerLog) {
+            Get-Content $pyinstallerLog | Write-Host
+        }
         Write-Success "PyInstaller 打包完成"
     }
     else {

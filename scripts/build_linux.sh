@@ -363,8 +363,31 @@ create_appimage() {
     mkdir -p "${DIST_DIR}"
     local appimage_name="${APP_NAME}-${APP_VERSION}_${PACKAGE_ARCH}.AppImage"
     
-    # 使用 appimagetool 生成 AppImage
-    ARCH="${APPIMAGE_ARCH}" "${BUILD_DIR}/${APPIMAGE_TOOL}" --appimage-extract-and-run "${APPDIR}" "${DIST_DIR}/${appimage_name}"
+    # 使用 appimagetool 生成 AppImage。
+    # 某些 aarch64 环境下，appimagetool 对 ARCH 值识别存在差异，这里做兼容重试。
+    local arch_candidates=("${APPIMAGE_ARCH}")
+    if [ "${TARGET_ARCH}" = "arm64" ]; then
+        arch_candidates=("aarch64" "arm64")
+    fi
+
+    local last_rc=1
+    local arch_value=""
+    for arch_value in "${arch_candidates[@]}"; do
+        info "尝试使用 ARCH=${arch_value} 生成 AppImage..."
+        export ARCH="${arch_value}"
+        set +e
+        "${BUILD_DIR}/${APPIMAGE_TOOL}" --appimage-extract-and-run "${APPDIR}" "${DIST_DIR}/${appimage_name}"
+        last_rc=$?
+        set -e
+        if [ "${last_rc}" -eq 0 ]; then
+            break
+        fi
+        warn "ARCH=${arch_value} 生成失败，退出码: ${last_rc}"
+    done
+
+    if [ "${last_rc}" -ne 0 ]; then
+        error "AppImage 生成失败：已尝试 ARCH=${arch_candidates[*]}"
+    fi
     
     # 设置可执行权限
     chmod +x "${DIST_DIR}/${appimage_name}"
