@@ -413,10 +413,11 @@ create_appimage() {
     scan_appdir_architecture
     
     # 使用 appimagetool 生成 AppImage。
-    # 某些 aarch64 环境下，appimagetool 对 ARCH 值识别存在差异，这里做兼容重试。
+    # 注意：AppImageKit 当前对 aarch64 的 ARCH 文本识别比较特殊，
+    # 实际可识别的是 arm_aarch64，而不是常见的 aarch64 / arm64。
     local arch_candidates=("${APPIMAGE_ARCH}")
     if [ "${TARGET_ARCH}" = "arm64" ]; then
-        arch_candidates=("aarch64" "arm64")
+        arch_candidates=("arm_aarch64" "aarch64" "arm64")
     fi
 
     local last_rc=1
