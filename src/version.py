@@ -1,4 +1,14 @@
 '''
+Author: error: error: git config user.name & please set dead value or install git && error: git config user.email & please set dead value or install git & please set dead value or install git
+Date: 2026-05-13 13:27:22
+LastEditors: error: error: git config user.name & please set dead value or install git && error: git config user.email & please set dead value or install git & please set dead value or install git
+LastEditTime: 2026-05-14 00:59:59
+FilePath: /Toolbox/src/version.py
+Description: 
+
+Copyright (c) 2026 by Yibo Yuan, All Rights Reserved. 
+'''
+'''
 Author: Yibo Yuan 2633669459@qq.com
 Description: 版本信息定义
     这是应用程序版本信息的唯一来源。
@@ -6,7 +16,7 @@ Description: 版本信息定义
 Copyright (c) 2026 by Yibo Yuan 2633669459@qq.com, All Rights Reserved. 
 '''
 
-__version__ = '1.7.1'
+__version__ = '1.8.0'
 __author__ = 'Yibo Yuan'
 __email__ = '2633669459@qq.com'
 

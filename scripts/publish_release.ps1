@@ -28,8 +28,13 @@ function Update-VersionJson {
 
     $tag = "v$Version"
     $json.release_url = "https://github.com/$Repo/releases/tag/$tag"
-    $json.downloads.windows = "https://github.com/$Repo/releases/download/$tag/Toolbox-$Version-x86_64-Setup.exe"
-    $json.downloads.linux = "https://github.com/$Repo/releases/download/$tag/Toolbox-$Version-x86_64.AppImage"
+    $json.downloads = [ordered]@{
+        windows_x86_64 = "https://github.com/$Repo/releases/download/$tag/Toolbox_${Version}_windows_x86_64.exe"
+        linux_x86_64   = "https://github.com/$Repo/releases/download/$tag/Toolbox-${Version}_linux_x86_64.AppImage"
+        linux_arm64    = "https://github.com/$Repo/releases/download/$tag/Toolbox-${Version}_linux_arm64.AppImage"
+        mac_x86_64     = "https://github.com/$Repo/releases/download/$tag/Toolbox_${Version}_apple_x86_64.dmg"
+        mac_arm64      = "https://github.com/$Repo/releases/download/$tag/Toolbox_${Version}_apple_arm64.dmg"
+    }
     $chinaTimeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById("China Standard Time")
     $publishedAt = [System.TimeZoneInfo]::ConvertTime((Get-Date), $chinaTimeZone)
     $json.published_at = $publishedAt.ToString("yyyy-MM-ddTHH:mm:sszzz")
@@ -68,7 +73,7 @@ function Main {
     git push $Remote HEAD
     git push $Remote $tag
 
-    Write-Host "已推送 $tag，GitHub Actions 将开始构建 Windows 和 Linux release。"
+    Write-Host "已推送 $tag，GitHub Actions 将开始构建 Windows/Linux/macOS 多架构 release。"
 }
 
 Main

@@ -1,11 +1,14 @@
 {
-  "version": "1.7.1",
-  "name": "v1.7.1版本, 新增图像分割工具，并修复部分问题",
-  "changelog": "新增图像分割工具，支持类似PS的魔法棒功能，方便快速分割图像\n修复了深浅色适配和切换的问题以及文件无法拖入到软件打开的问题",
+  "version": "1.8.0",
+  "name": "v1.8.0版本, 新增macos版本",
+  "changelog": "软件发布x86_64和M系列芯片两种macos版本, 欢迎下载使用",
   "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.7.1",
   "downloads": {
-    "windows": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.7.1/Toolbox-1.7.1-x86_64-Setup.exe",
-    "linux": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.7.1/Toolbox-1.7.1-x86_64.AppImage"
+    "windows_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.7.1/Toolbox_1.7.1_windows_x86_64.exe",
+    "linux_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.7.1/Toolbox-1.7.1_linux_x86_64.AppImage",
+    "linux_arm64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.7.1/Toolbox-1.7.1_linux_arm64.AppImage",
+    "mac_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.7.1/Toolbox_1.7.1_apple_x86_64.dmg",
+    "mac_arm64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.7.1/Toolbox_1.7.1_apple_arm64.dmg"
   },
   "published_at": "2026-04-20T13:54:23+08:00"
 }

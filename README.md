@@ -304,7 +304,7 @@ sudo apt install -y \
 本地一键发版命令：
 
 ```powershell
-.\scripts\publish_release.ps1
+.\scripts\publish_release_win.ps1
 ```
 
 执行前请确保：
@@ -320,7 +320,7 @@ sudo apt install -y \
 3. 在项目根目录执行：
 
 ```powershell
-.\scripts\publish_release.ps1
+.\scripts\publish_release_win.ps1
 ```
 
 这个脚本会自动：

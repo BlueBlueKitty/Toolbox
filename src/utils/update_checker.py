@@ -115,18 +115,44 @@ class UpdateChecker:
     def _get_download_url_for_platform_from_json(self, version_data: dict) -> Optional[str]:
         """从 version.json 数据中根据当前平台获取对应的下载链接"""
         system = platform.system().lower()
+        machine = platform.machine().lower()
         
         # 从 downloads 字段获取平台对应的下载链接
         downloads = version_data.get('downloads', {})
-        
+
+        def _is_arm_arch() -> bool:
+            return machine in {"arm64", "aarch64"} or machine.startswith("arm")
+
         if system == 'windows':
-            return downloads.get('windows')
+            # 当前只发布 windows_x86_64，保留旧键回退
+            return downloads.get('windows_x86_64') or downloads.get('windows') or downloads.get('universal')
         elif system == 'linux':
-            return downloads.get('linux')
+            if _is_arm_arch():
+                return (
+                    downloads.get('linux_arm64')
+                    or downloads.get('linux_arm')
+                    or downloads.get('linux')
+                    or downloads.get('universal')
+                )
+            return downloads.get('linux_x86_64') or downloads.get('linux') or downloads.get('universal')
         elif system == 'darwin':
-            return downloads.get('mac') or downloads.get('macos')
-        
-        # 如果没有找到特定平台的下载链接，返回通用下载链接
+            if _is_arm_arch():
+                return (
+                    downloads.get('mac_arm64')
+                    or downloads.get('apple_arm64')
+                    or downloads.get('mac')
+                    or downloads.get('macos')
+                    or downloads.get('universal')
+                )
+            return (
+                downloads.get('mac_x86_64')
+                or downloads.get('apple_x86_64')
+                or downloads.get('mac')
+                or downloads.get('macos')
+                or downloads.get('universal')
+            )
+
+        # 其他平台返回通用链接
         return downloads.get('universal')
     
     def download_update(
@@ -198,6 +224,8 @@ class UpdateChecker:
             return self._apply_update_windows(downloaded_file)
         elif system == 'linux':
             return self._apply_update_linux(downloaded_file)
+        elif system == 'darwin':
+            return self._apply_update_macos(downloaded_file)
         else:
             raise UpdateError(f"不支持的操作系统: {system}")
     
@@ -244,6 +272,14 @@ chmod +x "{current_appimage}"
             raise
         except Exception as e:
             raise UpdateError(f"应用更新失败: {e}")
+
+    def _apply_update_macos(self, dmg_path: str) -> bool:
+        """macOS: 打开 DMG 进行安装引导"""
+        try:
+            subprocess.Popen(["open", dmg_path])
+            return True
+        except Exception as e:
+            raise UpdateError(f"打开安装包失败: {e}")
 
     def _has_other_instance_running(self) -> bool:
         """检查是否有其他 Toolbox 实例在运行（不包含当前进程）"""

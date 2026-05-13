@@ -16,6 +16,7 @@ param(
 # 项目信息
 $APP_NAME = "Toolbox"
 $APP_PUBLISHER = "Yibo Yuan"
+$WINDOWS_ARCH = "x86_64"
 
 # 从 src/version.py 动态读取版本号
 $PROJECT_ROOT = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -52,6 +53,7 @@ $SCRIPT_DIR = $PROJECT_ROOT
 $BUILD_DIR = Join-Path $PROJECT_ROOT "build"
 $DIST_DIR = Join-Path $PROJECT_ROOT "dist"
 $OUTPUT_DIR = Join-Path $DIST_DIR "Toolbox_win"
+$INSTALLER_FILE = "${APP_NAME}_${APP_VERSION}_windows_${WINDOWS_ARCH}.exe"
 
 # 颜色输出函数
 function Write-Info {
@@ -134,7 +136,7 @@ function Clean-Build {
         (Join-Path $BUILD_DIR "Toolbox_win"),
         (Join-Path $DIST_DIR "Toolbox_win"),
         (Join-Path $DIST_DIR "Toolbox_win.exe"),
-        (Join-Path $DIST_DIR "${APP_NAME}-${APP_VERSION}-x86_64-Setup.exe")
+        (Join-Path $DIST_DIR "${APP_NAME}_*_windows_${WINDOWS_ARCH}.exe")
     )
     
     foreach ($path in $pathsToClean) {
@@ -239,7 +241,7 @@ function Create-NSISScript {
 
 ; 基本信息
 Name "${APP_NAME}"
-OutFile "..\dist\${APP_NAME}-${APP_VERSION}-x86_64-Setup.exe"
+OutFile "..\dist\${INSTALLER_FILE}"
 InstallDir "`$PROGRAMFILES64\${APP_NAME}"
 InstallDirRegKey HKLM "Software\${APP_NAME}" "Install_Dir"
 RequestExecutionLevel admin
@@ -394,7 +396,7 @@ function Create-Installer {
     & $nsisPath "/INPUTCHARSET" "UTF8" $nsisScript
     
     if ($LASTEXITCODE -eq 0) {
-        Write-Success "安装程序创建完成: dist\${APP_NAME}-${APP_VERSION}-x86_64-Setup.exe"
+        Write-Success "安装程序创建完成: dist\${INSTALLER_FILE}"
     }
     else {
         Write-Warn "NSIS 编译失败，请检查脚本"
@@ -426,7 +428,7 @@ function Show-Summary {
             Write-Host $dirPath -ForegroundColor Cyan
             Write-Host ("总大小: {0:N2} MB" -f $size)
         
-            $installerPath = Join-Path $DIST_DIR "${APP_NAME}-${APP_VERSION}-x86_64-Setup.exe"
+            $installerPath = Join-Path $DIST_DIR $INSTALLER_FILE
             if (Test-Path $installerPath) {
                 $installerSize = (Get-Item $installerPath).Length / 1MB
                 Write-Host ""

@@ -5,6 +5,7 @@
 #   ./scripts/build_macos.sh
 #   ./scripts/build_macos.sh --clean
 #   ./scripts/build_macos.sh --onefile
+#   ./scripts/build_macos.sh --arch arm64
 #
 # 说明:
 # - 默认使用 PyInstaller 的目录模式（与现有 spec 一致）
@@ -26,6 +27,7 @@ DMG_BACKGROUND_PNG="${PROJECT_ROOT}/resources/dmg_background.png"
 ONEFILE="0"
 CLEAN="0"
 CUSTOMIZE_FINDER_LAYOUT="1"
+TARGET_ARCH=""
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -45,6 +47,7 @@ usage() {
 选项:
   --clean      清理 build/dist 后再构建
   --onefile    使用 PyInstaller 单文件模式（不推荐）
+  --arch       目标架构: x86_64 或 arm64（默认使用当前机器架构）
   --finder     为 DMG 设置 Finder 拖拽布局（默认启用）
   --no-finder  跳过 DMG Finder 拖拽布局
   -h, --help   显示帮助
@@ -55,6 +58,11 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --clean) CLEAN="1"; shift ;;
         --onefile) ONEFILE="1"; shift ;;
+        --arch)
+            [[ $# -ge 2 ]] || error "--arch 需要参数: x86_64 或 arm64"
+            TARGET_ARCH="$2"
+            shift 2
+            ;;
         --finder) CUSTOMIZE_FINDER_LAYOUT="1"; shift ;;
         --no-finder) CUSTOMIZE_FINDER_LAYOUT="0"; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -66,12 +74,31 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
     error "该脚本仅支持在 macOS 上运行。"
 fi
 
+HOST_ARCH="$(uname -m)"
+case "${HOST_ARCH}" in
+    arm64|aarch64) HOST_ARCH="arm64" ;;
+    x86_64|amd64) HOST_ARCH="x86_64" ;;
+esac
+
+if [[ -z "${TARGET_ARCH}" ]]; then
+    TARGET_ARCH="${HOST_ARCH}"
+fi
+
+case "${TARGET_ARCH}" in
+    arm64|x86_64) ;;
+    *) error "不支持的 --arch 参数: ${TARGET_ARCH}（仅支持 x86_64 或 arm64）" ;;
+esac
+
+if [[ "${TARGET_ARCH}" != "${HOST_ARCH}" ]]; then
+    warn "当前主机架构为 ${HOST_ARCH}，目标架构为 ${TARGET_ARCH}。请确保构建环境与目标架构一致。"
+fi
+
 cd "${PROJECT_ROOT}"
 mkdir -p "${DIST_DIR}" "${BUILD_DIR}"
 
 if [[ "${CLEAN}" == "1" ]]; then
     info "清理旧构建产物..."
-    rm -rf "${BUILD_DIR}" "${DIST_DIR}/${PYI_TARGET_NAME}" "${DIST_DIR}/${APP_BUNDLE_NAME}" "${DIST_DIR}/${APP_NAME}-"*.dmg
+    rm -rf "${BUILD_DIR}" "${DIST_DIR}/${PYI_TARGET_NAME}" "${DIST_DIR}/${APP_BUNDLE_NAME}" "${DIST_DIR}/${APP_NAME}-"*.dmg "${DIST_DIR}/${APP_NAME}_"*.dmg
 fi
 
 activate_venv() {
@@ -84,7 +111,7 @@ activate_venv() {
         warn "请先创建虚拟环境："
         echo "  python3 -m venv .venv"
         echo "  source .venv/bin/activate"
-        echo "  pip install -r requirements.txt"
+        echo "  pip install -r requirements-macos.txt"
         error "请创建虚拟环境后再运行构建脚本"
     fi
 }
@@ -148,7 +175,13 @@ print(__version__)
 PY
 )"
 
-DMG_NAME="${APP_NAME}-${APP_VERSION}-macos-universal.dmg"
+if [[ "${TARGET_ARCH}" == "arm64" ]]; then
+    DMG_ARCH_NAME="apple_arm64"
+else
+    DMG_ARCH_NAME="apple_x86_64"
+fi
+
+DMG_NAME="${APP_NAME}_${APP_VERSION}_${DMG_ARCH_NAME}.dmg"
 DMG_PATH="${DIST_DIR}/${DMG_NAME}"
 DMG_STAGING="${BUILD_DIR}/dmg_staging"
 DMG_SETTINGS="${BUILD_DIR}/dmg_settings.py"

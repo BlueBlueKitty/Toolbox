@@ -1,7 +1,7 @@
 #!/bin/bash
 #-----------------------------------------------------------------------------
 # Linux 构建脚本 - 生成 AppImage
-# 用法: ./scripts/build_linux.sh [--onefile] [--clean]
+# 用法: ./scripts/build_linux.sh [--onefile] [--clean] [--arch x86_64|arm64]
 #   --onefile: 使用 PyInstaller 单文件模式（不推荐用于 AppImage）
 #   --clean:   清理之前的构建产物
 #-----------------------------------------------------------------------------
@@ -16,6 +16,16 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# 早期参数解析阶段需要的基础输出函数（后续会覆盖为完整版本）
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+    exit 1
+}
+
+warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
 # 项目信息
 APP_NAME="Toolbox"
 APP_ID="com.toolbox.app"
@@ -26,8 +36,9 @@ SCRIPT_DIR="$(cd "${SCRIPT_PATH_DIR}/.." && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
 DIST_DIR="${SCRIPT_DIR}/dist"
 APPDIR="${BUILD_DIR}/AppDir"
-APPIMAGE_TOOL="appimagetool"
-APPIMAGE_TOOL_URL="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+APPIMAGE_TOOL=""
+APPIMAGE_ARCH="x86_64"
+APPIMAGE_TOOL_URL=""
 
 # 从 src/version.py 动态读取版本号
 VERSION_FILE="${SCRIPT_DIR}/src/version.py"
@@ -45,22 +56,69 @@ fi
 # 解析参数
 ONEFILE=0
 CLEAN=0
-for arg in "$@"; do
-    case $arg in
+TARGET_ARCH=""
+while [ $# -gt 0 ]; do
+    case "$1" in
         --onefile)
             ONEFILE=1
+            shift
             ;;
         --clean)
             CLEAN=1
+            shift
+            ;;
+        --arch=*)
+            TARGET_ARCH="${1#*=}"
+            shift
+            ;;
+        --arch)
+            [ $# -ge 2 ] || error "--arch 需要参数: x86_64 或 arm64"
+            TARGET_ARCH="$2"
+            shift 2
             ;;
         -h|--help)
-            echo "用法: $0 [--onefile] [--clean]"
+            echo "用法: $0 [--onefile] [--clean] [--arch x86_64|arm64]"
             echo "  --onefile: 使用 PyInstaller 单文件模式"
             echo "  --clean:   清理之前的构建产物"
+            echo "  --arch:    构建架构（默认使用当前机器架构）"
             exit 0
+            ;;
+        *)
+            error "未知参数: $1"
             ;;
     esac
 done
+
+HOST_ARCH="$(uname -m)"
+case "${HOST_ARCH}" in
+    x86_64|amd64) HOST_ARCH="x86_64" ;;
+    aarch64|arm64) HOST_ARCH="arm64" ;;
+esac
+
+if [ -z "${TARGET_ARCH}" ]; then
+    TARGET_ARCH="${HOST_ARCH}"
+fi
+
+case "${TARGET_ARCH}" in
+    x86_64)
+        APPIMAGE_ARCH="x86_64"
+        APPIMAGE_TOOL_URL="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+        PACKAGE_ARCH="linux_x86_64"
+        ;;
+    arm64)
+        APPIMAGE_ARCH="aarch64"
+        APPIMAGE_TOOL_URL="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-aarch64.AppImage"
+        PACKAGE_ARCH="linux_arm64"
+        ;;
+    *)
+        error "不支持的 --arch 参数: ${TARGET_ARCH}（仅支持 x86_64 或 arm64）"
+        ;;
+esac
+APPIMAGE_TOOL="appimagetool-${APPIMAGE_ARCH}"
+
+if [ "${TARGET_ARCH}" != "${HOST_ARCH}" ]; then
+    warn "当前主机架构为 ${HOST_ARCH}，目标架构为 ${TARGET_ARCH}。请确保构建环境与目标架构一致。"
+fi
 
 # 打印带颜色的信息
 info() {
@@ -94,7 +152,7 @@ activate_venv() {
         warn "请先创建虚拟环境："
         echo "  python3 -m venv .venv"
         echo "  source .venv/bin/activate"
-        echo "  pip install -r requirements.txt"
+        echo "  pip install -r requirements-linux.txt"
         error "请创建虚拟环境后再运行构建脚本"
     fi
 }
@@ -303,14 +361,15 @@ create_appimage() {
     info "生成 AppImage..."
     
     mkdir -p "${DIST_DIR}"
+    local appimage_name="${APP_NAME}-${APP_VERSION}_${PACKAGE_ARCH}.AppImage"
     
     # 使用 appimagetool 生成 AppImage
-    ARCH=x86_64 "${BUILD_DIR}/${APPIMAGE_TOOL}" --appimage-extract-and-run "${APPDIR}" "${DIST_DIR}/${APP_NAME}-${APP_VERSION}-x86_64.AppImage"
+    ARCH="${APPIMAGE_ARCH}" "${BUILD_DIR}/${APPIMAGE_TOOL}" --appimage-extract-and-run "${APPDIR}" "${DIST_DIR}/${appimage_name}"
     
     # 设置可执行权限
-    chmod +x "${DIST_DIR}/${APP_NAME}-${APP_VERSION}-x86_64.AppImage"
+    chmod +x "${DIST_DIR}/${appimage_name}"
     
-    success "AppImage 生成完成: ${DIST_DIR}/${APP_NAME}-${APP_VERSION}-x86_64.AppImage"
+    success "AppImage 生成完成: ${DIST_DIR}/${appimage_name}"
 }
 
 # 主函数
@@ -348,11 +407,11 @@ main() {
     echo -e "${GREEN}  构建完成！${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
-    echo -e "AppImage 文件位置: ${BLUE}${DIST_DIR}/${APP_NAME}-${APP_VERSION}-x86_64.AppImage${NC}"
+    echo -e "AppImage 文件位置: ${BLUE}${DIST_DIR}/${APP_NAME}-${APP_VERSION}_${PACKAGE_ARCH}.AppImage${NC}"
     echo ""
     echo "运行方式:"
-    echo "  chmod +x ${DIST_DIR}/${APP_NAME}-${APP_VERSION}-x86_64.AppImage"
-    echo "  ./${DIST_DIR}/${APP_NAME}-${APP_VERSION}-x86_64.AppImage"
+    echo "  chmod +x ${DIST_DIR}/${APP_NAME}-${APP_VERSION}_${PACKAGE_ARCH}.AppImage"
+    echo "  ./${DIST_DIR}/${APP_NAME}-${APP_VERSION}_${PACKAGE_ARCH}.AppImage"
 }
 
 # 运行主函数
