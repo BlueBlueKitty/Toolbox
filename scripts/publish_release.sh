@@ -8,7 +8,7 @@ VERSION_FILE="${PROJECT_ROOT}/src/version.py"
 VERSION_JSON_PATH="${PROJECT_ROOT}/version.json"
 
 get_version_from_source() {
-    VERSION_FILE="${VERSION_FILE}" python - <<'PY'
+    VERSION_FILE="${VERSION_FILE}" python3 - <<'PY'
 import os
 import re
 from pathlib import Path
@@ -51,7 +51,7 @@ update_version_json() {
     published_at="${published_at:0:22}:${published_at:22:2}"
 
     VERSION="${version}" REPO="${repo}" TAG="${tag}" PUBLISHED_AT="${published_at}" VERSION_JSON_PATH="${VERSION_JSON_PATH}" \
-    python - <<'PY'
+    python3 - <<'PY'
 import json
 import os
 from pathlib import Path
