@@ -6,12 +6,18 @@ from osgeo import __file__ as gdal_file
 
 # --- 1. 平台与环境检测 ---
 IS_WINDOWS = sys.platform.startswith('win')
+IS_MACOS = sys.platform == 'darwin'
 # Linux 下开启 strip 以减小二进制体积
 STRIP = False if IS_WINDOWS else True
 # Windows 下禁用 UPX 以避免打包缓慢且大量 DLL 无法压缩 (CFG 保护)
 UPX_ENABLED = False if IS_WINDOWS else True
-# 动态确定名称：Windows 下为 Toolbox_win，Linux 下为 Toolbox_linux
-target_name = 'Toolbox_win' if IS_WINDOWS else 'Toolbox_linux'
+# 动态确定名称：Windows / macOS / Linux
+if IS_WINDOWS:
+    target_name = 'Toolbox_win'
+elif IS_MACOS:
+    target_name = 'Toolbox_macos'
+else:
+    target_name = 'Toolbox_linux'
 
 # 通过环境变量控制是否生成单文件
 ONEFILE = os.environ.get('ONEFILE', '0') == '1'
@@ -51,8 +57,11 @@ if _gdal_data:
 if _proj_data:
     datas.append((_proj_data, 'proj_data'))
 
-# 图标适配：Linux 通常不嵌入图标，Windows 必须用 .ico
+# 图标适配
 icon_path = os.path.join('resources', 'toolbox.ico') if IS_WINDOWS else None
+macos_bundle_icon = os.environ.get('MACOS_BUNDLE_ICON', '').strip() or os.path.join('resources', 'toolbox.icns')
+if IS_MACOS and not os.path.exists(macos_bundle_icon):
+    macos_bundle_icon = None
 
 # 自定义运行时钩子 (确保初始化 GDAL/PROJ 环境变量)
 _runtime_hooks = ['hooks/pyi_rth_proj.py']
@@ -99,6 +108,13 @@ if ONEFILE:
         console=False,
         icon=[icon_path] if icon_path else None,
     )
+    if IS_MACOS:
+        app = BUNDLE(
+            exe,
+            name='Toolbox.app',
+            icon=macos_bundle_icon,
+            bundle_identifier='com.bluebluekitty.toolbox',
+        )
 else:
     # 目录模式 (方便后续压缩为 .zip)
     exe = EXE(
@@ -121,5 +137,12 @@ else:
         a.datas,
         strip=False,
         upx=UPX_ENABLED,
-        name=target_name, # 这里是生成的文件夹名称：Toolbox_win 或 Toolbox_linux
+        name=target_name, # 这里是生成的文件夹名称：Toolbox_win / Toolbox_macos / Toolbox_linux
     )
+    if IS_MACOS:
+        app = BUNDLE(
+            coll,
+            name='Toolbox.app',
+            icon=macos_bundle_icon,
+            bundle_identifier='com.bluebluekitty.toolbox',
+        )

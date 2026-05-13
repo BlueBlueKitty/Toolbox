@@ -90,9 +90,14 @@ class MainWindow(QMainWindow):
         project_root = os.path.dirname(current_dir)
         
         # 设置应用程序图标
-        icon_path = os.path.join(project_root, 'resources', 'toolbox.ico')
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        icon_candidates = (
+            os.path.join(project_root, 'resources', 'toolbox.png'),
+            os.path.join(project_root, 'resources', 'toolbox.ico'),
+        )
+        for icon_path in icon_candidates:
+            if os.path.exists(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+                break
         
         # 创建UI
         self._create_menu_bar()

@@ -95,6 +95,7 @@ import h5py
 import requests
 from src.main_window import MainWindow
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon
 from src.utils.font_config import configure_matplotlib_font, configure_pyside6_font
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineSettings
@@ -125,6 +126,14 @@ def main():
     
     # 创建应用程序实例
     app = QApplication(sys.argv)
+    icon_candidates = [
+        os.path.join(project_root, "resources", "toolbox.png"),
+        os.path.join(project_root, "resources", "toolbox.ico"),
+    ]
+    for icon_path in icon_candidates:
+        if os.path.exists(icon_path):
+            app.setWindowIcon(QIcon(icon_path))
+            break
     
     # 配置字体（必须在创建 QApplication 后）
     configure_pyside6_font(app)
