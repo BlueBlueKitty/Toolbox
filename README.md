@@ -138,16 +138,7 @@
 
 #### Windows 平台
 
-1. **下载安装程序**：从 [Releases](https://github.com/BlueBlueKitty/Toolbox/releases) 页面下载最新的 `Toolbox-{版本号}-x86_64-Setup.exe`
-
-2. **运行安装程序**：
-   - 双击下载的安装程序
-   - 按照安装向导提示完成安装
-   - 安装完成后会在开始菜单和桌面创建快捷方式
-
-3. **启动软件**：
-   - 从开始菜单或桌面快捷方式启动
-   - 或直接运行安装目录下的 `Toolbox_win.exe`
+从 [Releases](https://github.com/BlueBlueKitty/Toolbox/releases) 页面下载并安装最新的 `Toolbox-{版本号}-x86_64-Setup.exe`
 
 #### Linux 平台
 
@@ -251,15 +242,31 @@ uv pip install path/to/gdal-3.11.4-cp312-cp312-win_amd64.whl
 uv sync
 ```
 
+#### Macos 系统安装 GDAL
+
+```bash
+# 1、通过homebrew安装gdal
+brew install gdal
+
+# 通过pip安装gdal
+uv pip install gdal
+```
+
 3. 运行程序：
 
 ```bash
-python main.py
+uv run main.py
 ```
 
 ## 项目打包
 
-本项目支持 Windows 和 Linux 平台的打包，分别生成安装程序和 AppImage。
+本项目支持 Windows、Linux、macOS 三个平台打包，生成以下安装包：
+
+- Windows x86_64：Toolbox_<version>_windows_x86_64.exe
+- Linux x86_64：Toolbox-<version>_linux_x86_64.AppImage
+- Linux arm64：Toolbox-<version>_linux_arm64.AppImage
+- macOS x86_64：Toolbox_<version>_apple_x86_64.dmg
+- macOS arm64：Toolbox_<version>_apple_arm64.dmg
 
 ### 打包前准备
 
@@ -273,6 +280,11 @@ python main.py
    - 安装后确保 `makensis.exe` 在系统 PATH 中，或安装在默认位置：
      - `C:\Program Files (x86)\NSIS\`
      - `C:\Program Files\NSIS\`
+3. 运行命令: 
+
+  ```powershell
+  ./scripts/build_win.ps1
+  ```
 
 #### Linux 平台
 
@@ -293,42 +305,19 @@ sudo apt install -y \
 # 确保已安装 Python 虚拟环境和所有项目依赖
 ```
 
-## 自动发布
+之后运行命令：
 
-项目已配置基于 GitHub Actions 的自动发布流程：
-
-1. Windows 在 GitHub Actions 云端直接调用 `scripts/build_win.ps1` 构建安装包。
-2. Linux 在 GitHub Actions 云端通过 `docker/linux-release.Dockerfile` 构建固定环境，再调用 `scripts/build_linux.sh` 生成 AppImage。
-3. 推送形如 `v1.4.1` 的 Git tag 后，会自动创建 GitHub Release 并上传 Windows/Linux 两个平台产物。
-
-本地一键发版命令：
-
-```powershell
-.\scripts\publish_release_win.ps1
+```bash
+./scripts/build_linux.sh
 ```
 
-执行前请确保：
+#### macOS 平台
 
-1. `src/version.py` 和 `version.json` 中的版本号一致。
-2. 当前 Git 工作区是干净状态。
-3. `version.json` 里的 `name` 和 `changelog` 已经写好本次发布说明。
+运行命令: 
 
-推荐发版步骤：
-
-1. 修改 [src/version.py](./src/version.py) 中的 `__version__`，例如改成 `1.5.2`。
-2. 修改 [version.json](./version.json) 中的 `version`、`name` 和 `changelog`，并确保 `version` 与 `src/version.py` 一致。
-3. 在项目根目录执行：
-
-```powershell
-.\scripts\publish_release_win.ps1
+```bash
+./scripts/build_macos.sh
 ```
-
-这个脚本会自动：
-
-1. 更新 `version.json` 中的 `release_url`、下载链接和 `published_at`。
-2. 提交 `version.json`。
-3. 创建并推送形如 `v1.5.2` 的 Git tag。
-4. 触发 GitHub Actions 自动构建 Windows 和 Linux 安装包并发布 Release。
 
 ### Windows 打包
 
@@ -387,6 +376,20 @@ chmod +x dist/Toolbox-*.AppImage
 2. **Qt 库兼容性**：打包脚本已处理 GTK 和 Qt 插件冲突问题
 3. **测试**：打包后请在干净的系统环境中测试，确保所有依赖都已正确打包
 4. **Windows NSIS**：如果未安装 NSIS，脚本会跳过安装程序创建，但仍会生成 ZIP 压缩包
+
+## 自动发布
+
+项目已配置基于 GitHub Actions 的自动发布流程：
+
+```powershell
+.\scripts\publish_release.ps1
+```
+
+或：
+
+```bash
+./scripts/publish_release.sh
+```
 
 ## 许可证
 
