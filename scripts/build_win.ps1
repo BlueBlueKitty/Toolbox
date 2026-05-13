@@ -109,6 +109,11 @@ function Check-Dependencies {
     try {
         $pythonVersion = python --version 2>&1
         Write-Info "Python 版本: $pythonVersion"
+        $pythonPath = (Get-Command python -ErrorAction Stop).Source
+        Write-Info "Python 路径: $pythonPath"
+        if ($env:CONDA_PREFIX) {
+            Write-Info "当前 Conda 环境: $($env:CONDA_DEFAULT_ENV)"
+        }
     }
     catch {
         Write-Error-Custom "未找到 Python，请先安装 Python 3.10+"
@@ -174,25 +179,35 @@ function Build-WithPyInstaller {
         Remove-Item $pyinstallerLog -Force
     }
 
-    # 运行 PyInstaller 并写入日志文件。
-    # 在 GitHub Actions(PowerShell) 中，原生命令向 stderr 输出 INFO 日志时，
-    # 可能触发 NativeCommandError（即使进程实际成功），因此这里避免使用管道实时转发。
-    Push-Location $SCRIPT_DIR
-    $oldNativeErrorPref = $null
-    try {
-        if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
-            $oldNativeErrorPref = $PSNativeCommandUseErrorActionPreference
-            $PSNativeCommandUseErrorActionPreference = $false
+    # 使用 Start-Process 获取真实退出码，避免 GitHub Actions 将 stderr 中的 INFO
+    # 误判成 NativeCommandError。
+    $stdoutLog = Join-Path $BUILD_DIR "pyinstaller-windows.stdout.log"
+    $stderrLog = Join-Path $BUILD_DIR "pyinstaller-windows.stderr.log"
+    foreach ($logPath in @($stdoutLog, $stderrLog)) {
+        if (Test-Path $logPath) {
+            Remove-Item $logPath -Force
         }
-
-        & python -m PyInstaller --clean --noconfirm Toolbox.spec *> $pyinstallerLog
-        $pyinstallerExitCode = $LASTEXITCODE
     }
-    finally {
-        if ($null -ne $oldNativeErrorPref -and (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue)) {
-            $PSNativeCommandUseErrorActionPreference = $oldNativeErrorPref
+
+    $pythonExe = (Get-Command python -ErrorAction Stop).Source
+    $process = Start-Process -FilePath $pythonExe `
+        -ArgumentList @("-m", "PyInstaller", "--clean", "--noconfirm", "Toolbox.spec") `
+        -WorkingDirectory $SCRIPT_DIR `
+        -RedirectStandardOutput $stdoutLog `
+        -RedirectStandardError $stderrLog `
+        -NoNewWindow `
+        -Wait `
+        -PassThru
+    $pyinstallerExitCode = $process.ExitCode
+
+    $combinedLogs = @()
+    foreach ($logPath in @($stdoutLog, $stderrLog)) {
+        if (Test-Path $logPath) {
+            $combinedLogs += Get-Content $logPath
         }
-        Pop-Location
+    }
+    if ($combinedLogs.Count -gt 0) {
+        $combinedLogs | Set-Content -Path $pyinstallerLog -Encoding UTF8
     }
     
     # 检查构建产物是否存在
@@ -206,6 +221,14 @@ function Build-WithPyInstaller {
     if (Test-Path $expectedOutput) {
         if (Test-Path $pyinstallerLog) {
             Get-Content $pyinstallerLog | Write-Host
+        }
+        if ($pyinstallerExitCode -ne 0) {
+            if ((Test-Path $pyinstallerLog) -and (Select-String -Path $pyinstallerLog -Pattern "Build complete!" -Quiet)) {
+                Write-Warn "PyInstaller 退出码: $pyinstallerExitCode，但日志显示 Build complete 且产物存在，继续后续步骤"
+            }
+            else {
+                Write-Warn "PyInstaller 退出码: $pyinstallerExitCode，产物已生成，继续后续步骤"
+            }
         }
         Write-Success "PyInstaller 打包完成"
     }

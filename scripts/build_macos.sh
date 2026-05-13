@@ -102,17 +102,22 @@ if [[ "${CLEAN}" == "1" ]]; then
 fi
 
 activate_venv() {
-    if [[ -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
+    if [[ -n "${CONDA_PREFIX:-}" ]] && command -v python >/dev/null 2>&1; then
+        success "使用已激活的 Conda 环境: ${CONDA_DEFAULT_ENV:-$(basename "${CONDA_PREFIX}")} ($(which python))"
+    elif [[ -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
+        warn "未检测到 Conda 环境，回退到 .venv ..."
         # shellcheck disable=SC1091
         source "${PROJECT_ROOT}/.venv/bin/activate"
         success "虚拟环境已激活: $(which python)"
     else
-        warn "未找到 .venv 虚拟环境"
-        warn "请先创建虚拟环境："
+        warn "未检测到已激活的 Conda 环境，也未找到 .venv"
+        warn "请先准备构建环境："
+        echo "  conda env create -n toolbox-build -f environment-build.yml"
+        echo "  conda activate toolbox-build"
+        echo "  或"
         echo "  python3 -m venv .venv"
         echo "  source .venv/bin/activate"
-        echo "  pip install -r requirements-macos.txt"
-        error "请创建虚拟环境后再运行构建脚本"
+        error "请激活 Conda 或 .venv 环境后再运行构建脚本"
     fi
 }
 

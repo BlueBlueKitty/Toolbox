@@ -1,0 +1,20 @@
+name: toolbox-build
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - gdal>=3.10,<3.11
+  - proj
+  - pip:
+      - "dmgbuild>=1.6.7; platform_system == 'Darwin'"
+      - h5py>=3.15.1
+      - matplotlib>=3.10.8
+      - numpy>=1.21.0,<2.0
+      - opencv-python==4.10.0.84
+      - pillow>=12.1.0
+      - pyinstaller>=6.18.0
+      - pyqtgraph>=0.13.7
+      - pyside6<6.10
+      - requests>=2.32.5
+      - shapely>=2.0.6

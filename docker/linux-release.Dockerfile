@@ -1,12 +1,10 @@
 FROM python:3.10-bullseye
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV CONDA_DIR=/opt/conda
+ENV PATH=${CONDA_DIR}/bin:${PATH}
 
 RUN apt-get update && apt-get install -y \
-    gdal-bin \
-    libgdal-dev \
-    proj-bin \
-    libproj-dev \
     build-essential \
     wget \
     curl \
@@ -53,7 +51,21 @@ RUN apt-get update && apt-get install -y \
     libxi6 \
     libxrandr2 \
     libxtst6 \
+    bzip2 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+RUN arch="$(dpkg --print-architecture)" \
+    && case "${arch}" in \
+        amd64) conda_arch="x86_64" ;; \
+        arm64) conda_arch="aarch64" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac \
+    && wget -q -O /tmp/miniconda.sh "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${conda_arch}.sh" \
+    && bash /tmp/miniconda.sh -b -p "${CONDA_DIR}" \
+    && rm -f /tmp/miniconda.sh \
+    && conda config --system --set auto_update_conda false \
+    && conda config --system --set show_channel_urls true \
+    && conda config --system --add channels conda-forge
 
 WORKDIR /workspace

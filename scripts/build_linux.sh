@@ -39,6 +39,7 @@ APPDIR="${BUILD_DIR}/AppDir"
 APPIMAGE_TOOL=""
 APPIMAGE_ARCH="x86_64"
 APPIMAGE_TOOL_URL=""
+ACTIVE_ENV_NAME=""
 
 # 从 src/version.py 动态读取版本号
 VERSION_FILE="${SCRIPT_DIR}/src/version.py"
@@ -138,23 +139,33 @@ error() {
     exit 1
 }
 
-# 激活虚拟环境
-activate_venv() {
-    info "检查虚拟环境..."
-    
-    # 检查 .venv 是否存在
-    if [ -d "${SCRIPT_DIR}/.venv" ]; then
-        info "找到虚拟环境，正在激活..."
-        source "${SCRIPT_DIR}/.venv/bin/activate"
-        success "虚拟环境已激活: $(which python)"
-    else
-        warn "未找到 .venv 虚拟环境"
-        warn "请先创建虚拟环境："
-        echo "  python3 -m venv .venv"
-        echo "  source .venv/bin/activate"
-        echo "  pip install -r requirements-linux.txt"
-        error "请创建虚拟环境后再运行构建脚本"
+# 激活 Python 环境
+activate_python_env() {
+    info "检查 Python 环境..."
+
+    if [ -n "${CONDA_PREFIX:-}" ] && command -v python >/dev/null 2>&1; then
+        ACTIVE_ENV_NAME="conda:${CONDA_DEFAULT_ENV:-$(basename "${CONDA_PREFIX}")}"
+        success "使用已激活的 Conda 环境: ${ACTIVE_ENV_NAME} ($(command -v python))"
+        return
     fi
+
+    if [ -f "${SCRIPT_DIR}/.venv/bin/activate" ]; then
+        info "未检测到 Conda 环境，回退到 .venv ..."
+        # shellcheck disable=SC1091
+        source "${SCRIPT_DIR}/.venv/bin/activate"
+        ACTIVE_ENV_NAME="venv:.venv"
+        success "虚拟环境已激活: $(which python)"
+        return
+    fi
+
+    warn "未检测到已激活的 Conda 环境，也未找到 .venv"
+    warn "请先准备构建环境，例如："
+    echo "  conda env create -n toolbox-build -f environment-build.yml"
+    echo "  conda activate toolbox-build"
+    echo "  或"
+    echo "  python3 -m venv .venv"
+    echo "  source .venv/bin/activate"
+    error "请激活 Conda 或 .venv 环境后再运行构建脚本"
 }
 
 # 检查依赖
@@ -172,6 +183,42 @@ check_dependencies() {
     fi
     
     success "依赖检查完成"
+}
+
+scan_appdir_architecture() {
+    info "检查 AppDir 二进制架构..."
+
+    local output_file="${BUILD_DIR}/appdir-architecture.txt"
+    local mismatch_file="${BUILD_DIR}/appdir-architecture-mismatch.txt"
+    : > "${output_file}"
+    : > "${mismatch_file}"
+
+    while IFS= read -r -d '' file_path; do
+        local file_info
+        file_info="$(file -L "${file_path}")"
+        printf '%s\n' "${file_info}" >> "${output_file}"
+
+        case "${TARGET_ARCH}" in
+            x86_64)
+                if printf '%s\n' "${file_info}" | grep -Eq 'aarch64|ARM aarch64'; then
+                    printf '%s\n' "${file_info}" >> "${mismatch_file}"
+                fi
+                ;;
+            arm64)
+                if printf '%s\n' "${file_info}" | grep -Eq 'x86-64'; then
+                    printf '%s\n' "${file_info}" >> "${mismatch_file}"
+                fi
+                ;;
+        esac
+    done < <(find "${APPDIR}" -type f \( -perm -111 -o -name '*.so' -o -name '*.so.*' \) -print0)
+
+    if [ -s "${mismatch_file}" ]; then
+        warn "检测到与目标架构不匹配的 AppDir 二进制："
+        cat "${mismatch_file}"
+        error "AppDir 存在混合架构文件，请先清理错误架构依赖后再生成 AppImage"
+    fi
+
+    success "AppDir 架构检查通过"
 }
 
 # 下载 appimagetool
@@ -362,6 +409,8 @@ create_appimage() {
     
     mkdir -p "${DIST_DIR}"
     local appimage_name="${APP_NAME}-${APP_VERSION}_${PACKAGE_ARCH}.AppImage"
+
+    scan_appdir_architecture
     
     # 使用 appimagetool 生成 AppImage。
     # 某些 aarch64 环境下，appimagetool 对 ARCH 值识别存在差异，这里做兼容重试。
@@ -374,9 +423,8 @@ create_appimage() {
     local arch_value=""
     for arch_value in "${arch_candidates[@]}"; do
         info "尝试使用 ARCH=${arch_value} 生成 AppImage..."
-        export ARCH="${arch_value}"
         set +e
-        "${BUILD_DIR}/${APPIMAGE_TOOL}" --appimage-extract-and-run "${APPDIR}" "${DIST_DIR}/${appimage_name}"
+        ARCH="${arch_value}" "${BUILD_DIR}/${APPIMAGE_TOOL}" --appimage-extract-and-run "${APPDIR}" "${DIST_DIR}/${appimage_name}"
         last_rc=$?
         set -e
         if [ "${last_rc}" -eq 0 ]; then
@@ -402,8 +450,8 @@ main() {
     echo -e "${GREEN}========================================${NC}"
     echo ""
     
-    # 激活虚拟环境
-    activate_venv
+    # 激活 Python 环境
+    activate_python_env
     
     # 检查依赖
     check_dependencies
