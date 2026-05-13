@@ -8,23 +8,31 @@ VERSION_FILE="${PROJECT_ROOT}/src/version.py"
 VERSION_JSON_PATH="${PROJECT_ROOT}/version.json"
 
 get_version_from_source() {
-    local version
-    version="$(grep -oP "__version__\s*=\s*['\"]\K[^'\"]+" "${VERSION_FILE}" || true)"
-    if [[ -z "${version}" ]]; then
-        echo "无法从 src/version.py 读取版本号" >&2
-        exit 1
-    fi
-    echo "${version}"
+    VERSION_FILE="${VERSION_FILE}" python - <<'PY'
+import os
+import re
+from pathlib import Path
+
+text = Path(os.environ["VERSION_FILE"]).read_text(encoding="utf-8")
+match = re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]", text)
+if not match:
+    raise SystemExit("无法从 src/version.py 读取版本号")
+print(match.group(1))
+PY
 }
 
 get_repo_from_source() {
-    local repo
-    repo="$(grep -oP "GITHUB_REPO\s*=\s*['\"]\K[^'\"]+" "${VERSION_FILE}" || true)"
-    if [[ -z "${repo}" ]]; then
-        echo "无法从 src/version.py 读取 GITHUB_REPO" >&2
-        exit 1
-    fi
-    echo "${repo}"
+    VERSION_FILE="${VERSION_FILE}" python - <<'PY'
+import os
+import re
+from pathlib import Path
+
+text = Path(os.environ["VERSION_FILE"]).read_text(encoding="utf-8")
+match = re.search(r"GITHUB_REPO\s*=\s*['\"]([^'\"]+)['\"]", text)
+if not match:
+    raise SystemExit("无法从 src/version.py 读取 GITHUB_REPO")
+print(match.group(1))
+PY
 }
 
 assert_clean_worktree() {
