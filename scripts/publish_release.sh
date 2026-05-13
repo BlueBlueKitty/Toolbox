@@ -22,7 +22,7 @@ PY
 }
 
 get_repo_from_source() {
-    VERSION_FILE="${VERSION_FILE}" python - <<'PY'
+    VERSION_FILE="${VERSION_FILE}" python3 - <<'PY'
 import os
 import re
 from pathlib import Path
