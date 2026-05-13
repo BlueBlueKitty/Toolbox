@@ -24,6 +24,7 @@ from PySide6.QtGui import QFontDatabase, QFont, QPainter, QPixmap, QIcon, QColor
 
 # 导入共享的GAMMA对话框
 from src.dialogs.gamma_dialogs import GammaTimeSeriesDialog
+from src.utils.window_geometry import expand_window_width_safely, fit_window_to_screen
 
 # 配置文件路径
 def get_settings():
@@ -1156,13 +1157,19 @@ class PixelTimeSeriesViewerDialog(QDialog):
             base_width = getattr(self, "_sidebar_base_width", 0)
             if base_width > 0:
                 self.resize(base_width, self.height())
+            fit_window_to_screen(self, margin=24, center=False)
             self._sidebar_visible = False
         else:
             sidebar_width = max(180, min(240, int(self.render_sidebar.sizeHint().width())))
             self._sidebar_base_width = self.width()
-            self.resize(self._sidebar_base_width + sidebar_width, self.height())
+            applied_sidebar_width = expand_window_width_safely(
+                self,
+                sidebar_width,
+                min_main_width=520,
+                margin=24,
+            )
             self.render_sidebar.setVisible(True)
-            self.outer_splitter.setSizes([max(1, self._sidebar_base_width), sidebar_width])
+            self.outer_splitter.setSizes([max(1, self.width() - applied_sidebar_width), max(1, applied_sidebar_width)])
             self._sidebar_visible = True
 
     def _load_material_icon_font(self) -> str | None:
@@ -1174,6 +1181,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
             return None
         families = QFontDatabase.applicationFontFamilies(font_id)
         return families[0] if families else None
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, lambda: fit_window_to_screen(self, margin=24, center=True))
 
     def _material_icon(self, icon_name: str, *, size: int = 20, rotation_angle: float = 0.0) -> QIcon:
         if not self._material_icon_family:
@@ -3284,4 +3295,3 @@ class PixelTimeSeriesViewerDialog(QDialog):
             if show_message:
                 QMessageBox.critical(self, "错误", f"转换为dB失败: {str(e)}")
             traceback.print_exc()
-

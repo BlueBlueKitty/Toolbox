@@ -11,11 +11,11 @@ import webbrowser
 from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QSettings, QThread, QTimer, Qt, Signal
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QFontMetrics
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
     QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-    QPushButton, QProgressDialog, QRadioButton, QSizePolicy, QSplitter, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
+    QPushButton, QProgressDialog, QRadioButton, QScrollArea, QSizePolicy, QSplitter, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from src.dialogs.local_raster_source_dialog import LocalRasterSourceConfigDialog
@@ -226,12 +226,20 @@ class RasterDataAcquisitionDialog(QDialog):
         self.splitter.addWidget(left)
 
         right = QWidget()
-        right.setMinimumWidth(520)
         right_layout = QVBoxLayout(right)
-        right_layout.addWidget(self._create_region_group(), 0)
-        right_layout.addWidget(self._create_source_group(), 0)
-        right_layout.addWidget(self._create_output_group(), 0)
-        right_layout.addWidget(self._create_log_group(), 1)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        right_content = QWidget()
+        right_content.setMinimumWidth(520)
+        panel_layout = QVBoxLayout(right_content)
+        panel_layout.addWidget(self._create_region_group(), 0)
+        panel_layout.addWidget(self._create_source_group(), 0)
+        panel_layout.addWidget(self._create_output_group(), 0)
+        panel_layout.addWidget(self._create_log_group(), 1)
         button_row = QHBoxLayout()
         self.start_button = QPushButton("开始获取")
         self.start_button.clicked.connect(self.start_acquisition)
@@ -243,7 +251,9 @@ class RasterDataAcquisitionDialog(QDialog):
         close_btn = QPushButton("关闭")
         close_btn.clicked.connect(self.close)
         button_row.addWidget(close_btn)
-        right_layout.addLayout(button_row)
+        panel_layout.addLayout(button_row)
+        right_scroll.setWidget(right_content)
+        right_layout.addWidget(right_scroll)
         self.splitter.addWidget(right)
         self.splitter.setStretchFactor(0, 3)
         self.splitter.setStretchFactor(1, 4)
@@ -315,6 +325,18 @@ class RasterDataAcquisitionDialog(QDialog):
         label.setMaximumHeight(max_height)
         label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
+    @staticmethod
+    def _create_summary_panel(min_lines: int) -> QLabel:
+        label = QLabel()
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        label.setFrameShape(QFrame.StyledPanel)
+        label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        fm = QFontMetrics(label.font())
+        line_height = max(18, fm.lineSpacing())
+        label.setMinimumHeight(line_height * min_lines + 14)
+        return label
+
     def _create_file_tab(self, label_text, browse_handler, file_type):
         widget = QWidget()
         layout = QHBoxLayout(widget)
@@ -360,8 +382,10 @@ class RasterDataAcquisitionDialog(QDialog):
 
     def _create_source_group(self):
         group = QGroupBox("数据源选择")
-        group.setMinimumHeight(255)
-        group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        # 该分组包含多行控件和两块摘要信息，固定高度在高 DPI/大字号下会导致控件重叠。
+        # 改为内容自适应，并给出一个保守的最小高度。
+        group.setMinimumHeight(320)
+        group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         layout = QVBoxLayout(group)
         self.source_mode_group = QButtonGroup(self)
         row1 = QHBoxLayout()
@@ -374,10 +398,7 @@ class RasterDataAcquisitionDialog(QDialog):
         local_cfg = QPushButton("配置"); local_cfg.clicked.connect(self._open_local_config); row1.addWidget(local_cfg)
         local_test = QPushButton("测试"); local_test.clicked.connect(self._test_local_source); row1.addWidget(local_test)
         layout.addLayout(row1)
-        self.local_summary_label = QTextEdit()
-        self.local_summary_label.setReadOnly(True)
-        self.local_summary_label.setFixedHeight(74)
-        self.local_summary_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.local_summary_label = self._create_summary_panel(min_lines=7)
         layout.addWidget(self.local_summary_label)
 
         row2 = QHBoxLayout()
@@ -400,10 +421,7 @@ class RasterDataAcquisitionDialog(QDialog):
         api_btn = QPushButton("获取 API key"); api_btn.clicked.connect(lambda: webbrowser.open("https://portal.opentopography.org/myopentopo"))
         row3.addWidget(api_btn)
         layout.addLayout(row3)
-        self.online_summary_label = QTextEdit()
-        self.online_summary_label.setReadOnly(True)
-        self.online_summary_label.setFixedHeight(48)
-        self.online_summary_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.online_summary_label = self._create_summary_panel(min_lines=3)
         layout.addWidget(self.online_summary_label)
         return group
 
@@ -530,9 +548,9 @@ class RasterDataAcquisitionDialog(QDialog):
     def _update_local_summary(self):
         source = self.config_manager.get_local_source(self.local_source_combo.currentText())
         if not source:
-            self.local_summary_label.setPlainText("未选择本地数据源")
+            self.local_summary_label.setText("未选择本地数据源")
             return
-        self.local_summary_label.setPlainText(
+        self.local_summary_label.setText(
             f"根目录: {source.root_dir or '未设置'}\n"
             f"经纬度间隔: {source.latitude_interval} x {source.longitude_interval}\n"
             f"命名锚点: {source.naming_anchor}\n"
@@ -545,11 +563,11 @@ class RasterDataAcquisitionDialog(QDialog):
     def _update_online_summary(self):
         source = self.config_manager.get_online_source(self.online_source_combo.currentText())
         if not source:
-            self.online_summary_label.setPlainText("未选择在线数据源")
+            self.online_summary_label.setText("未选择在线数据源")
             return
         if self.online_dataset_combo.findData(source.default_dataset) >= 0:
             self.online_dataset_combo.setCurrentIndex(self.online_dataset_combo.findData(source.default_dataset))
-        self.online_summary_label.setPlainText(
+        self.online_summary_label.setText(
             f"平台名称: {source.platform_type}\n"
             f"默认产品/数据集: {source.default_dataset or '未设置'}\n"
             f"API key: {'已配置' if source.api_key else '未配置'}"

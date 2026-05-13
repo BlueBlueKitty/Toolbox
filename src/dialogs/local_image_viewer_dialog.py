@@ -65,6 +65,7 @@ from src.utils.display_pyramid import (
     write_derived_raster_cache,
     write_full_derived_raster_cache,
 )
+from src.utils.window_geometry import expand_window_width_safely, fit_window_to_screen
 from src.dialogs.gamma_dialogs import GammaSingleFileDialog
 from src.rendering.sources import GdalRasterSource, GammaVrtRasterSource, H5DatasetRasterSource, HillshadeCompositeRasterSource
 from src.rendering.sources import StandardImageSource
@@ -176,13 +177,19 @@ class LocalImageViewerDialog(QDialog):
             base_width = getattr(self, "_sidebar_base_width", 0)
             if base_width > 0:
                 self.resize(base_width, self.height())
+            fit_window_to_screen(self, margin=24, center=False)
             self._sidebar_visible = False
         else:
             sidebar_width = max(180, min(240, int(self.render_sidebar.sizeHint().width())))
             self._sidebar_base_width = self.width()
-            self.resize(self._sidebar_base_width + sidebar_width, self.height())
+            applied_sidebar_width = expand_window_width_safely(
+                self,
+                sidebar_width,
+                min_main_width=480,
+                margin=24,
+            )
             self.render_sidebar.setVisible(True)
-            self.outer_splitter.setSizes([max(1, self._sidebar_base_width), sidebar_width])
+            self.outer_splitter.setSizes([max(1, self.width() - applied_sidebar_width), max(1, applied_sidebar_width)])
             self._sidebar_visible = True
 
     def _load_material_icon_font(self) -> str | None:
@@ -936,6 +943,10 @@ class LocalImageViewerDialog(QDialog):
         except Exception:
             pass
         super().closeEvent(event)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, lambda: fit_window_to_screen(self, margin=24, center=True))
 
     def _restore_base_render_source(self) -> None:
         if self._base_render_source is not None and self.image_source is not self._base_render_source:

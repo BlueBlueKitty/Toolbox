@@ -242,3 +242,4 @@ AGENTS.md
 .mindfs/
 .omx/
 .pytest_tmp/
+.DS_Store

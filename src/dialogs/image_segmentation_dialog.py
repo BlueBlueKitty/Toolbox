@@ -72,6 +72,7 @@ from src.rendering.config import default_raster_render_config, render_raster_rgb
 from src.rendering.layer_operations import is_layer_removable, nodata_to_text
 from src.rendering.layer_panel_controller import LayerPanelController
 from src.utils.display_pyramid import DEFAULT_PYRAMID_THRESHOLD_MB
+from src.utils.window_geometry import expand_window_width_safely, fit_window_to_screen
 from src.utils.image_io import (
     bounds_overlap,
     build_coordinate_transform,
@@ -513,14 +514,24 @@ class ImageSegmentationDialog(QDialog):
             base_width = getattr(self, "_sidebar_base_width", 0)
             if base_width > 0:
                 self.resize(base_width, self.height())
+            fit_window_to_screen(self, margin=24, center=False)
             self._sidebar_visible = False
             return
         sidebar_width = max(180, min(240, int(self.render_sidebar.sizeHint().width())))
         self._sidebar_base_width = self.width()
-        self.resize(self._sidebar_base_width + sidebar_width, self.height())
+        applied_sidebar_width = expand_window_width_safely(
+            self,
+            sidebar_width,
+            min_main_width=560,
+            margin=24,
+        )
         self.render_sidebar.setVisible(True)
-        self.right_splitter.setSizes([max(1, self._sidebar_base_width), sidebar_width])
+        self.right_splitter.setSizes([max(1, self.width() - applied_sidebar_width), max(1, applied_sidebar_width)])
         self._sidebar_visible = True
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, lambda: fit_window_to_screen(self, margin=24, center=True))
 
     def _bind_signals(self) -> None:
         self.open_action.triggered.connect(self.open_image)

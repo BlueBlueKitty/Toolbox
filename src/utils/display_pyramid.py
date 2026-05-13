@@ -38,6 +38,11 @@ CACHE_DIR_SETTING_KEY = "display/cache_dir"
 _cleanup_lock = threading.Lock()
 _cleanup_thread: threading.Thread | None = None
 
+# GDAL 3.12+ 默认限制 VRTRawRasterBand 的源路径访问范围。
+# 本工具会把 VRT 缓存写在独立目录，而原始 GAMMA 文件位于用户数据目录，
+# 因此需要显式放开来源限制，否则打开会报 “relativeToVRT / allowed source” 错误。
+gdal.SetConfigOption("GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE", "ALL")
+
 
 def default_cache_dir() -> Path:
     """默认显示缓存目录：用户目录下的 .toolbox/pyramids。"""
@@ -182,11 +187,18 @@ def ensure_gamma_vrt(file_path: str, width: int, height: int, gamma_format: str)
     )
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
     path = get_cache_dir() / f"gamma_{digest}.vrt"
-    source_name = str(source_path)
+    # GDAL 3.12+ 对 VRTRawRasterBand 的绝对路径访问有更严格限制：
+    # 默认不允许 relativeToVRT="0" + 绝对路径。这里统一改为相对路径引用。
+    try:
+        source_name = os.path.relpath(str(source_path), str(path.parent))
+    except ValueError:
+        # Windows 跨盘符等极端情况回退到绝对路径；大多数平台不会走到这里。
+        source_name = str(source_path)
+    source_name = source_name.replace("\\", "/")
     byte_order = "MSB"
     xml = f"""<VRTDataset rasterXSize="{int(width)}" rasterYSize="{int(height)}">
   <VRTRasterBand dataType="{gdal_type}" band="1" subClass="VRTRawRasterBand">
-    <SourceFilename relativeToVRT="0">{_xml_escape(source_name)}</SourceFilename>
+    <SourceFilename relativeToVRT="1">{_xml_escape(source_name)}</SourceFilename>
     <ImageOffset>0</ImageOffset>
     <PixelOffset>{bytes_per_pixel}</PixelOffset>
     <LineOffset>{int(width) * bytes_per_pixel}</LineOffset>

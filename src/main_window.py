@@ -31,6 +31,7 @@ from src.utils.display_pyramid import (
     get_cache_dir,
     set_cache_dir,
 )
+from src.utils.window_geometry import fit_window_to_screen
 from src.version import __version__, APP_DISPLAY_NAME
 from src.segmentation.project_manager import get_settings as get_segmentation_settings
 
@@ -433,6 +434,7 @@ class MainWindow(QMainWindow):
         if hasattr(dialog, "on_theme_mode_changed"):
             dialog.on_theme_mode_changed(self.theme_mode)
         dialog.show()
+        QTimer.singleShot(0, lambda d=dialog: fit_window_to_screen(d, margin=24, center=True))
         dialog.raise_()
         dialog.activateWindow()
 
