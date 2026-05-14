@@ -98,12 +98,9 @@ jobs:
           export TOOLBOX_LD_LIBRARY_PATH="dist/Toolbox_linux/_internal:dist/Toolbox_linux:${LD_LIBRARY_PATH:-}"
           LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd dist/Toolbox_linux/Toolbox_linux | tee "${LOG_DIR}/ldd-main.txt"
           : > "${LOG_DIR}/ldd-gdal.txt"
-          shopt -s nullglob
-          gdal_targets=(dist/Toolbox_linux/_internal/*gdal*)
-          for f in "${gdal_targets[@]}"; do
+          while IFS= read -r -d '' f; do
             LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd "$f" | tee -a "${LOG_DIR}/ldd-gdal.txt"
-          done
-          shopt -u nullglob
+          done < <(find dist/Toolbox_linux/_internal -maxdepth 1 -type f \( -name "*_gdal*.so*" -o -name "libgdal*.so*" \) -print0)
           if grep -q "not found" "${LOG_DIR}/ldd-main.txt" "${LOG_DIR}/ldd-gdal.txt"; then
             echo "Detected missing shared libraries in Linux x86_64 build output"
             exit 1
@@ -154,12 +151,9 @@ jobs:
           export TOOLBOX_LD_LIBRARY_PATH="dist/Toolbox_linux/_internal:dist/Toolbox_linux:${LD_LIBRARY_PATH:-}"
           LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd dist/Toolbox_linux/Toolbox_linux | tee "${LOG_DIR}/ldd-main.txt"
           : > "${LOG_DIR}/ldd-gdal.txt"
-          shopt -s nullglob
-          gdal_targets=(dist/Toolbox_linux/_internal/*gdal*)
-          for f in "${gdal_targets[@]}"; do
+          while IFS= read -r -d '' f; do
             LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd "$f" | tee -a "${LOG_DIR}/ldd-gdal.txt"
-          done
-          shopt -u nullglob
+          done < <(find dist/Toolbox_linux/_internal -maxdepth 1 -type f \( -name "*_gdal*.so*" -o -name "libgdal*.so*" \) -print0)
           if grep -q "not found" "${LOG_DIR}/ldd-main.txt" "${LOG_DIR}/ldd-gdal.txt"; then
             echo "Detected missing shared libraries in Linux arm64 build output"
             exit 1
