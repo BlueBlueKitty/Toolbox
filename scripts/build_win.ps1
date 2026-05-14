@@ -145,14 +145,17 @@ function Check-Dependencies {
         Write-Error-Custom "未找到 Python，请先安装 Python 3.10+"
     }
     
-    # 检查 PyInstaller
-    try {
-        & $script:PythonExe -c "import PyInstaller" 2>&1 | Out-Null
+    # 检查 PyInstaller（外部命令失败不会进入 catch，需要检查退出码）
+    & $script:PythonExe -c "import PyInstaller" 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
         Write-Info "PyInstaller 已安装"
     }
-    catch {
+    else {
         Write-Warn "未找到 PyInstaller，正在安装..."
         & $script:PythonExe -m pip install pyinstaller
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error-Custom "安装 PyInstaller 失败，请检查网络或镜像源。"
+        }
     }
     
     Write-Success "依赖检查完成"
@@ -214,8 +217,13 @@ function Build-WithPyInstaller {
     }
 
     try {
-        & $script:PythonExe -m PyInstaller --clean --noconfirm Toolbox.spec 2>&1 | Tee-Object -FilePath $pyinstallerLog
+        & $script:PythonExe -m pyinstaller --clean --noconfirm Toolbox.spec 2>&1 | Tee-Object -FilePath $pyinstallerLog
         $pyinstallerExitCode = $LASTEXITCODE
+        if ($pyinstallerExitCode -ne 0) {
+            Write-Warn "python -m pyinstaller 调用失败，回退尝试 python -m PyInstaller"
+            & $script:PythonExe -m PyInstaller --clean --noconfirm Toolbox.spec 2>&1 | Tee-Object -FilePath $pyinstallerLog
+            $pyinstallerExitCode = $LASTEXITCODE
+        }
     }
     finally {
         if ($null -ne $previousNativePref) {
