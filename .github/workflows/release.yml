@@ -93,12 +93,13 @@ jobs:
           set -euo pipefail
           test -f dist/Toolbox_linux/Toolbox_linux
           test -d dist/Toolbox_linux/_internal
-          ldd dist/Toolbox_linux/Toolbox_linux | tee build/ldd-linux-x86_64-main.txt
+          export TOOLBOX_LD_LIBRARY_PATH="dist/Toolbox_linux/_internal:dist/Toolbox_linux:${LD_LIBRARY_PATH:-}"
+          LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd dist/Toolbox_linux/Toolbox_linux | tee build/ldd-linux-x86_64-main.txt
           : > build/ldd-linux-x86_64-gdal.txt
           shopt -s nullglob
           gdal_targets=(dist/Toolbox_linux/_internal/*gdal*)
           for f in "${gdal_targets[@]}"; do
-            ldd "$f" | tee -a build/ldd-linux-x86_64-gdal.txt
+            LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd "$f" | tee -a build/ldd-linux-x86_64-gdal.txt
           done
           shopt -u nullglob
           if grep -q "not found" build/ldd-linux-x86_64-main.txt build/ldd-linux-x86_64-gdal.txt; then
@@ -146,12 +147,13 @@ jobs:
           set -euo pipefail
           test -f dist/Toolbox_linux/Toolbox_linux
           test -d dist/Toolbox_linux/_internal
-          ldd dist/Toolbox_linux/Toolbox_linux | tee build/ldd-linux-arm64-main.txt
+          export TOOLBOX_LD_LIBRARY_PATH="dist/Toolbox_linux/_internal:dist/Toolbox_linux:${LD_LIBRARY_PATH:-}"
+          LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd dist/Toolbox_linux/Toolbox_linux | tee build/ldd-linux-arm64-main.txt
           : > build/ldd-linux-arm64-gdal.txt
           shopt -s nullglob
           gdal_targets=(dist/Toolbox_linux/_internal/*gdal*)
           for f in "${gdal_targets[@]}"; do
-            ldd "$f" | tee -a build/ldd-linux-arm64-gdal.txt
+            LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd "$f" | tee -a build/ldd-linux-arm64-gdal.txt
           done
           shopt -u nullglob
           if grep -q "not found" build/ldd-linux-arm64-main.txt build/ldd-linux-arm64-gdal.txt; then

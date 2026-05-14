@@ -226,6 +226,7 @@ scan_appdir_missing_dependencies() {
 
     local report_file="${BUILD_DIR}/appdir-ldd-report.txt"
     local missing_file="${BUILD_DIR}/appdir-ldd-missing.txt"
+    local runtime_lib_path="${APPDIR}/_internal:${APPDIR}:${LD_LIBRARY_PATH:-}"
     : > "${report_file}"
     : > "${missing_file}"
 
@@ -246,7 +247,7 @@ scan_appdir_missing_dependencies() {
     local target
     for target in "${targets[@]}"; do
         echo ">>> ${target}" >> "${report_file}"
-        if ldd "${target}" >> "${report_file}" 2>&1; then
+        if LD_LIBRARY_PATH="${runtime_lib_path}" ldd "${target}" >> "${report_file}" 2>&1; then
             :
         else
             warn "ldd 检查失败: ${target}"
