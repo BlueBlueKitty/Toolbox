@@ -210,7 +210,7 @@ jobs:
           auto-update-conda: true
           environment-file: environment-build.yml
           miniforge-variant: Miniforge3
-          use-mamba: true
+          use-mamba: false # 由于在github action中，macos的x86_64架构使用mamba时经常构建失败，暂时回退到conda
 
       - name: Verify Conda environment
         shell: bash -el {0}
