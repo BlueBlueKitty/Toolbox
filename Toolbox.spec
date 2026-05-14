@@ -75,22 +75,9 @@ def _append_conda_libs(lib_dir, patterns):
 if _conda_prefix:
     if IS_WINDOWS:
         _conda_lib_dir = os.path.join(_conda_prefix, 'Library', 'bin')
-        _append_conda_libs(_conda_lib_dir, [
-            'gdal*.dll',
-            'proj*.dll',
-            'geos*.dll',
-            'sqlite3*.dll',
-            'libcurl*.dll',
-            'tiff*.dll',
-            'jpeg*.dll',
-            'png*.dll',
-            'zstd*.dll',
-            'deflate*.dll',
-            'webp*.dll',
-            'lzma*.dll',
-            'expat*.dll',
-            'iconv*.dll',
-        ])
+        # Conda-forge 的 GDAL 依赖链很长，且版本会变化。
+        # Windows 下直接收集 Library/bin 的全部 DLL，避免 CI 与用户环境不一致导致漏依赖。
+        _append_conda_libs(_conda_lib_dir, ['*.dll'])
     elif not IS_MACOS:
         _conda_lib_dir = os.path.join(_conda_prefix, 'lib')
         _append_conda_libs(_conda_lib_dir, [

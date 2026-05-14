@@ -54,6 +54,7 @@ $BUILD_DIR = Join-Path $PROJECT_ROOT "build"
 $DIST_DIR = Join-Path $PROJECT_ROOT "dist"
 $OUTPUT_DIR = Join-Path $DIST_DIR "Toolbox_win"
 $INSTALLER_FILE = "${APP_NAME}_${APP_VERSION}_windows_${WINDOWS_ARCH}.exe"
+$script:PythonExe = $null
 
 # 颜色输出函数
 function Write-Info {
@@ -79,6 +80,32 @@ function Write-Error-Custom {
     Write-Host "[ERROR] " -ForegroundColor Red -NoNewline
     Write-Host $Message
     exit 1
+}
+
+# 解析 Python 环境（策略：已激活 Conda > 项目 .venv > 报错）
+function Resolve-PythonEnvironment {
+    Write-Info "解析 Python 环境（Conda 优先，.venv 回退）..."
+
+    if ($env:CONDA_PREFIX) {
+        try {
+            $condaPython = (Get-Command python -ErrorAction Stop).Source
+            $script:PythonExe = $condaPython
+            Write-Success "使用已激活 Conda 环境: $($env:CONDA_DEFAULT_ENV) ($script:PythonExe)"
+            return
+        }
+        catch {
+            Write-Warn "检测到 CONDA_PREFIX，但无法解析当前 python，尝试回退 .venv"
+        }
+    }
+
+    $venvPython = Join-Path $PROJECT_ROOT ".venv\Scripts\python.exe"
+    if (Test-Path $venvPython) {
+        $script:PythonExe = (Resolve-Path $venvPython).Path
+        Write-Success "使用项目 .venv 环境: $script:PythonExe"
+        return
+    }
+
+    Write-Error-Custom "未检测到已激活 Conda 环境，也未找到 .venv\\Scripts\\python.exe。请先 conda activate 或创建 .venv。"
 }
 
 # 显示帮助
@@ -107,10 +134,9 @@ function Check-Dependencies {
     
     # 检查 Python
     try {
-        $pythonVersion = python --version 2>&1
+        $pythonVersion = & $script:PythonExe --version 2>&1
         Write-Info "Python 版本: $pythonVersion"
-        $pythonPath = (Get-Command python -ErrorAction Stop).Source
-        Write-Info "Python 路径: $pythonPath"
+        Write-Info "Python 路径: $script:PythonExe"
         if ($env:CONDA_PREFIX) {
             Write-Info "当前 Conda 环境: $($env:CONDA_DEFAULT_ENV)"
         }
@@ -121,12 +147,12 @@ function Check-Dependencies {
     
     # 检查 PyInstaller
     try {
-        python -c "import PyInstaller" 2>&1 | Out-Null
+        & $script:PythonExe -c "import PyInstaller" 2>&1 | Out-Null
         Write-Info "PyInstaller 已安装"
     }
     catch {
         Write-Warn "未找到 PyInstaller，正在安装..."
-        pip install pyinstaller
+        & $script:PythonExe -m pip install pyinstaller
     }
     
     Write-Success "依赖检查完成"
@@ -188,7 +214,7 @@ function Build-WithPyInstaller {
     }
 
     try {
-        & python -m PyInstaller --clean --noconfirm Toolbox.spec 2>&1 | Tee-Object -FilePath $pyinstallerLog
+        & $script:PythonExe -m PyInstaller --clean --noconfirm Toolbox.spec 2>&1 | Tee-Object -FilePath $pyinstallerLog
         $pyinstallerExitCode = $LASTEXITCODE
     }
     finally {
@@ -327,7 +353,7 @@ Section "安装 ${APP_NAME}" SecMain
     SetOutPath `$INSTDIR
     
     ; 复制所有文件
-    File /r "..\dist\Toolbox_win\*.*"
+    File /r "..\dist\Toolbox_win\*"
     
     ; 写入卸载信息
     WriteRegStr HKLM "Software\${APP_NAME}" "Install_Dir" "`$INSTDIR"
@@ -478,6 +504,8 @@ function Main {
     Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
     
+    Resolve-PythonEnvironment
+
     # 检查依赖
     Check-Dependencies
     

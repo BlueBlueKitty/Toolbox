@@ -48,9 +48,37 @@ jobs:
           if (!(Test-Path $exe)) {
             throw "未找到打包产物: $exe"
           }
-          & $exe --version
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows smoke test failed with exit code $LASTEXITCODE"
+          # 隔离 Conda PATH，避免系统/conda DLL 掩盖打包缺失依赖
+          $cleanPathParts = @()
+          foreach ($p in ($env:PATH -split ';')) {
+            if ([string]::IsNullOrWhiteSpace($p)) { continue }
+            if ($p -like "*\miniforge*") { continue }
+            if ($p -like "*\conda*") { continue }
+            if ($p -like "*\mamba*") { continue }
+            if ($p -like "*\Library\bin*") { continue }
+            $cleanPathParts += $p
+          }
+          $cleanPath = ($cleanPathParts -join ';')
+
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = (Resolve-Path $exe).Path
+          $psi.Arguments = "--version"
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $psi.Environment["PATH"] = $cleanPath
+
+          $proc = New-Object System.Diagnostics.Process
+          $proc.StartInfo = $psi
+          [void]$proc.Start()
+          $stdout = $proc.StandardOutput.ReadToEnd()
+          $stderr = $proc.StandardError.ReadToEnd()
+          $proc.WaitForExit()
+
+          if ($stdout) { Write-Host $stdout.TrimEnd() }
+          if ($stderr) { Write-Host $stderr.TrimEnd() }
+          if ($proc.ExitCode -ne 0) {
+            throw "Windows smoke test failed with exit code $($proc.ExitCode)"
           }
 
       - name: Upload Windows artifacts
