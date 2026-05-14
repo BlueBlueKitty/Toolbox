@@ -262,6 +262,54 @@ function Build-WithPyInstaller {
     }
 }
 
+function Invoke-SmokeTest {
+    Write-Info "执行 Windows 产物自检（隔离 Conda PATH）..."
+    $exePath = if ($OneFile) {
+        Join-Path $DIST_DIR "Toolbox_win.exe"
+    }
+    else {
+        Join-Path $DIST_DIR "Toolbox_win\\Toolbox_win.exe"
+    }
+
+    if (-not (Test-Path $exePath)) {
+        Write-Error-Custom "自检失败：未找到可执行文件 $exePath"
+    }
+
+    $cleanPathParts = @()
+    foreach ($p in ($env:PATH -split ';')) {
+        if ([string]::IsNullOrWhiteSpace($p)) { continue }
+        if ($p -like "*\\Anaconda3*") { continue }
+        if ($p -like "*\\conda*") { continue }
+        if ($p -like "*\\mamba*") { continue }
+        if ($p -like "*\\Library\\bin*") { continue }
+        $cleanPathParts += $p
+    }
+    $cleanPath = ($cleanPathParts -join ';')
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = (Resolve-Path $exePath).Path
+    $psi.Arguments = "--version"
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.Environment["PATH"] = $cleanPath
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    [void]$proc.Start()
+    $stdout = $proc.StandardOutput.ReadToEnd()
+    $stderr = $proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+
+    if ($stdout) { Write-Host $stdout.TrimEnd() }
+    if ($stderr) { Write-Host $stderr.TrimEnd() }
+    if ($proc.ExitCode -ne 0) {
+        Write-Error-Custom "自检失败：可执行文件退出码 $($proc.ExitCode)"
+    }
+
+    Write-Success "产物自检通过"
+}
+
 # 创建 ZIP 压缩包
 function Create-ZipPackage {
     Write-Info "创建 ZIP 压缩包..."
@@ -524,6 +572,9 @@ function Main {
     
     # PyInstaller 打包
     Build-WithPyInstaller
+
+    # 产物自检（尽早发现 DLL 依赖缺失）
+    Invoke-SmokeTest
     
     
     # 默认创建 NSIS 安装程序（目录模式）

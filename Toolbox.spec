@@ -159,6 +159,31 @@ def _append_conda_gdal_runtime_windows(conda_prefix, osgeo_dir):
         [osgeo_dir, conda_bin],
     )
 
+    # 兜底：若 pefile 不可用或解析失败，至少收集 GDAL 常见依赖，避免 _gdal.pyd 裸奔。
+    if not dependency_closure:
+        fallback_patterns = [
+            'gdal*.dll',
+            'proj*.dll',
+            'geos*.dll',
+            'libcurl*.dll',
+            'libssl*.dll',
+            'libcrypto*.dll',
+            'sqlite3*.dll',
+            'libxml2*.dll',
+            'xerces*.dll',
+            'tiff*.dll',
+            'jpeg*.dll',
+            'png*.dll',
+            'zlib*.dll',
+            'zstd*.dll',
+            'liblzma*.dll',
+            'libexpat*.dll',
+            'spatialite*.dll',
+            'iconv*.dll',
+        ]
+        for pattern in fallback_patterns:
+            dependency_closure.extend(glob.glob(os.path.join(conda_bin, pattern)))
+
     for dll_path in dependency_closure:
         _append_unique_binary(dll_path, 'osgeo')
 
