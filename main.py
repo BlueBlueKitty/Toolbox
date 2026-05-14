@@ -6,6 +6,7 @@ Copyright (c) 2025 by Yibo Yuan 2633669459@qq.com, All Rights Reserved.
 '''
 import os
 import sys
+import argparse
 
 # =====================================================================
 # 【关键】PROJ/GDAL 环境变量设置 - 必须在导入 GDAL 之前完成
@@ -102,11 +103,23 @@ from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebChannel import QWebChannel
 WEBENGINE_AVAILABLE = True
 import sqlite3
+from src.version import __version__
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--version", action="store_true", dest="show_version")
+    args, _ = parser.parse_known_args()
+    return args
 
 def main():
     """
     应用程序的入口函数
     """
+    args = parse_args()
+    if args.show_version:
+        print(__version__)
+        return
     
     # 在Linux系统上配置Qt和Chromium环境变量
     # 这些配置与 build_linux.sh 中的 AppRun 脚本保持一致，确保开发环境和打包环境行为一致

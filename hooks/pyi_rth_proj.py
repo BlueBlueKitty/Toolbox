@@ -8,6 +8,30 @@ import sys
 
 if hasattr(sys, "_MEIPASS"):
     base_path = sys._MEIPASS
+    internal_path = os.path.join(base_path, "_internal")
+
+    # Ensure GDAL-related dynamic libraries can be discovered at runtime.
+    if sys.platform.startswith("win") and hasattr(os, "add_dll_directory"):
+        dll_dirs = [
+            base_path,
+            internal_path,
+            os.path.join(base_path, "Library", "bin"),
+            os.path.join(internal_path, "Library", "bin"),
+        ]
+        for dll_dir in dll_dirs:
+            if os.path.isdir(dll_dir):
+                try:
+                    os.add_dll_directory(dll_dir)
+                except OSError:
+                    pass
+    elif sys.platform.startswith("linux"):
+        if os.path.isdir(internal_path):
+            current_ld = os.environ.get("LD_LIBRARY_PATH", "")
+            if current_ld:
+                if internal_path not in current_ld.split(":"):
+                    os.environ["LD_LIBRARY_PATH"] = f"{internal_path}:{current_ld}"
+            else:
+                os.environ["LD_LIBRARY_PATH"] = internal_path
     
     # Set PROJ_LIB for PROJ library
     proj_candidates = [

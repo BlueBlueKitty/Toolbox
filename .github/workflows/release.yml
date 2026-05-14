@@ -41,6 +41,18 @@ jobs:
         shell: pwsh
         run: .\scripts\build_win.ps1 -Clean -CreateInstaller
 
+      - name: Smoke test Windows build output
+        shell: pwsh
+        run: |
+          $exe = "dist\Toolbox_win\Toolbox_win.exe"
+          if (!(Test-Path $exe)) {
+            throw "未找到打包产物: $exe"
+          }
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows smoke test failed with exit code $LASTEXITCODE"
+          }
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -76,6 +88,24 @@ jobs:
               ./scripts/build_linux.sh --clean --arch x86_64
             '
 
+      - name: Smoke test Linux x86_64 build output
+        run: |
+          set -euo pipefail
+          test -f dist/Toolbox_linux/Toolbox_linux
+          test -d dist/Toolbox_linux/_internal
+          ldd dist/Toolbox_linux/Toolbox_linux | tee build/ldd-linux-x86_64-main.txt
+          : > build/ldd-linux-x86_64-gdal.txt
+          shopt -s nullglob
+          gdal_targets=(dist/Toolbox_linux/_internal/*gdal*)
+          for f in "${gdal_targets[@]}"; do
+            ldd "$f" | tee -a build/ldd-linux-x86_64-gdal.txt
+          done
+          shopt -u nullglob
+          if grep -q "not found" build/ldd-linux-x86_64-main.txt build/ldd-linux-x86_64-gdal.txt; then
+            echo "Detected missing shared libraries in Linux x86_64 build output"
+            exit 1
+          fi
+
       - name: Upload Linux x86_64 artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -110,6 +140,24 @@ jobs:
               chmod +x scripts/build_linux.sh
               ./scripts/build_linux.sh --clean --arch arm64
             '
+
+      - name: Smoke test Linux arm64 build output
+        run: |
+          set -euo pipefail
+          test -f dist/Toolbox_linux/Toolbox_linux
+          test -d dist/Toolbox_linux/_internal
+          ldd dist/Toolbox_linux/Toolbox_linux | tee build/ldd-linux-arm64-main.txt
+          : > build/ldd-linux-arm64-gdal.txt
+          shopt -s nullglob
+          gdal_targets=(dist/Toolbox_linux/_internal/*gdal*)
+          for f in "${gdal_targets[@]}"; do
+            ldd "$f" | tee -a build/ldd-linux-arm64-gdal.txt
+          done
+          shopt -u nullglob
+          if grep -q "not found" build/ldd-linux-arm64-main.txt build/ldd-linux-arm64-gdal.txt; then
+            echo "Detected missing shared libraries in Linux arm64 build output"
+            exit 1
+          fi
 
       - name: Upload Linux arm64 artifacts
         uses: actions/upload-artifact@v4

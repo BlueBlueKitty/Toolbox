@@ -2,7 +2,9 @@
 
 import os
 import sys
+import glob
 from osgeo import __file__ as gdal_file
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
 
 # --- 1. 平台与环境检测 ---
 IS_WINDOWS = sys.platform.startswith('win')
@@ -26,6 +28,7 @@ ONEFILE = os.environ.get('ONEFILE', '0') == '1'
 datas = [
     ('resources', 'resources'),
 ]
+binaries = []
 
 # --- 3. GDAL/PROJ 数据路径适配 ---
 _osgeo_dir = os.path.dirname(gdal_file)
@@ -57,6 +60,57 @@ if _gdal_data:
 if _proj_data:
     datas.append((_proj_data, 'proj_data'))
 
+# --- 3.1 GDAL 动态库收集（重点：Conda 环境） ---
+# 先收集 PyInstaller 对 osgeo 能识别到的动态库
+binaries += collect_dynamic_libs('osgeo')
+
+def _append_conda_libs(lib_dir, patterns):
+    if not lib_dir or not os.path.isdir(lib_dir):
+        return
+    for pattern in patterns:
+        for file_path in glob.glob(os.path.join(lib_dir, pattern)):
+            if os.path.isfile(file_path):
+                binaries.append((file_path, '.'))
+
+if _conda_prefix:
+    if IS_WINDOWS:
+        _conda_lib_dir = os.path.join(_conda_prefix, 'Library', 'bin')
+        _append_conda_libs(_conda_lib_dir, [
+            'gdal*.dll',
+            'proj*.dll',
+            'geos*.dll',
+            'sqlite3*.dll',
+            'libcurl*.dll',
+            'tiff*.dll',
+            'jpeg*.dll',
+            'png*.dll',
+            'zstd*.dll',
+            'deflate*.dll',
+            'webp*.dll',
+            'lzma*.dll',
+            'expat*.dll',
+            'iconv*.dll',
+        ])
+    elif not IS_MACOS:
+        _conda_lib_dir = os.path.join(_conda_prefix, 'lib')
+        _append_conda_libs(_conda_lib_dir, [
+            'libgdal.so*',
+            'libproj.so*',
+            'libgeos*.so*',
+            'libsqlite3.so*',
+            'libcurl.so*',
+            'libtiff.so*',
+            'libjpeg.so*',
+            'libpng*.so*',
+            'libzstd.so*',
+            'libdeflate.so*',
+            'libwebp*.so*',
+            'liblzma.so*',
+            'libexpat.so*',
+            'libiconv.so*',
+            'libnsl.so*',
+        ])
+
 # 图标适配
 icon_path = os.path.join('resources', 'toolbox.ico') if IS_WINDOWS else None
 macos_bundle_icon = os.environ.get('MACOS_BUNDLE_ICON', '').strip() or os.path.join('resources', 'toolbox.icns')
@@ -70,7 +124,7 @@ _runtime_hooks = ['hooks/pyi_rth_proj.py']
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=[
         'PySide6.QtUiTools',
@@ -81,7 +135,7 @@ a = Analysis(
         'h5py.utils',
         'h5py.h5ac',
         'h5py._proxy',
-    ],
+    ] + collect_submodules('osgeo'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=_runtime_hooks,

@@ -221,6 +221,49 @@ scan_appdir_architecture() {
     success "AppDir 架构检查通过"
 }
 
+scan_appdir_missing_dependencies() {
+    info "检查 AppDir 关键二进制依赖是否缺失..."
+
+    local report_file="${BUILD_DIR}/appdir-ldd-report.txt"
+    local missing_file="${BUILD_DIR}/appdir-ldd-missing.txt"
+    : > "${report_file}"
+    : > "${missing_file}"
+
+    local targets=()
+    if [ -f "${APPDIR}/Toolbox_linux" ]; then
+        targets+=("${APPDIR}/Toolbox_linux")
+    fi
+
+    while IFS= read -r -d '' candidate; do
+        targets+=("${candidate}")
+    done < <(find "${APPDIR}" -type f \( -name "_gdal*.so*" -o -name "libgdal.so*" \) -print0)
+
+    if [ ${#targets[@]} -eq 0 ]; then
+        warn "未在 AppDir 中找到可检查的 GDAL 目标文件，跳过 ldd 缺失检查"
+        return
+    fi
+
+    local target
+    for target in "${targets[@]}"; do
+        echo ">>> ${target}" >> "${report_file}"
+        if ldd "${target}" >> "${report_file}" 2>&1; then
+            :
+        else
+            warn "ldd 检查失败: ${target}"
+        fi
+        echo "" >> "${report_file}"
+    done
+
+    grep "not found" "${report_file}" > "${missing_file}" || true
+    if [ -s "${missing_file}" ]; then
+        warn "检测到缺失依赖："
+        cat "${missing_file}"
+        error "AppDir 依赖检查失败（存在 not found）"
+    fi
+
+    success "AppDir 关键依赖检查通过"
+}
+
 # 下载 appimagetool
 download_appimagetool() {
     if [ ! -f "${BUILD_DIR}/${APPIMAGE_TOOL}" ]; then
@@ -316,6 +359,7 @@ create_appdir() {
     rm -f "${APPDIR}/PySide6/Qt/plugins/platformthemes/libqgtk3.so"
     
     # 移除打包的 GTK 和 gdk-pixbuf 库（它们与系统图标格式不兼容）
+    # 注意：不要删除 GDAL 依赖链（如 libnsl.so*、libproj.so*、libgdal.so*）
     rm -f "${APPDIR}/_internal/libgtk-3.so"*
     rm -f "${APPDIR}/_internal/libgdk_pixbuf-2.0.so"*
     rm -f "${APPDIR}/_internal/libgdk-3.so"*
@@ -470,6 +514,9 @@ main() {
     
     # 创建 AppDir
     create_appdir
+
+    # 检查 AppDir 关键依赖，提前失败避免生成坏包
+    scan_appdir_missing_dependencies
     
     # 生成 AppImage
     create_appimage
