@@ -93,16 +93,18 @@ jobs:
           set -euo pipefail
           test -f dist/Toolbox_linux/Toolbox_linux
           test -d dist/Toolbox_linux/_internal
+          LOG_DIR="${RUNNER_TEMP}/toolbox-smoke-linux-x86_64"
+          mkdir -p "${LOG_DIR}"
           export TOOLBOX_LD_LIBRARY_PATH="dist/Toolbox_linux/_internal:dist/Toolbox_linux:${LD_LIBRARY_PATH:-}"
-          LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd dist/Toolbox_linux/Toolbox_linux | tee build/ldd-linux-x86_64-main.txt
-          : > build/ldd-linux-x86_64-gdal.txt
+          LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd dist/Toolbox_linux/Toolbox_linux | tee "${LOG_DIR}/ldd-main.txt"
+          : > "${LOG_DIR}/ldd-gdal.txt"
           shopt -s nullglob
           gdal_targets=(dist/Toolbox_linux/_internal/*gdal*)
           for f in "${gdal_targets[@]}"; do
-            LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd "$f" | tee -a build/ldd-linux-x86_64-gdal.txt
+            LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd "$f" | tee -a "${LOG_DIR}/ldd-gdal.txt"
           done
           shopt -u nullglob
-          if grep -q "not found" build/ldd-linux-x86_64-main.txt build/ldd-linux-x86_64-gdal.txt; then
+          if grep -q "not found" "${LOG_DIR}/ldd-main.txt" "${LOG_DIR}/ldd-gdal.txt"; then
             echo "Detected missing shared libraries in Linux x86_64 build output"
             exit 1
           fi
@@ -147,16 +149,18 @@ jobs:
           set -euo pipefail
           test -f dist/Toolbox_linux/Toolbox_linux
           test -d dist/Toolbox_linux/_internal
+          LOG_DIR="${RUNNER_TEMP}/toolbox-smoke-linux-arm64"
+          mkdir -p "${LOG_DIR}"
           export TOOLBOX_LD_LIBRARY_PATH="dist/Toolbox_linux/_internal:dist/Toolbox_linux:${LD_LIBRARY_PATH:-}"
-          LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd dist/Toolbox_linux/Toolbox_linux | tee build/ldd-linux-arm64-main.txt
-          : > build/ldd-linux-arm64-gdal.txt
+          LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd dist/Toolbox_linux/Toolbox_linux | tee "${LOG_DIR}/ldd-main.txt"
+          : > "${LOG_DIR}/ldd-gdal.txt"
           shopt -s nullglob
           gdal_targets=(dist/Toolbox_linux/_internal/*gdal*)
           for f in "${gdal_targets[@]}"; do
-            LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd "$f" | tee -a build/ldd-linux-arm64-gdal.txt
+            LD_LIBRARY_PATH="$TOOLBOX_LD_LIBRARY_PATH" ldd "$f" | tee -a "${LOG_DIR}/ldd-gdal.txt"
           done
           shopt -u nullglob
-          if grep -q "not found" build/ldd-linux-arm64-main.txt build/ldd-linux-arm64-gdal.txt; then
+          if grep -q "not found" "${LOG_DIR}/ldd-main.txt" "${LOG_DIR}/ldd-gdal.txt"; then
             echo "Detected missing shared libraries in Linux arm64 build output"
             exit 1
           fi
