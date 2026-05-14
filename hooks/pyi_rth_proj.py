@@ -9,12 +9,14 @@ import sys
 if hasattr(sys, "_MEIPASS"):
     base_path = sys._MEIPASS
     internal_path = os.path.join(base_path, "_internal")
+    osgeo_path = os.path.join(base_path, "osgeo")
 
     # Ensure GDAL-related dynamic libraries can be discovered at runtime.
     if sys.platform.startswith("win") and hasattr(os, "add_dll_directory"):
         dll_dirs = [
             base_path,
             internal_path,
+            osgeo_path,
             os.path.join(base_path, "Library", "bin"),
             os.path.join(internal_path, "Library", "bin"),
         ]
