@@ -406,6 +406,13 @@ FunctionEnd
 ; 安装部分
 Section "安装 ${APP_NAME}" SecMain
     Call EnsureToolboxNotRunning
+    
+    ; 清理旧版 onedir 运行时，避免覆盖安装后遗留旧 DLL 污染新环境。
+    ; 这类残留最容易出现在 _internal\osgeo 下，并会导致 _gdal.pyd 加载到错误版本的 gdal.dll/proj.dll。
+    IfFileExists "`$INSTDIR\_internal\*.*" 0 +2
+    RMDir /r "`$INSTDIR\_internal"
+    Delete "`$INSTDIR\Toolbox_win.exe"
+
     SetOutPath `$INSTDIR
     
     ; 复制所有文件
@@ -571,11 +578,10 @@ function Main {
     }
     
     # PyInstaller 打包
-    Build-WithPyInstaller
+    # Build-WithPyInstaller
 
     # 产物自检（尽早发现 DLL 依赖缺失）
     Invoke-SmokeTest
-    
     
     # 默认创建 NSIS 安装程序（目录模式）
     if (-not $OneFile) {
