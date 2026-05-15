@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                                 QApplication, QSizePolicy, QToolButton)
 from PySide6.QtCore import Qt, QSettings, QTimer, QSize
 from PySide6.QtGui import QFontDatabase, QFont, QPainter, QPixmap, QIcon, QColor, QTransform
+from PySide6.QtCore import QRectF
 
 # 导入共享的GAMMA对话框
 from src.dialogs.gamma_dialogs import GammaTimeSeriesDialog
@@ -228,6 +229,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._loading_new_series = False
         self._material_icon_family = self._load_material_icon_font()
         self._theme_mode = "dark"
+        self._last_jump_row_1b = 1
+        self._last_jump_col_1b = 1
         
         # 创建UI
         self._create_ui()
@@ -280,6 +283,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.db_toggle_check = QCheckBox("转dB")
         self.db_toggle_check.toggled.connect(self._on_db_toggled)
         control_layout1.addWidget(self.db_toggle_check)
+        self.jump_pixel_btn = QPushButton("跳转像素...")
+        self.jump_pixel_btn.setEnabled(False)
+        self.jump_pixel_btn.clicked.connect(self.jump_to_pixel)
+        control_layout1.addWidget(self.jump_pixel_btn)
         self.toggle_window_layout_btn = QToolButton()
         self.toggle_window_layout_btn.setToolTip("单窗口/双窗口切换")
         self.toggle_window_layout_btn.setAutoRaise(True)
@@ -823,6 +830,8 @@ class PixelTimeSeriesViewerDialog(QDialog):
 
     def _refresh_navigation_controls(self):
         has_images = self.image_count > 0
+        if hasattr(self, "jump_pixel_btn") and self.jump_pixel_btn is not None:
+            self.jump_pixel_btn.setEnabled(has_images)
         for viewer_id in [1, 2]:
             slider = getattr(self, f'image_slider_{viewer_id}', None)
             prev_btn = getattr(self, f'prev_btn_{viewer_id}', None)
@@ -1218,8 +1227,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
                 self.render_sidebar.set_db_checked(bool(enabled))
             return
         self._sync_db_toggle_widgets(enabled)
+        if hasattr(self, "db_toggle_check") and self.db_toggle_check is not None:
+            self.db_toggle_check.repaint()
+        QApplication.processEvents()
         if enabled:
-            self.convert_to_db(show_message=False, confirm=False)
+            QTimer.singleShot(0, lambda: self.convert_to_db(show_message=False, confirm=False))
             return
         self._converted_to_db = False
         self._clear_cached_images()
@@ -1844,6 +1856,124 @@ class PixelTimeSeriesViewerDialog(QDialog):
             slider.setValue(target_index)
             slider.blockSignals(False)
             self.show_image(viewer_id, reset_view=False)
+
+    def _get_current_image_shape_for_viewer(self, viewer_id: int) -> Optional[tuple[int, int]]:
+        """获取当前窗口图像尺寸，返回(height, width)。"""
+        if not self._viewer_has_image.get(viewer_id, False):
+            return None
+        current_index = getattr(self, f'current_image_index_{viewer_id}', -1)
+        if current_index < 0:
+            return None
+        metadata = self._get_image_metadata(current_index) or {}
+        width = int(metadata.get("width", 0) or 0)
+        height = int(metadata.get("height", 0) or 0)
+        if width > 0 and height > 0:
+            return (height, width)
+        size = self.image_shape
+        if size is not None and len(size) >= 2:
+            return (int(size[0]), int(size[1]))
+        viewer = getattr(self, f'image_viewer_{viewer_id}', None)
+        if viewer is None:
+            return None
+        image_size = viewer.get_image_size()
+        if image_size is None:
+            return None
+        return (int(image_size[0]), int(image_size[1]))
+
+    def jump_to_pixel(self):
+        """输入行列号后定位到指定像素，展示标记并刷新时序曲线。"""
+        if self.image_count <= 0:
+            QMessageBox.information(self, "提示", "请先加载时序影像。")
+            return
+        viewer_id = int(self._active_render_viewer_id)
+        if not self._viewer_has_image.get(viewer_id, False):
+            self._set_viewer_has_image(viewer_id, True, index=0)
+            self.show_image(viewer_id, reset_view=False)
+        shape = self._get_current_image_shape_for_viewer(viewer_id)
+        if shape is None:
+            QMessageBox.warning(self, "提示", "当前无法获取图像尺寸，请先显示影像。")
+            return
+        height, width = shape
+        row_1b, ok_row = QInputDialog.getInt(
+            self,
+            "跳转像素",
+            f"请输入行号（1-{height}）:",
+            max(1, min(int(self._last_jump_row_1b), int(height))),
+            1,
+            height,
+            1,
+        )
+        if not ok_row:
+            return
+        col_1b, ok_col = QInputDialog.getInt(
+            self,
+            "跳转像素",
+            f"请输入列号（1-{width}）:",
+            max(1, min(int(self._last_jump_col_1b), int(width))),
+            1,
+            width,
+            1,
+        )
+        if not ok_col:
+            return
+        self._last_jump_row_1b = int(row_1b)
+        self._last_jump_col_1b = int(col_1b)
+        y = int(row_1b - 1)
+        x = int(col_1b - 1)
+        self._focus_pixel(viewer_id, x, y)
+
+    def _focus_pixel(self, viewer_id: int, x: int, y: int) -> None:
+        """聚焦像素并同步更新标记与时序曲线。"""
+        shape = self._get_current_image_shape_for_viewer(viewer_id)
+        if shape is None:
+            QMessageBox.warning(self, "提示", "当前无法定位像素。")
+            return
+        height, width = shape
+        if not (0 <= x < width and 0 <= y < height):
+            QMessageBox.warning(self, "提示", f"像素越界：行范围 1-{height}，列范围 1-{width}。")
+            return
+
+        viewer = getattr(self, f'image_viewer_{viewer_id}', None)
+        if viewer is None:
+            return
+
+        self._set_active_render_viewer(viewer_id)
+        self.selected_viewer_id = viewer_id
+        self.selected_pixel = (int(x), int(y))
+
+        current_index = getattr(self, f'current_image_index_{viewer_id}', 0)
+        lon, lat = self._get_pixel_lonlat(current_index, int(x), int(y))
+        if lon is not None and lat is not None:
+            self.selected_geo = (lon, lat)
+            self.pixel_info_label.setText(
+                f"选中像素: ({x + 1}, {y + 1}) | 地理坐标: ({lon:.6f}, {lat:.6f})"
+            )
+        else:
+            self.selected_geo = None
+            self.pixel_info_label.setText(f"选中像素: ({x + 1}, {y + 1})")
+
+        center = viewer.image_to_view_point(float(x) + 0.5, float(y) + 0.5)
+        scene_rect = QRectF(viewer._current_scene_rect())
+        if not scene_rect.isNull():
+            pixel_size_x = abs(scene_rect.width()) / max(float(width), 1.0)
+            pixel_size_y = abs(scene_rect.height()) / max(float(height), 1.0)
+            span_px_w = max(32.0, min(float(width), float(width) * 0.1))
+            span_px_h = max(32.0, min(float(height), float(height) * 0.1))
+            half_w = max(pixel_size_x * span_px_w / 2.0, pixel_size_x * 4.0)
+            half_h = max(pixel_size_y * span_px_h / 2.0, pixel_size_y * 4.0)
+            x0 = max(scene_rect.left(), float(center.x()) - half_w)
+            x1 = min(scene_rect.right(), float(center.x()) + half_w)
+            y0 = max(scene_rect.top(), float(center.y()) - half_h)
+            y1 = min(scene_rect.bottom(), float(center.y()) + half_h)
+            if x1 <= x0 or y1 <= y0:
+                x0 = float(center.x()) - half_w
+                x1 = float(center.x()) + half_w
+                y0 = float(center.y()) - half_h
+                y1 = float(center.y()) + half_h
+            viewer.view_box.setRange(xRange=(x0, x1), yRange=(y0, y1), padding=0.02)
+
+        self._sync_selected_pixel_markers()
+        self.update_time_series_plot()
 
     def on_image_selector_changed(self, viewer_id, combo_index):
         """通过日期/文件名下拉框切换影像。"""
@@ -2728,11 +2858,11 @@ class PixelTimeSeriesViewerDialog(QDialog):
         if lon is not None and lat is not None:
             self.selected_geo = (lon, lat)
             self.pixel_info_label.setText(
-                f"选中像素: ({x}, {y}) | 地理坐标: ({lon:.6f}, {lat:.6f})"
+                f"选中像素: ({x + 1}, {y + 1}) | 地理坐标: ({lon:.6f}, {lat:.6f})"
             )
         else:
             self.selected_geo = None
-            self.pixel_info_label.setText(f"选中像素: ({x}, {y})")
+            self.pixel_info_label.setText(f"选中像素: ({x + 1}, {y + 1})")
 
         self._sync_selected_pixel_markers()
 

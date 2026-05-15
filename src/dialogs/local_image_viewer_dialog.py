@@ -224,14 +224,29 @@ class LocalImageViewerDialog(QDialog):
 
     def _on_db_toggled(self, enabled: bool) -> None:
         if enabled == bool(self._converted_to_db):
+            self._sync_db_toggle_widgets(bool(enabled))
             return
+        self._sync_db_toggle_widgets(bool(enabled))
+        if hasattr(self, "db_toggle_check") and self.db_toggle_check is not None:
+            self.db_toggle_check.repaint()
+        QApplication.processEvents()
         if enabled:
-            self.convert_to_db(show_message=False)
+            # 让事件循环先完成勾选状态重绘，再执行耗时转换。
+            QTimer.singleShot(0, lambda: self.convert_to_db(show_message=False))
             return
         self._converted_to_db = False
         self._clear_hillshade_cache()
         if self.image_file:
-            self.load_image(self.image_file)
+            self._reload_current_image_from_source()
+
+    def _sync_db_toggle_widgets(self, checked: bool | None = None) -> None:
+        checked = bool(self._converted_to_db) if checked is None else bool(checked)
+        if hasattr(self, "db_toggle_check") and self.db_toggle_check is not None:
+            self.db_toggle_check.blockSignals(True)
+            self.db_toggle_check.setChecked(checked)
+            self.db_toggle_check.blockSignals(False)
+        if hasattr(self, "render_sidebar"):
+            self.render_sidebar.set_db_checked(checked)
 
     def _set_viewer_source_or_array(self, original_size=None):
         if self.image_source is not None:
@@ -246,6 +261,42 @@ class LocalImageViewerDialog(QDialog):
             self.render_sidebar_controller.refresh()
         if hasattr(self, "render_sidebar"):
             self.render_sidebar.set_db_checked(bool(self._converted_to_db))
+
+    def _reload_current_image_from_source(self) -> None:
+        """按当前数据类型无交互重载文件。"""
+        if not self.image_file:
+            return
+        if self.is_gamma:
+            self.open_gamma_file(self.image_file, show_auto_detect_message=False)
+            return
+        if self.is_h5:
+            # 保持当前 h5 数据集与帧选择，避免重复弹窗。
+            dataset_name = getattr(self, "h5_dataset_name", None)
+            if dataset_name:
+                try:
+                    frame_index = getattr(self, "h5_frame_index", None)
+                    data, original_size, downsample_factor, _mode = read_h5_dataset_pyramid_display(
+                        self.image_file, dataset_name, frame_index, self.pyramid_threshold_mb
+                    )
+                    if data is not None:
+                        self.image_data = data
+                        self.image_source = H5DatasetRasterSource(self.image_file, dataset_name, frame_index, self.pyramid_threshold_mb)
+                        self.downsample_factor = downsample_factor
+                        self.original_width = original_size[0] if original_size else data.shape[1]
+                        self.original_height = original_size[1] if original_size else data.shape[0]
+                        self._reset_render_controls_for_new_image()
+                        display_original_size = original_size if downsample_factor > 1 else None
+                        self._set_viewer_source_or_array(display_original_size)
+                        self.image_viewer.set_nodata_value(self.nodata_value)
+                        self.image_viewer.fit_in_view(delayed=True)
+                        self.show_image_histogram()
+                        self._sync_db_toggle_widgets(False)
+                        return
+                except Exception:
+                    pass
+            self.open_h5_file(self.image_file)
+            return
+        self.open_image(self.image_file)
 
     def _reset_render_controls_for_new_image(self):
         """新图像使用默认渲染参数，避免继承上一幅图的显示状态。"""
@@ -406,6 +457,10 @@ class LocalImageViewerDialog(QDialog):
         self.mode_polyline_radio.clicked.connect(self.on_mode_changed)
         self.mode_group.addButton(self.mode_polyline_radio, 2)
         control_layout1.addWidget(self.mode_polyline_radio)
+
+        self.db_toggle_check = QCheckBox("转dB")
+        self.db_toggle_check.toggled.connect(self._on_db_toggled)
+        control_layout1.addWidget(self.db_toggle_check)
         
         control_layout1.addStretch()
         self.toggle_sidebar_btn = QToolButton()
@@ -467,10 +522,12 @@ class LocalImageViewerDialog(QDialog):
         self.toolbar = NavigationToolbar(self.canvas, self)
         
         right_layout.addWidget(self.toolbar)
-        right_layout.addWidget(self.canvas)
+        right_layout.addWidget(self.canvas, 1)
         
         # 图表信息
         self.chart_info_label = QLabel("请绘制矩形或折线以查看数据")
+        self.chart_info_label.setWordWrap(True)
+        self.chart_info_label.setMinimumHeight(42)
         right_layout.addWidget(self.chart_info_label)
         
         splitter.addWidget(right_widget)
@@ -1595,15 +1652,61 @@ class LocalImageViewerDialog(QDialog):
         if handles:
             ax.legend()
         ax.grid(True, alpha=0.3)
-        
+
         self.figure.tight_layout()
         self.canvas.draw()
         self._ensure_chart_hover()
-        
-        if self.show_fit_curve:
-            self.chart_info_label.setText(f"直方图(平滑+拟合): 共{sum(len(d) for d in data_list)}个像素")
-        else:
-            self.chart_info_label.setText(f"直方图(平滑): 共{sum(len(d) for d in data_list)}个像素")
+
+        self.chart_info_label.setText(self._format_histogram_stats_text(data_list))
+
+    def _compute_histogram_region_stats(self, data_list):
+        """计算直方图区域统计值（按波段）。"""
+        stats_list = []
+        for idx, data in enumerate(data_list or []):
+            if data is None:
+                continue
+            arr = np.asarray(data)
+            valid_mask = np.isfinite(arr)
+            if self.nodata_value is not None:
+                if np.isnan(self.nodata_value):
+                    valid_mask &= ~np.isnan(arr)
+                else:
+                    valid_mask &= (arr != self.nodata_value)
+            valid = arr[valid_mask]
+            if valid.size == 0:
+                stats_list.append({"band_index": idx, "count": 0})
+                continue
+            stats_list.append(
+                {
+                    "band_index": idx,
+                    "count": int(valid.size),
+                    "min": float(np.min(valid)),
+                    "max": float(np.max(valid)),
+                    "mean": float(np.mean(valid)),
+                    "median": float(np.median(valid)),
+                    "std": float(np.std(valid)),
+                }
+            )
+        return stats_list
+
+    def _format_histogram_stats_text(self, data_list) -> str:
+        """格式化直方图统计信息，显示在图表下方标签。"""
+        stats_list = self._compute_histogram_region_stats(data_list)
+        if not stats_list:
+            return "统计信息: 无有效统计值"
+        lines = []
+        multi_band = len(stats_list) > 1
+        for item in stats_list:
+            band_title = f"波段{item['band_index'] + 1}" if multi_band else "像素"
+            if item.get("count", 0) <= 0:
+                lines.append(f"{band_title}: 无有效统计值")
+                continue
+            lines.append(
+                f"{band_title}: 最小={item['min']:.6g}, 最大={item['max']:.6g}, "
+                f"均值={item['mean']:.6g}, 中值={item['median']:.6g}, "
+                f"标准差={item['std']:.6g}, 像素数={item['count']}"
+            )
+        return "统计信息 | " + " | ".join(lines)
     
     def plot_polyline(self, values, points):
         """绘制折线图（改进版：平滑曲线+折点标记+填充）"""
@@ -2049,7 +2152,7 @@ class LocalImageViewerDialog(QDialog):
                 
                 self.image_info_label.setText(info)
 
-    def open_gamma_file(self, file_path: str | None = None):
+    def open_gamma_file(self, file_path: str | None = None, show_auto_detect_message: bool = True):
         """打开GAMMA二进制文件"""
         settings = get_settings()
         last_path = settings.value("last_gamma_path", "")
@@ -2087,10 +2190,11 @@ class LocalImageViewerDialog(QDialog):
                 par_file_used = auto_par_file
                 
                 # 显示自动检测信息
-                QMessageBox.information(self, "自动检测成功", 
-                    f"自动检测到PAR文件: {os.path.basename(auto_par_file)}\n"
-                    f"尺寸: {width} x {height}\n"
-                    f"格式: {gamma_format}")
+                if show_auto_detect_message:
+                    QMessageBox.information(self, "自动检测成功", 
+                        f"自动检测到PAR文件: {os.path.basename(auto_par_file)}\n"
+                        f"尺寸: {width} x {height}\n"
+                        f"格式: {gamma_format}")
             else:
                 # 没找到，弹出对话框让用户选择
                 format_dialog = GammaSingleFileDialog(self, last_format, file_path)
@@ -2296,7 +2400,8 @@ class LocalImageViewerDialog(QDialog):
                     pyramid_threshold_mb=self.pyramid_threshold_mb,
                 )
                 self.image_source = GdalRasterSource(str(cache_path), source_path=self.image_file, pyramid_threshold_mb=self.pyramid_threshold_mb)
-                self.image_data = self.image_source.read_window_native(0, 0, 1, 1)
+                if self.image_data is not None:
+                    self.image_data = self._convert_array_to_db(self.image_data)
                 self.downsample_factor = 1
                 self._set_viewer_source_or_array(None)
             else:
@@ -2329,3 +2434,5 @@ class LocalImageViewerDialog(QDialog):
             if show_message:
                 QMessageBox.critical(self, "错误", f"转换为dB失败: {str(e)}")
             traceback.print_exc()
+        finally:
+            self._hide_loading_indicator()
