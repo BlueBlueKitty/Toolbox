@@ -1,14 +1,14 @@
 {
-  "version": "1.8.0",
+  "version": "1.8.1",
   "name": "v1.8.0版本, 新增macos版本",
   "changelog": "软件发布x86_64和M系列芯片两种macos版本, 欢迎下载使用",
-  "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.8.0",
+  "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.8.1",
   "downloads": {
-    "windows_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.0/Toolbox_1.8.0_windows_x86_64.exe",
-    "linux_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.0/Toolbox-1.8.0_linux_x86_64.AppImage",
-    "linux_arm64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.0/Toolbox-1.8.0_linux_arm64.AppImage",
-    "mac_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.0/Toolbox_1.8.0_apple_x86_64.dmg",
-    "mac_arm64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.0/Toolbox_1.8.0_apple_arm64.dmg"
+    "windows_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.1/Toolbox_1.8.1_windows_x86_64.exe",
+    "linux_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.1/Toolbox-1.8.1_linux_x86_64.AppImage",
+    "linux_arm64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.1/Toolbox-1.8.1_linux_arm64.AppImage",
+    "mac_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.1/Toolbox_1.8.1_apple_x86_64.dmg",
+    "mac_arm64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.1/Toolbox_1.8.1_apple_arm64.dmg"
   },
-  "published_at": "2026-05-15T20:46:55+08:00"
+  "published_at": "2026-06-22T17:45:24+08:00"
 }
