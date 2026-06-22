@@ -40,10 +40,9 @@ def export_mask_file(
     driver = gdal.GetDriverByName("GTiff")
     creation_options = ["BIGTIFF=IF_SAFER"]
     if colored:
+        creation_options.append("PHOTOMETRIC=PALETTE")
         dataset = driver.Create(output_path, width, height, 1, gdal.GDT_UInt16, options=creation_options)
         band = dataset.GetRasterBand(1)
-        band.WriteArray(mask)
-        band.SetNoDataValue(0)
         color_table = gdal.ColorTable()
         color_table.SetColorEntry(0, (0, 0, 0, 0))
         for label in project.labels:
@@ -54,10 +53,13 @@ def export_mask_file(
             color_table.SetColorEntry(int(label.id), (*rgb, 255))
         band.SetRasterColorTable(color_table)
         band.SetRasterColorInterpretation(gdal.GCI_PaletteIndex)
+        band.WriteArray(mask)
+        band.SetNoDataValue(0)
     else:
         dataset = driver.Create(output_path, width, height, 1, gdal.GDT_UInt16, options=creation_options)
-        dataset.GetRasterBand(1).WriteArray(mask)
-        dataset.GetRasterBand(1).SetNoDataValue(0)
+        band = dataset.GetRasterBand(1)
+        band.WriteArray(mask)
+        band.SetNoDataValue(0)
     if project.image_asset.geotransform:
         dataset.SetGeoTransform(project.image_asset.geotransform)
     if project.image_asset.crs_wkt:

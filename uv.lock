@@ -383,12 +383,6 @@ wheels = [
 ]
 
 [[package]]
-name = "gdal"
-version = "3.4.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/12/82/ed7f65fe6ab931514807c79370096a816ad8cad6cef03a2fef90845503f6/GDAL-3.4.3.tar.gz", hash = "sha256:f4f4b0bb34073b164c5a05a1b0eb44af47349e5606eb7b75244c2167ac462f36", size = 757573, upload-time = "2022-05-04T09:08:14.634Z" }
-
-[[package]]
 name = "h5py"
 version = "3.15.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1064,7 +1058,6 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "dmgbuild" },
-    { name = "gdal" },
     { name = "h5py" },
     { name = "matplotlib" },
     { name = "numpy" },
@@ -1080,7 +1073,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "dmgbuild", specifier = ">=1.6.7" },
-    { name = "gdal", specifier = "==3.4.3" },
     { name = "h5py", specifier = ">=3.15.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=1.21.0,<2.0" },
