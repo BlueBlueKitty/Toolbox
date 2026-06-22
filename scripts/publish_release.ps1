@@ -1,5 +1,6 @@
 param(
-    [string]$Remote = "origin"
+    [string]$Remote = "origin",
+    [string]$Version
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +14,25 @@ function Get-VersionFromSource {
     return $match.Matches[0].Groups[1].Value
 }
 
+function Set-VersionInSource {
+    param(
+        [string]$Version
+    )
+
+    $versionFile = Join-Path $PSScriptRoot "..\\src\\version.py"
+    $content = Get-Content $versionFile -Raw
+    $updated = [regex]::Replace(
+        $content,
+        "__version__\s*=\s*['""][^'""]+['""]",
+        "__version__ = '$Version'",
+        1
+    )
+    if ($updated -eq $content) {
+        throw "无法更新 src/version.py 中的版本号"
+    }
+    Set-Content $versionFile -Value $updated -Encoding UTF8
+}
+
 function Update-VersionJson {
     param(
         [string]$Version,
@@ -22,9 +42,7 @@ function Update-VersionJson {
     $versionJsonPath = Join-Path $PSScriptRoot "..\\version.json"
     $json = Get-Content $versionJsonPath -Raw | ConvertFrom-Json
 
-    if ($json.version -ne $Version) {
-        throw "version.json 中的 version ($($json.version)) 与 src/version.py ($Version) 不一致"
-    }
+    $json.version = $Version
 
     $tag = "v$Version"
     $json.release_url = "https://github.com/$Repo/releases/tag/$tag"
@@ -42,6 +60,42 @@ function Update-VersionJson {
     $json | ConvertTo-Json -Depth 10 | Set-Content $versionJsonPath -Encoding UTF8
 }
 
+function Get-NextPatchVersion {
+    param(
+        [string]$CurrentVersion
+    )
+
+    if ($CurrentVersion -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
+        throw "当前版本号 '$CurrentVersion' 不是 x.y.z 格式，无法自动递增，请手动输入发布版本。"
+    }
+    $major = [int]$Matches[1]
+    $minor = [int]$Matches[2]
+    $patch = [int]$Matches[3] + 1
+    return "$major.$minor.$patch"
+}
+
+function Resolve-ReleaseVersion {
+    param(
+        [string]$CurrentVersion,
+        [string]$SpecifiedVersion
+    )
+
+    Write-Host "当前版本: $CurrentVersion"
+    $targetVersion = $SpecifiedVersion
+    if (-not $targetVersion) {
+        $defaultVersion = Get-NextPatchVersion -CurrentVersion $CurrentVersion
+        $targetVersion = Read-Host "请输入要发布的版本号（直接回车使用默认版本 $defaultVersion）"
+    }
+    if (-not $targetVersion) {
+        $targetVersion = $defaultVersion
+    }
+    $targetVersion = $targetVersion.Trim()
+    if (-not $targetVersion) {
+        throw "版本号不能为空。"
+    }
+    return $targetVersion
+}
+
 function Assert-CleanWorktree {
     $status = git status --porcelain
     if ($status) {
@@ -57,7 +111,11 @@ function Main {
 
     Assert-CleanWorktree
 
-    $version = Get-VersionFromSource
+    $currentVersion = Get-VersionFromSource
+    $version = Resolve-ReleaseVersion -CurrentVersion $currentVersion -SpecifiedVersion $Version
+    if ($version -ne $currentVersion) {
+        Set-VersionInSource -Version $version
+    }
     $tag = "v$version"
     $existingTag = git tag --list $tag
     if ($existingTag) {
@@ -66,7 +124,7 @@ function Main {
 
     Update-VersionJson -Version $version -Repo $repo
 
-    git add version.json
+    git add src/version.py version.json
     git commit -m "release: $tag"
 
     git tag -a $tag -m "Release $tag"
