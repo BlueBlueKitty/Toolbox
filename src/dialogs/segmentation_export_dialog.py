@@ -39,8 +39,14 @@ class SegmentationExportDialog(QDialog):
     DL_VECTOR_FORMATS = {"COCO", "YOLO", "VOC"}
 
     MASK_FORMATS = {
-        "PNG Mask": ".png",
+        "PNG": ".png",
+        "BMP": ".bmp",
         "GeoTIFF": ".tif",
+    }
+
+    MASK_ENCODINGS = {
+        "单通道标签值（0=背景，1…=标签）": "indexed",
+        "标签颜色（用于可视化）": "colored",
     }
 
     @classmethod
@@ -62,7 +68,7 @@ class SegmentationExportDialog(QDialog):
     def __init__(self, default_name: str, default_dir: str, has_geo: bool, prefer_tif_mask: bool, parent=None):
         super().__init__(parent)
         self.setWindowTitle("导出设置")
-        self.resize(520, 320)
+        self.resize(520, 390)
         self._has_geo = has_geo
         self._vector_formats = self.available_vector_formats(has_geo)
 
@@ -101,16 +107,17 @@ class SegmentationExportDialog(QDialog):
 
         self.mask_format_combo = QComboBox()
         self.mask_format_combo.addItems(self.MASK_FORMATS.keys())
-        self.mask_format_combo.setCurrentText("GeoTIFF" if prefer_tif_mask else "PNG Mask")
+        self.mask_format_combo.setCurrentText("GeoTIFF" if prefer_tif_mask else "PNG")
         form.addRow("Mask 格式", self.mask_format_combo)
 
-        self.mask_colored_check = QCheckBox("GeoTIFF 写入标签着色表")
-        self.mask_colored_check.setChecked(True)
-        form.addRow("Mask 选项", self.mask_colored_check)
+        self.mask_encoding_combo = QComboBox()
+        self.mask_encoding_combo.addItems(self.MASK_ENCODINGS.keys())
+        form.addRow("Mask 编码", self.mask_encoding_combo)
 
-        self.hint_label = QLabel(
-            "PNG Mask 将按标签颜色导出为 RGB 图像；GeoTIFF Mask 保持单波段标签值。"
-        )
+        self.export_split_masks_check = QCheckBox("另按标签分别导出 Mask（文件名前缀1、2、3…）")
+        form.addRow("Mask 选项", self.export_split_masks_check)
+
+        self.hint_label = QLabel()
         self.hint_label.setWordWrap(True)
         layout.addLayout(form)
         layout.addWidget(self.hint_label)
@@ -124,6 +131,7 @@ class SegmentationExportDialog(QDialog):
         self.export_mask_check.toggled.connect(self._update_enabled_state)
         self.vector_format_combo.currentTextChanged.connect(self._update_enabled_state)
         self.mask_format_combo.currentTextChanged.connect(self._update_enabled_state)
+        self.mask_encoding_combo.currentTextChanged.connect(self._update_enabled_state)
         self._update_enabled_state()
 
     def _browse_dir(self) -> None:
@@ -137,7 +145,14 @@ class SegmentationExportDialog(QDialog):
         mask_enabled = self.export_mask_check.isChecked()
         self.vector_format_combo.setEnabled(vector_enabled)
         self.mask_format_combo.setEnabled(mask_enabled)
-        self.mask_colored_check.setEnabled(mask_enabled and self.mask_format_combo.currentText() == "GeoTIFF")
+        self.mask_encoding_combo.setEnabled(mask_enabled)
+        self.export_split_masks_check.setEnabled(mask_enabled)
+        if self.MASK_ENCODINGS[self.mask_encoding_combo.currentText()] == "indexed":
+            self.hint_label.setText("单通道标签值：背景为 0，标签按标签面板顺序连续写为 1、2、3……")
+        elif self.mask_format_combo.currentText() == "GeoTIFF":
+            self.hint_label.setText("标签颜色：GeoTIFF 写入单波段调色板，用于可视化。")
+        else:
+            self.hint_label.setText("标签颜色：导出 RGB 图像，用于可视化。")
 
     def _accept(self) -> None:
         output_dir = self.dir_edit.text().strip()
@@ -151,34 +166,29 @@ class SegmentationExportDialog(QDialog):
         if not self.export_vector_check.isChecked() and not self.export_mask_check.isChecked():
             QMessageBox.warning(self, "提示", "请至少选择一种导出内容。")
             return
-        settings = {
-            "output_dir": output_dir,
-            "base_name": base_name,
-            "export_vector": self.export_vector_check.isChecked(),
-            "export_mask": self.export_mask_check.isChecked(),
-            "vector_format": self.vector_format_combo.currentText(),
-            "vector_extension": self._vector_formats[self.vector_format_combo.currentText()],
-            "mask_format": self.mask_format_combo.currentText(),
-            "mask_extension": self.MASK_FORMATS[self.mask_format_combo.currentText()],
-            "mask_colored": self.mask_colored_check.isChecked(),
-        }
+        settings = self._current_settings()
         self.accepted_settings.emit(settings)
         self.accept()
+
+    def _current_settings(self) -> dict:
+        vector_format = self.vector_format_combo.currentText()
+        mask_format = self.mask_format_combo.currentText()
+        return {
+            "output_dir": self.dir_edit.text().strip(),
+            "base_name": self.base_name_edit.text().strip(),
+            "export_vector": self.export_vector_check.isChecked(),
+            "export_mask": self.export_mask_check.isChecked(),
+            "vector_format": vector_format,
+            "vector_extension": self._vector_formats[vector_format],
+            "mask_format": mask_format,
+            "mask_extension": self.MASK_FORMATS[mask_format],
+            "mask_encoding": self.MASK_ENCODINGS[self.mask_encoding_combo.currentText()],
+            "export_split_masks": self.export_split_masks_check.isChecked(),
+        }
 
     @classmethod
     def get_settings(cls, default_name: str, default_dir: str, has_geo: bool, prefer_tif_mask: bool, parent=None):
         dialog = cls(default_name, default_dir, has_geo, prefer_tif_mask, parent)
         if dialog.exec() != QDialog.Accepted:
             return None
-        vector_format = dialog.vector_format_combo.currentText()
-        return {
-            "output_dir": dialog.dir_edit.text().strip(),
-            "base_name": dialog.base_name_edit.text().strip(),
-            "export_vector": dialog.export_vector_check.isChecked(),
-            "export_mask": dialog.export_mask_check.isChecked(),
-            "vector_format": vector_format,
-            "vector_extension": dialog._vector_formats[vector_format],
-            "mask_format": dialog.mask_format_combo.currentText(),
-            "mask_extension": dialog.MASK_FORMATS[dialog.mask_format_combo.currentText()],
-            "mask_colored": dialog.mask_colored_check.isChecked(),
-        }
+        return dialog._current_settings()

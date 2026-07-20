@@ -170,6 +170,8 @@ class ImageSegmentationDialog(QDialog):
         self._layout_view_states: dict[int, dict | None] = {1: None, 2: None}
         self._layer_window_visibility: dict[str, dict[str, bool]] = {}
         self._base_nodata_override = None
+        # 仅记录已经成功写入项目文件的导出目录；未保存项目不复用本次导出目录。
+        self._saved_export_output_dir = ""
         self._autosave_thread: QThread | None = None
         self._autosave_worker: AutosaveWorker | None = None
         self._magic_preview_timer = QTimer(self)
@@ -1564,6 +1566,7 @@ class ImageSegmentationDialog(QDialog):
             active_label_id=self.project.active_label_id or 1,
         )
         self.current_project_path = None
+        self._saved_export_output_dir = ""
         self._set_dirty(False)
 
     def _apply_source(
@@ -1688,6 +1691,7 @@ class ImageSegmentationDialog(QDialog):
         self.project.display_state = saved_display_state
         self.project.layer_visibility = project.layer_visibility
         self.project.export_prefs = project.export_prefs
+        self._saved_export_output_dir = self._project_export_output_dir(project)
         self._restore_auxiliary_layers_from_project()
         self._restore_canvas_view_state()
         self.layer_controller.apply_visibility_map(self.project.layer_visibility)
@@ -1821,6 +1825,7 @@ class ImageSegmentationDialog(QDialog):
         try:
             self._update_progress(30, "正在写入项目文件...", maximum=100)
             self.project_manager.save_project(self.project, self.current_project_path)
+            self._saved_export_output_dir = self._project_export_output_dir(self.project)
             self._update_progress(100, "项目保存完成", maximum=100)
             self._finish_progress("项目保存完成")
         except Exception as exc:
@@ -2210,7 +2215,7 @@ class ImageSegmentationDialog(QDialog):
         if self.project.image_asset is None:
             return
         default_name = f"{Path(self.project.image_asset.path).stem}_mask"
-        default_dir = self._last_project_dir or self._last_image_dir or str(Path(self.project.image_asset.path).parent)
+        default_dir = self._saved_export_output_dir
         settings = SegmentationExportDialog.get_settings(
             default_name=default_name,
             default_dir=default_dir,
@@ -2223,7 +2228,8 @@ class ImageSegmentationDialog(QDialog):
         output_dir = Path(settings["output_dir"])
         output_dir.mkdir(parents=True, exist_ok=True)
         exported_paths = []
-        total_steps = int(settings["export_vector"]) + int(settings["export_mask"])
+        split_labels = list(self.project.labels) if settings["export_mask"] and settings.get("export_split_masks") else []
+        total_steps = int(settings["export_vector"]) + int(settings["export_mask"]) + len(split_labels)
         step_index = 0
         failed_exports = []
         self._start_progress("正在准备导出...", maximum=max(total_steps * 100, 100))
@@ -2272,7 +2278,7 @@ class ImageSegmentationDialog(QDialog):
                     export_mask_file(
                         self.project,
                         str(mask_path),
-                        colored=settings["mask_colored"] and settings["mask_extension"] == ".tif",
+                        encoding=settings["mask_encoding"],
                     )
                     exported_paths.append(str(mask_path))
                     self._update_progress(step_index * 100 + 90, f"Mask 导出完成: {mask_path.name}", maximum=max(total_steps * 100, 100))
@@ -2280,6 +2286,32 @@ class ImageSegmentationDialog(QDialog):
                     failed_exports.append(f"Mask 导出失败（{mask_path.name}）：{self._format_exception_message(exc, '导出失败。')}")
                 step_index += 1
                 self._update_progress(step_index * 100, maximum=max(total_steps * 100, 100))
+                for label_index, label in enumerate(split_labels, start=1):
+                    split_mask_path = output_dir / f"{settings['base_name']}{label_index}{settings['mask_extension']}"
+                    try:
+                        self._update_progress(
+                            step_index * 100 + 10,
+                            f"正在导出标签 Mask: {split_mask_path.name}",
+                            maximum=max(total_steps * 100, 100),
+                        )
+                        export_mask_file(
+                            self.project,
+                            str(split_mask_path),
+                            binary_label_id=label.id,
+                            encoding=settings["mask_encoding"],
+                        )
+                        exported_paths.append(str(split_mask_path))
+                        self._update_progress(
+                            step_index * 100 + 90,
+                            f"标签 Mask 导出完成: {split_mask_path.name}",
+                            maximum=max(total_steps * 100, 100),
+                        )
+                    except Exception as exc:
+                        failed_exports.append(
+                            f"标签 Mask 导出失败（{split_mask_path.name}）：{self._format_exception_message(exc, '导出失败。')}"
+                        )
+                    step_index += 1
+                    self._update_progress(step_index * 100, maximum=max(total_steps * 100, 100))
             self.project.export_prefs = dict(settings)
             if failed_exports:
                 final_message = []
@@ -2297,6 +2329,13 @@ class ImageSegmentationDialog(QDialog):
         except Exception as exc:
             self._fail_progress("导出失败")
             QMessageBox.warning(self, "导出失败", self._format_exception_message(exc, "导出失败。"))
+
+    @staticmethod
+    def _project_export_output_dir(project: SegmentationProject) -> str:
+        """读取项目中已保存的导出目录；无有效设置时保持为空。"""
+        preferences = project.export_prefs if isinstance(project.export_prefs, dict) else {}
+        output_dir = preferences.get("output_dir", "")
+        return str(output_dir).strip() if isinstance(output_dir, str) else ""
 
     def _build_export_project_from_mask(self):
         if self.project.image_asset is None:
