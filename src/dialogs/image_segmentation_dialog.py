@@ -65,7 +65,12 @@ from src.segmentation.exporters import (
 )
 from src.segmentation.geometry_service import GeometryService
 from src.rendering.sources import GdalRasterSource, StandardImageSource
-from src.rendering.raster_source_utils import open_raster_source
+from src.rendering.raster_source_utils import (
+    SEGMENTATION_RASTER_EXTENSIONS,
+    SEGMENTATION_RASTER_FILE_FILTER,
+    is_segmentation_raster_file,
+    open_raster_source,
+)
 from src.rendering.style_auto_selector import DefaultRenderStyleFactory
 from src.rendering.styles import default_display_settings, legacy_config_to_style, style_to_legacy_config
 from src.rendering.config import default_raster_render_config, render_raster_rgb
@@ -677,8 +682,12 @@ class ImageSegmentationDialog(QDialog):
         if file_path is None:
             QMessageBox.warning(self, "拖拽打开失败", "请拖入图像文件。")
             return
-        if not file_path.lower().endswith((".jpg", ".jpeg", ".png", ".tif", ".tiff")):
-            QMessageBox.warning(self, "拖拽打开失败", "图像分割工具仅支持 JPG/PNG/TIF 图像。")
+        if not is_segmentation_raster_file(file_path):
+            QMessageBox.warning(
+                self,
+                "拖拽打开失败",
+                "图像分割工具支持 TIF/TIFF、GRD、PNG、JPG/JPEG、BMP 图像。",
+            )
             return
         self.open_image(file_path)
 
@@ -1536,7 +1545,7 @@ class ImageSegmentationDialog(QDialog):
                 self,
                 "打开图像",
                 self._last_image_dir,
-                "Images (*.jpg *.jpeg *.png *.tif *.tiff)",
+                SEGMENTATION_RASTER_FILE_FILTER,
             )
         if not file_path:
             return
@@ -1834,7 +1843,9 @@ class ImageSegmentationDialog(QDialog):
             self,
             "导入辅助数据",
             self._last_aux_dir or self._last_image_dir,
-            "辅助数据 (*.tif *.tiff *.img *.jpg *.jpeg *.png *.shp *.geojson *.json *.gpkg *.kml *.kmz *.gml)",
+            "辅助数据 ("
+            + " ".join(f"*{ext}" for ext in SEGMENTATION_RASTER_EXTENSIONS)
+            + " *.shp *.geojson *.json *.gpkg *.kml *.kmz *.gml)",
         )
         if not file_path:
             return
@@ -1865,7 +1876,7 @@ class ImageSegmentationDialog(QDialog):
                 self._import_aux_vector(file_path)
                 imported_any = True
                 continue
-            if lower.endswith((".tif", ".tiff", ".img", ".jpg", ".jpeg", ".png")):
+            if is_segmentation_raster_file(file_path):
                 self._import_aux_raster(file_path)
                 imported_any = True
                 continue
