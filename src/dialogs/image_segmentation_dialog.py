@@ -3599,13 +3599,27 @@ class ImageSegmentationDialog(QDialog):
 
     def _on_merge_preview_changed(self, enabled: bool) -> None:
         self._sync_magic_panel_state_to_project(mark_dirty=True)
-        if not enabled:
-            self._merge_preview_entries = []
-            self._clear_preview_history()
-            self._preview_mask = None
-            self._preview_bbox = None
-            self.preview_selection = None
-            self._update_preview_display()
+        if enabled:
+            # 单次选区切换为合并选区时，当前预览本身就是合并结果的第一个条目。
+            # 否则下一次点击会从空条目列表重建预览，导致原有选区被覆盖。
+            if (
+                not self._merge_preview_entries
+                and self._preview_mask is not None
+                and self._preview_bbox is not None
+            ):
+                seed = self._last_magic_seed
+                if seed is None and self.preview_selection is not None:
+                    seed = self.preview_selection.seed_point
+                if seed is not None:
+                    self._upsert_merge_preview_entry(seed, self._preview_mask, self._preview_bbox)
+            return
+
+        self._merge_preview_entries = []
+        self._clear_preview_history()
+        self._preview_mask = None
+        self._preview_bbox = None
+        self.preview_selection = None
+        self._update_preview_display()
 
     def _ensure_preview_mask_layer_visible_for_magic(self) -> None:
         """预览 Mask 是临时交互叠加，不在图层面板中提供可见性开关。"""
