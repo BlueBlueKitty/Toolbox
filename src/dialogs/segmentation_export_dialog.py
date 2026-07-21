@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -42,11 +41,6 @@ class SegmentationExportDialog(QDialog):
         "PNG": ".png",
         "BMP": ".bmp",
         "GeoTIFF": ".tif",
-    }
-
-    MASK_ENCODINGS = {
-        "单通道标签值（保留用户设定值）": "indexed",
-        "标签颜色（用于可视化）": "colored",
     }
 
     @classmethod
@@ -76,7 +70,7 @@ class SegmentationExportDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("导出设置")
-        self.resize(520, 390)
+        self.resize(520, 1)
         self._has_geo = has_geo
         self._vector_formats = self.available_vector_formats(has_geo)
 
@@ -118,18 +112,10 @@ class SegmentationExportDialog(QDialog):
         self.mask_format_combo.setCurrentText("GeoTIFF" if prefer_tif_mask else "PNG")
         form.addRow("Mask 格式", self.mask_format_combo)
 
-        self.mask_encoding_combo = QComboBox()
-        self.mask_encoding_combo.addItems(self.MASK_ENCODINGS.keys())
-        self.mask_encoding_combo.setCurrentText("标签颜色（用于可视化）")
-        form.addRow("Mask 编码", self.mask_encoding_combo)
-
         self.export_split_masks_check = QCheckBox("另按标签分别导出 Mask（文件名前缀1、2、3…）")
         form.addRow("Mask 选项", self.export_split_masks_check)
 
-        self.hint_label = QLabel()
-        self.hint_label.setWordWrap(True)
         layout.addLayout(form)
-        layout.addWidget(self.hint_label)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._accept)
@@ -140,9 +126,11 @@ class SegmentationExportDialog(QDialog):
         self.export_mask_check.toggled.connect(self._update_enabled_state)
         self.vector_format_combo.currentTextChanged.connect(self._update_enabled_state)
         self.mask_format_combo.currentTextChanged.connect(self._update_enabled_state)
-        self.mask_encoding_combo.currentTextChanged.connect(self._update_enabled_state)
         self._apply_initial_settings(initial_settings or {})
         self._update_enabled_state()
+        # Let Qt derive a compact height from the visible rows.  A hard-coded
+        # height leaves a conspicuous blank area after optional rows change.
+        self.resize(520, self.sizeHint().height())
 
     def _apply_initial_settings(self, settings: dict) -> None:
         """仅恢复有效的项目导出设置，旧项目则保留当前默认值。"""
@@ -157,11 +145,6 @@ class SegmentationExportDialog(QDialog):
         self.export_split_masks_check.setChecked(bool(settings.get("export_split_masks", self.export_split_masks_check.isChecked())))
         self._set_combo_value(self.vector_format_combo, settings.get("vector_format"))
         self._set_combo_value(self.mask_format_combo, settings.get("mask_format"))
-        encoding = settings.get("mask_encoding")
-        for display_name, value in self.MASK_ENCODINGS.items():
-            if value == encoding:
-                self.mask_encoding_combo.setCurrentText(display_name)
-                break
 
     @staticmethod
     def _set_combo_value(combo: QComboBox, value) -> None:
@@ -179,14 +162,7 @@ class SegmentationExportDialog(QDialog):
         mask_enabled = self.export_mask_check.isChecked()
         self.vector_format_combo.setEnabled(vector_enabled)
         self.mask_format_combo.setEnabled(mask_enabled)
-        self.mask_encoding_combo.setEnabled(mask_enabled)
         self.export_split_masks_check.setEnabled(mask_enabled)
-        if self.MASK_ENCODINGS[self.mask_encoding_combo.currentText()] == "indexed":
-            self.hint_label.setText("单通道标签值：背景为 0，其余像素保留标签面板中设定的类别值。")
-        elif self.mask_format_combo.currentText() == "GeoTIFF":
-            self.hint_label.setText("标签颜色：GeoTIFF 写入单波段调色板，用于可视化。")
-        else:
-            self.hint_label.setText("标签颜色：导出 RGB 图像，用于可视化。")
 
     def _accept(self) -> None:
         output_dir = self.dir_edit.text().strip()
@@ -216,7 +192,6 @@ class SegmentationExportDialog(QDialog):
             "vector_extension": self._vector_formats[vector_format],
             "mask_format": mask_format,
             "mask_extension": self.MASK_FORMATS[mask_format],
-            "mask_encoding": self.MASK_ENCODINGS[self.mask_encoding_combo.currentText()],
             "export_split_masks": self.export_split_masks_check.isChecked(),
         }
 

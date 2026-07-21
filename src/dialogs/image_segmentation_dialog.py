@@ -2664,7 +2664,6 @@ class ImageSegmentationDialog(QDialog):
                     export_mask_file(
                         self.project,
                         str(mask_path),
-                        encoding=settings["mask_encoding"],
                     )
                     exported_paths.append(str(mask_path))
                     self._update_progress(step_index * 100 + 90, f"Mask 导出完成: {mask_path.name}", maximum=max(total_steps * 100, 100))
@@ -2684,7 +2683,6 @@ class ImageSegmentationDialog(QDialog):
                             self.project,
                             str(split_mask_path),
                             binary_label_id=label.id,
-                            encoding=settings["mask_encoding"],
                         )
                         exported_paths.append(str(split_mask_path))
                         self._update_progress(
@@ -2741,7 +2739,7 @@ class ImageSegmentationDialog(QDialog):
             key: preferences[key]
             for key in (
                 "output_dir", "base_name", "export_vector", "export_mask", "vector_format",
-                "mask_format", "mask_encoding", "export_split_masks",
+                "mask_format", "export_split_masks",
             )
             if key in preferences
         }

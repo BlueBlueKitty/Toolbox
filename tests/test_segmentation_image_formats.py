@@ -102,13 +102,15 @@ def test_indexed_mask_exports_contiguous_single_band_values(tmp_path, suffix):
     )
     output_path = tmp_path / f"mask{suffix}"
 
-    export_mask_file(project, str(output_path), encoding="indexed")
+    export_mask_file(project, str(output_path))
 
     expected = np.array([[0, 1, 2], [2, 0, 1]], dtype=np.uint8)
     if suffix == ".tif":
         dataset = gdal.Open(str(output_path))
         assert dataset.RasterCount == 1
         np.testing.assert_array_equal(dataset.GetRasterBand(1).ReadAsArray(), expected)
+        assert dataset.GetRasterBand(1).GetRasterColorTable() is not None
+        assert dataset.GetRasterBand(1).GetRasterColorInterpretation() == gdal.GCI_PaletteIndex
         assert dataset.GetGeoTransform() == project.image_asset.geotransform
         dataset = None
     else:
@@ -128,7 +130,7 @@ def test_single_label_mask_exports_as_binary_mask(tmp_path, suffix):
     )
     output_path = tmp_path / f"mask2{suffix}"
 
-    export_mask_file(project, str(output_path), binary_label_id=3, encoding="indexed")
+    export_mask_file(project, str(output_path), binary_label_id=3)
 
     expected = np.array([[0, 0, 1], [1, 0, 0]], dtype=np.uint8)
     if suffix == ".tif":
@@ -139,7 +141,7 @@ def test_single_label_mask_exports_as_binary_mask(tmp_path, suffix):
         np.testing.assert_array_equal(np.asarray(Image.open(output_path)), expected)
 
 
-def test_single_label_colored_mask_excludes_other_labels(tmp_path):
+def test_single_label_mask_uses_one_based_index_and_label_colour(tmp_path):
     project = _mask_project(
         [
             LabelClass(id=1, name="Red", color="#ff0000", shortcut="1"),
@@ -149,27 +151,29 @@ def test_single_label_colored_mask_excludes_other_labels(tmp_path):
     )
     output_path = tmp_path / "mask1.png"
 
-    export_mask_file(project, str(output_path), binary_label_id=1, encoding="colored")
+    export_mask_file(project, str(output_path), binary_label_id=1)
 
     np.testing.assert_array_equal(
         np.asarray(Image.open(output_path)),
-        np.array([[[255, 0, 0], [0, 0, 0]]], dtype=np.uint8),
+        np.array([[1, 0]], dtype=np.uint8),
     )
+    assert Image.open(output_path).convert("RGB").getpixel((0, 0)) == (255, 0, 0)
 
 
 @pytest.mark.parametrize("suffix", [".png", ".bmp"])
-def test_colored_mask_exports_rgb_for_common_image_formats(tmp_path, suffix):
+def test_mask_exports_paletted_single_band_for_common_image_formats(tmp_path, suffix):
     project = _mask_project(
         [LabelClass(id=1, name="A", color="#ff0000", shortcut="1")],
         np.array([[0, 1]], dtype=np.uint16),
     )
     output_path = tmp_path / f"colored{suffix}"
 
-    export_mask_file(project, str(output_path), encoding="colored")
+    export_mask_file(project, str(output_path))
 
     image = Image.open(output_path)
-    assert np.asarray(image).shape == (1, 2, 3)
-    assert np.asarray(image)[0, 1].tolist() == [255, 0, 0]
+    assert image.mode == "P"
+    assert np.asarray(image).shape == (1, 2)
+    assert image.convert("RGB").getpixel((1, 0)) == (255, 0, 0)
 
 
 def test_indexed_mask_rejects_unknown_label_ids(tmp_path):
@@ -179,7 +183,7 @@ def test_indexed_mask_rejects_unknown_label_ids(tmp_path):
     )
 
     with pytest.raises(ValueError, match="未定义的标签 ID：2"):
-        export_mask_file(project, str(tmp_path / "invalid.png"), encoding="indexed")
+        export_mask_file(project, str(tmp_path / "invalid.png"))
 
 
 def test_indexed_bmp_rejects_more_than_255_labels(tmp_path):
@@ -187,7 +191,7 @@ def test_indexed_bmp_rejects_more_than_255_labels(tmp_path):
     project = _mask_project(labels, np.array([[256]], dtype=np.uint16))
 
     with pytest.raises(ValueError, match="最多支持 255 个标签"):
-        export_mask_file(project, str(tmp_path / "too-many.bmp"), encoding="indexed")
+        export_mask_file(project, str(tmp_path / "too-many.bmp"))
 
 
 def test_export_dialog_defaults_to_indexed_masks_and_lists_common_formats():
@@ -197,7 +201,7 @@ def test_export_dialog_defaults_to_indexed_masks_and_lists_common_formats():
     settings = dialog._current_settings()
     assert set(SegmentationExportDialog.MASK_FORMATS) == {"PNG", "BMP", "GeoTIFF"}
     assert settings["mask_extension"] == ".png"
-    assert settings["mask_encoding"] == "indexed"
+    assert "mask_encoding" not in settings
     assert settings["export_split_masks"] is False
     dialog.close()
 

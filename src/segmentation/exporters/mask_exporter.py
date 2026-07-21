@@ -18,22 +18,10 @@ def export_mask_file(
     project: SegmentationProject,
     output_path: str,
     binary_label_id: int | None = None,
-    *,
-    encoding: str = "colored",
-    colored: bool | None = None,
 ) -> None:
-    """导出分割 Mask。
-
-    ``indexed`` 模式直接输出单通道 Mask 类别值：0 为背景，其余值保持
-    用户在标签面板中设定的值。``colored`` 模式用于可视化输出。
-    ``colored`` 参数保留为旧调用方的兼容入口。
-    """
+    """导出单通道分类 Mask，并按标签面板顺序编号类别值。"""
     if project.image_asset is None:
         raise ValueError("缺少图像元信息，无法导出掩膜")
-    if colored is not None:
-        encoding = "colored" if colored else "indexed"
-    if encoding not in {"indexed", "colored"}:
-        raise ValueError(f"不支持的 Mask 编码：{encoding}")
 
     width = project.image_asset.width
     height = project.image_asset.height
@@ -52,39 +40,70 @@ def export_mask_file(
     if suffix not in {".png", ".bmp", ".tif", ".tiff"}:
         raise ValueError("Mask 仅支持导出为 PNG、BMP 或 GeoTIFF 格式")
 
-    if encoding == "indexed":
-        indexed_mask = _preserve_mask_values(mask)
-        if suffix == ".bmp" and indexed_mask.dtype != np.uint8:
-            raise ValueError("BMP 单通道标签导出最多支持 255 个标签，请改用 PNG 或 GeoTIFF。")
-        if suffix in {".png", ".bmp"}:
-            Image.fromarray(indexed_mask).save(output_path)
-            return
-        _write_geotiff_mask(project, output_path, indexed_mask)
-        return
-
+    indexed_mask, palette = _build_indexed_mask_and_palette(mask, project, binary_label_id)
     if suffix in {".png", ".bmp"}:
-        Image.fromarray(_colorize_mask_rgb(mask, project)).save(output_path)
+        if len(palette) > 256:
+            raise ValueError("PNG/BMP 最多支持 255 个标签，请改用 GeoTIFF。")
+        _write_paletted_image(output_path, indexed_mask, palette)
         return
+    _write_geotiff_mask(project, output_path, indexed_mask, palette)
 
-    _write_geotiff_mask(project, output_path, mask, colored=True)
+
+def _build_indexed_mask_and_palette(
+    mask: np.ndarray,
+    project: SegmentationProject,
+    binary_label_id: int | None,
+) -> tuple[np.ndarray, list[tuple[int, int, int, int]]]:
+    """Map project label IDs to stable exported indices and their display colours."""
+    raw = np.asarray(mask)
+    labels = list(project.labels)
+    label_ids = [int(label.id) for label in labels]
+    known_values = set(label_ids)
+    unknown_values = sorted(int(value) for value in np.unique(raw) if int(value) != 0 and int(value) not in known_values)
+    if unknown_values:
+        values = "、".join(str(value) for value in unknown_values)
+        raise ValueError(f"Mask 中存在未定义的标签 ID：{values}")
+
+    if binary_label_id is not None:
+        if int(binary_label_id) not in known_values:
+            raise ValueError(f"未定义的标签 ID：{int(binary_label_id)}")
+        indexed = np.where(raw == int(binary_label_id), 1, 0).astype(np.uint8)
+        label = next(item for item in labels if int(item.id) == int(binary_label_id))
+        return indexed, [(0, 0, 0, 0), _label_rgba(label.color)]
+
+    dtype = np.uint8 if len(labels) <= 255 else np.uint16
+    indexed = np.zeros(raw.shape, dtype=dtype)
+    palette = [(0, 0, 0, 0)]
+    for export_value, label in enumerate(labels, start=1):
+        indexed[raw == int(label.id)] = export_value
+        palette.append(_label_rgba(label.color))
+    return indexed, palette
 
 
-def _preserve_mask_values(mask: np.ndarray) -> np.ndarray:
-    """保留当前 Mask 的类别值，包括已删除标签留下的未定义值。"""
-    values = np.asarray(mask)
-    if np.any(values < 0) or np.any(values > np.iinfo(np.uint16).max):
-        raise ValueError("单通道 Mask 类别值必须在 0 到 65535 之间")
-    return values.astype(np.uint8 if int(values.max(initial=0)) <= 255 else np.uint16, copy=False)
+def _label_rgba(color: str) -> tuple[int, int, int, int]:
+    value = str(color or "").lstrip("#")
+    if len(value) != 6:
+        return (148, 163, 184, 255)
+    try:
+        return tuple(int(value[index:index + 2], 16) for index in (0, 2, 4)) + (255,)
+    except ValueError:
+        return (148, 163, 184, 255)
+
+
+def _write_paletted_image(output_path: str, mask: np.ndarray, palette: list[tuple[int, int, int, int]]) -> None:
+    image = Image.fromarray(np.asarray(mask, dtype=np.uint8), mode="P")
+    rgb_palette = [component for rgba in palette for component in rgba[:3]]
+    image.putpalette((rgb_palette + [0] * 768)[:768])
+    image.save(output_path)
 
 
 def _write_geotiff_mask(
     project: SegmentationProject,
     output_path: str,
     mask: np.ndarray,
-    *,
-    colored: bool = False,
+    palette: list[tuple[int, int, int, int]],
 ) -> None:
-    """写出单波段 GeoTIFF；颜色模式额外写入调色板。"""
+    """写出单波段 GeoTIFF。"""
     height, width = mask.shape[:2]
     if mask.dtype == np.uint8:
         data_type = gdal.GDT_Byte
@@ -95,30 +114,17 @@ def _write_geotiff_mask(
         data_type = gdal.GDT_UInt16
 
     driver = gdal.GetDriverByName("GTiff")
-    creation_options = ["BIGTIFF=IF_SAFER"]
-    if colored:
-        creation_options.append("PHOTOMETRIC=PALETTE")
+    creation_options = ["BIGTIFF=IF_SAFER", "PHOTOMETRIC=PALETTE"]
 
     dataset = driver.Create(output_path, width, height, 1, data_type, options=creation_options)
     if dataset is None:
         raise RuntimeError(f"无法创建 GeoTIFF 文件：{output_path}")
     band = dataset.GetRasterBand(1)
-    if colored:
-        color_table = gdal.ColorTable()
-        color_table.SetColorEntry(0, (0, 0, 0, 0))
-        for label in project.labels:
-            color = label.color.lstrip("#")
-            if len(color) != 6:
-                continue
-            rgb = tuple(int(color[index:index + 2], 16) for index in (0, 2, 4))
-            color_table.SetColorEntry(int(label.id), (*rgb, 255))
-        known_values = {int(label.id) for label in project.labels}
-        for value in np.unique(mask):
-            value = int(value)
-            if value != 0 and value not in known_values:
-                color_table.SetColorEntry(value, (148, 163, 184, 255))
-        band.SetRasterColorTable(color_table)
-        band.SetRasterColorInterpretation(gdal.GCI_PaletteIndex)
+    color_table = gdal.ColorTable()
+    for index, rgba in enumerate(palette):
+        color_table.SetColorEntry(index, rgba)
+    band.SetRasterColorTable(color_table)
+    band.SetRasterColorInterpretation(gdal.GCI_PaletteIndex)
     band.WriteArray(mask)
     band.SetNoDataValue(0)
     if project.image_asset.geotransform:
@@ -127,17 +133,3 @@ def _write_geotiff_mask(
         dataset.SetProjection(project.image_asset.crs_wkt)
     dataset.FlushCache()
     dataset = None
-
-
-def _colorize_mask_rgb(mask: np.ndarray, project: SegmentationProject) -> np.ndarray:
-    rgb_mask = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
-    for label in project.labels:
-        color = label.color.lstrip("#")
-        if len(color) != 6:
-            continue
-        rgb = [int(color[index:index + 2], 16) for index in (0, 2, 4)]
-        rgb_mask[mask == int(label.id)] = rgb
-    known_values = [int(label.id) for label in project.labels]
-    unknown = (mask != 0) & ~np.isin(mask, known_values)
-    rgb_mask[unknown] = [148, 163, 184]
-    return rgb_mask
