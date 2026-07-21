@@ -1,4 +1,4 @@
-__version__ = '1.8.1'
+__version__ = '1.8.2'
 __author__ = 'Yibo Yuan'
 __email__ = '2633669459@qq.com'
 
@@ -12,4 +12,5 @@ GITHUB_RELEASES_URL = f'https://github.com/{GITHUB_REPO}/releases'
 # 应用程序信息
 APP_NAME = 'Toolbox'
 APP_DISPLAY_NAME = '遥感工具箱'
+
 

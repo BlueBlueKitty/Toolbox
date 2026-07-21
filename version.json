@@ -1,14 +1,14 @@
 {
-  "version": "1.8.1",
+  "version": "1.8.2",
   "name": "v1.8.2版本, 优化图像分割工具",
   "changelog": "软件优化了图像分割工具的导入导出以及渲染功能",
-  "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.8.1",
+  "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.8.2",
   "downloads": {
-    "windows_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.1/Toolbox_1.8.1_windows_x86_64.exe",
-    "linux_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.1/Toolbox-1.8.1_linux_x86_64.AppImage",
-    "linux_arm64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.1/Toolbox-1.8.1_linux_arm64.AppImage",
-    "mac_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.1/Toolbox_1.8.1_apple_x86_64.dmg",
-    "mac_arm64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.1/Toolbox_1.8.1_apple_arm64.dmg"
+    "windows_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.2/Toolbox_1.8.2_windows_x86_64.exe",
+    "linux_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.2/Toolbox-1.8.2_linux_x86_64.AppImage",
+    "linux_arm64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.2/Toolbox-1.8.2_linux_arm64.AppImage",
+    "mac_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.2/Toolbox_1.8.2_apple_x86_64.dmg",
+    "mac_arm64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.2/Toolbox_1.8.2_apple_arm64.dmg"
   },
-  "published_at": "2026-06-22T17:45:24+08:00"
+  "published_at": "2026-07-21T11:09:22+08:00"
 }
