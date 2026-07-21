@@ -38,7 +38,18 @@ def build_mask_outer_boundary_path(mask: np.ndarray, bbox: tuple[int, int, int, 
     the same line.  Here every foreground pixel is treated as a unit square
     and only its exposed edges are retained, producing its true outer border.
     """
-    binary = np.asarray(mask, dtype=bool)
+    binary = np.ascontiguousarray(np.asarray(mask, dtype=np.uint8) > 0)
+    return _build_mask_pixel_edge_path(binary, bbox)
+
+
+def _build_mask_pixel_edge_path(binary: np.ndarray, bbox: tuple[int, int, int, int]) -> QPainterPath:
+    """Trace exact pixel-cell edges while scanning only exposed boundaries.
+
+    OpenCV contours are defined on pixel centres, whereas ImageItem paints a
+    Mask over pixel cells.  Building edges at cell boundaries keeps the ants
+    exactly aligned with the raster fill.  The edge tests are vectorised, so a
+    large solid region costs O(perimeter) Python work instead of O(area).
+    """
     height, width = binary.shape[:2]
     x0, y0, _, _ = bbox
     outgoing: dict[tuple[int, int], list[tuple[int, int]]] = {}
@@ -46,31 +57,60 @@ def build_mask_outer_boundary_path(mask: np.ndarray, bbox: tuple[int, int, int, 
     def add_edge(start: tuple[int, int], end: tuple[int, int]) -> None:
         outgoing.setdefault(start, []).append(end)
 
-    for row, col in np.argwhere(binary):
-        x, y = int(x0 + col), int(y0 + row)
-        if row == 0 or not binary[row - 1, col]:
-            add_edge((x, y), (x + 1, y))
-        if col == width - 1 or not binary[row, col + 1]:
-            add_edge((x + 1, y), (x + 1, y + 1))
-        if row == height - 1 or not binary[row + 1, col]:
-            add_edge((x + 1, y + 1), (x, y + 1))
-        if col == 0 or not binary[row, col - 1]:
-            add_edge((x, y + 1), (x, y))
+    if height <= 0 or width <= 0 or not np.any(binary):
+        return QPainterPath()
+
+    above = np.zeros_like(binary)
+    above[1:] = binary[:-1]
+    below = np.zeros_like(binary)
+    below[:-1] = binary[1:]
+    left = np.zeros_like(binary)
+    left[:, 1:] = binary[:, :-1]
+    right = np.zeros_like(binary)
+    right[:, :-1] = binary[:, 1:]
+
+    def add_edges(edge_mask: np.ndarray, edge_factory) -> None:
+        rows, cols = np.nonzero(edge_mask)
+        for row, col in zip(rows.tolist(), cols.tolist()):
+            add_edge(*edge_factory(int(x0 + col), int(y0 + row)))
+
+    add_edges(binary & ~above, lambda x, y: ((x, y), (x + 1, y)))
+    add_edges(binary & ~right, lambda x, y: ((x + 1, y), (x + 1, y + 1)))
+    add_edges(binary & ~below, lambda x, y: ((x + 1, y + 1), (x, y + 1)))
+    add_edges(binary & ~left, lambda x, y: ((x, y + 1), (x, y)))
 
     path = QPainterPath()
     while outgoing:
         start = next(iter(outgoing))
         current = start
-        path.moveTo(float(current[0]), float(current[1]))
+        points = [current]
         while current in outgoing:
             end = outgoing[current].pop()
             if not outgoing[current]:
                 del outgoing[current]
-            path.lineTo(float(end[0]), float(end[1]))
+            if len(points) >= 2:
+                previous = points[-2]
+                current_point = points[-1]
+                previous_direction = (current_point[0] - previous[0], current_point[1] - previous[1])
+                next_direction = (end[0] - current_point[0], end[1] - current_point[1])
+                same_direction = (
+                    previous_direction[0] * next_direction[1] == previous_direction[1] * next_direction[0]
+                    and previous_direction[0] * next_direction[0] + previous_direction[1] * next_direction[1] > 0
+                )
+                if same_direction:
+                    points[-1] = end
+                else:
+                    points.append(end)
+            else:
+                points.append(end)
             current = end
             if current == start:
-                path.closeSubpath()
                 break
+        path.moveTo(float(points[0][0]), float(points[0][1]))
+        for point in points[1:]:
+            path.lineTo(float(point[0]), float(point[1]))
+        if current == start:
+            path.closeSubpath()
     return path
 
 
@@ -187,6 +227,12 @@ class MaskSelectionItem:
         path = QPainterPath()
         for mask, bbox in valid_selections:
             path.addPath(build_mask_outer_boundary_path(mask, bbox))
+        self.path_item.setPath(path)
+        self.white_path_item.setPath(path)
+        self.path_item.setVisible(not path.isEmpty())
+
+    def update_path(self, path: QPainterPath | None) -> None:
+        path = path or QPainterPath()
         self.path_item.setPath(path)
         self.white_path_item.setPath(path)
         self.path_item.setVisible(not path.isEmpty())

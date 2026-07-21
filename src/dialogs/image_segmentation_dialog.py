@@ -96,6 +96,7 @@ from src.widgets.multi_canvas_workspace import MultiCanvasWorkspace
 from src.widgets.operation_progress_widget import OperationProgressWidget
 from src.widgets.segmentation_canvas import SegmentationCanvas
 from src.widgets.segmentation_tool_controller import SegmentationToolController
+from src.rendering.overlays import build_mask_outer_boundary_path
 
 
 class AutosaveWorker(QObject):
@@ -113,6 +114,110 @@ class AutosaveWorker(QObject):
             self.finished.emit(True, "")
         except Exception as exc:  # pragma: no cover
             self.finished.emit(False, str(exc))
+
+
+class MaskComponentSelectionWorker(QObject):
+    """Extract one clicked Mask component and its outline away from the GUI thread."""
+
+    finished = Signal(int, object, object, str)
+
+    def __init__(
+        self,
+        request_id: int,
+        mask_data: np.ndarray,
+        seed_point: tuple[int, int],
+        label_id: int,
+    ):
+        super().__init__()
+        self.request_id = request_id
+        self.mask_data = mask_data
+        self.seed_point = seed_point
+        self.label_id = label_id
+
+    def run(self) -> None:
+        try:
+            import cv2
+            # Label equality is image-wide work; keep it off the GUI thread so
+            # a click on a large indexed mask stays responsive.
+            binary_mask = np.ascontiguousarray(self.mask_data == self.label_id, dtype=np.uint8)
+            height, width = binary_mask.shape[:2]
+            flood_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
+            flags = 8 | cv2.FLOODFILL_MASK_ONLY | cv2.FLOODFILL_FIXED_RANGE | (1 << 8)
+            area, _, flood_mask, bbox = cv2.floodFill(
+                binary_mask,
+                flood_mask,
+                self.seed_point,
+                0,
+                flags=flags,
+            )
+            x, y, component_width, component_height = (int(value) for value in bbox)
+            component_mask = flood_mask[y + 1:y + component_height + 1, x + 1:x + component_width + 1]
+            component_mask = np.ascontiguousarray(component_mask > 0, dtype=np.uint8)
+            selection = {
+                "bbox": (x, y, component_width, component_height),
+                "mask": component_mask,
+                "label_id": self.label_id,
+                "area": int(area),
+            }
+            outline_path = build_mask_outer_boundary_path(component_mask, selection["bbox"])
+            self.finished.emit(self.request_id, selection, outline_path, "")
+        except Exception as exc:  # pragma: no cover - requires a failed OpenCV runtime.
+            self.finished.emit(self.request_id, None, None, str(exc))
+
+
+class MaskOutlineWorker(QObject):
+    """Build a static magic-wand outline without blocking painting or panning."""
+
+    finished = Signal(int, object, str)
+
+    def __init__(self, request_id: int, mask: np.ndarray, bbox: tuple[int, int, int, int]):
+        super().__init__()
+        self.request_id = int(request_id)
+        self.mask = np.ascontiguousarray(mask, dtype=np.uint8)
+        self.bbox = tuple(int(value) for value in bbox)
+
+    def run(self) -> None:
+        try:
+            self.finished.emit(self.request_id, build_mask_outer_boundary_path(self.mask, self.bbox), "")
+        except Exception as exc:  # pragma: no cover - defensive worker boundary.
+            self.finished.emit(self.request_id, None, str(exc))
+
+
+class MagicPreviewWorker(QObject):
+    """Run the CPU-bound full-image magic-wand pass away from the GUI thread."""
+
+    finished = Signal(int, object, object, object, object, str)
+
+    def __init__(self, request_id: int, rgb_image: np.ndarray, seed: tuple[int, int], params):
+        super().__init__()
+        self.request_id = int(request_id)
+        self.rgb_image = np.ascontiguousarray(rgb_image)
+        self.seed = tuple(int(value) for value in seed)
+        self.params = params
+
+    def run(self) -> None:
+        try:
+            segmenter = MagicWandSegmenter()
+            prepared = segmenter.prepare_image(self.rgb_image, self.params)
+            preview = segmenter.run_prepared(prepared, self.seed, self.params)
+            if preview.bbox[2] <= 0 or preview.bbox[3] <= 0:
+                info = {
+                    "filtered_by_min_area": bool(preview.filtered_by_min_area),
+                    "pixel_area": int(preview.pixel_area),
+                    "min_area": int(self.params.min_area),
+                }
+                self.finished.emit(self.request_id, None, None, info, None, "")
+                return
+            mask = preview.mask.astype(np.uint8, copy=False)
+            path = build_mask_outer_boundary_path(mask, preview.bbox)
+            info = {
+                "filtered_by_min_area": bool(preview.filtered_by_min_area),
+                "pixel_area": int(preview.pixel_area),
+                "min_area": int(self.params.min_area),
+            }
+            self.finished.emit(self.request_id, mask, preview.bbox, info, path, "")
+        except Exception as exc:  # pragma: no cover - defensive worker boundary.
+            self.finished.emit(self.request_id, None, None, None, None, str(exc))
 
 
 class ImageSegmentationDialog(QDialog):
@@ -136,8 +241,17 @@ class ImageSegmentationDialog(QDialog):
         self._last_magic_seed = None
         self._preview_mask = None
         self._preview_bbox = None
+        self._preview_outline_path: QPainterPath | None = None
+        self._preview_outline_request_id = 0
+        self._preview_outline_generation = 0
+        self._preview_outline_threads: dict[int, QThread] = {}
+        self._preview_outline_workers: dict[int, MaskOutlineWorker] = {}
         self._magic_cancel_requested = False
         self._magic_preview_in_progress = False
+        self._magic_preview_request_id = 0
+        self._magic_preview_generation = 0
+        self._magic_preview_threads: dict[int, QThread] = {}
+        self._magic_preview_workers: dict[int, MagicPreviewWorker] = {}
         self._dirty = False
         self._node_edit_session_annotation_id: str | None = None
         self._node_edit_original_annotation: AnnotationObject | None = None
@@ -162,6 +276,11 @@ class ImageSegmentationDialog(QDialog):
         self._mask_paint_before_patch: np.ndarray | None = None
         self._last_mask_paint_point: tuple[float, float] | None = None
         self._selected_mask_components: list[dict] = []
+        self._mask_selection_generation = 0
+        self._mask_selection_request_id = 0
+        self._pending_mask_selection_requests: dict[int, tuple[int, bool, int]] = {}
+        self._mask_selection_threads: dict[int, QThread] = {}
+        self._mask_selection_workers: dict[int, MaskComponentSelectionWorker] = {}
         self._mask_selection_dash_offset = 0.0
         self._mask_selection_timer = QTimer(self)
         self._mask_selection_timer.setInterval(100)
@@ -325,7 +444,7 @@ class ImageSegmentationDialog(QDialog):
         self.layer_controller = LayerPanelController(
             self.layer_panel,
             self.canvas,
-            exclude_layer_ids={"draft", "snap", "preview_vector", "annotations"},
+            exclude_layer_ids={"draft", "snap", "preview_vector", "preview_mask", "annotations"},
         )
         self.magic_panel = MagicWandPanel()
         self.render_sidebar = self.workspace.render_sidebar
@@ -690,6 +809,7 @@ class ImageSegmentationDialog(QDialog):
         if not (self._magic_preview_timer.isActive() or self._magic_preview_in_progress):
             return
         self._magic_cancel_requested = True
+        self._magic_preview_generation += 1
         self._current_magic_seed = None
         self._magic_preview_timer.stop()
         self._finish_progress("魔法棒识别已取消")
@@ -2720,7 +2840,7 @@ class ImageSegmentationDialog(QDialog):
         menu.exec(QCursor.pos())
 
     def _select_mask_component(self, image_x: float, image_y: float, additive: bool = False) -> None:
-        """Select the clicked non-background Mask connected component (8-neighbourhood)."""
+        """Queue an 8-neighbourhood Mask component selection without blocking the GUI."""
         mask = self.project.mask_data
         x, y = int(np.floor(image_x)), int(np.floor(image_y))
         if mask is None or not (0 <= y < mask.shape[0] and 0 <= x < mask.shape[1]):
@@ -2732,30 +2852,42 @@ class ImageSegmentationDialog(QDialog):
             if not additive:
                 self._clear_mask_selection()
             return
-        try:
-            import cv2
-            binary = np.ascontiguousarray(mask == label_id, dtype=np.uint8)
-            component_count, component_map, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-        except Exception as exc:
-            self.status_label.setText(f"无法选择 Mask：{exc}")
+        if not additive:
+            self._clear_mask_selection()
+        # Binary conversion, flood filling, and outline construction all run
+        # off-thread.  The request/version checks discard a result if the Mask
+        # changes while its worker is running.
+        self._mask_selection_request_id += 1
+        request_id = self._mask_selection_request_id
+        generation = self._mask_selection_generation
+        self._pending_mask_selection_requests[request_id] = (generation, additive, self._mask_overlay_revision)
+        worker = MaskComponentSelectionWorker(request_id, mask, (x, y), label_id)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_mask_component_selection_finished)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda request=request_id: self._mask_selection_threads.pop(request, None))
+        thread.finished.connect(lambda request=request_id: self._mask_selection_workers.pop(request, None))
+        thread.finished.connect(thread.deleteLater)
+        self._mask_selection_threads[request_id] = thread
+        self._mask_selection_workers[request_id] = worker
+        thread.start()
+        self.status_label.setText("正在选取 Mask 区域...")
+
+    def _on_mask_component_selection_finished(self, request_id: int, selection, outline_path, error: str) -> None:
+        request = self._pending_mask_selection_requests.pop(int(request_id), None)
+        if request is None:
             return
-        component_id = int(component_map[y, x])
-        if component_id <= 0 or component_id >= component_count:
-            if not additive:
-                self._clear_mask_selection()
+        generation, additive, mask_revision = request
+        if generation != self._mask_selection_generation or mask_revision != self._mask_overlay_revision:
             return
-        left = int(stats[component_id, cv2.CC_STAT_LEFT])
-        top = int(stats[component_id, cv2.CC_STAT_TOP])
-        width = int(stats[component_id, cv2.CC_STAT_WIDTH])
-        height = int(stats[component_id, cv2.CC_STAT_HEIGHT])
-        area = int(stats[component_id, cv2.CC_STAT_AREA])
-        component_mask = (component_map[top:top + height, left:left + width] == component_id).astype(np.uint8)
-        selection = {
-            "bbox": (left, top, width, height),
-            "mask": component_mask,
-            "label_id": label_id,
-            "area": area,
-        }
+        if error or selection is None:
+            self.status_label.setText(f"无法选择 Mask：{error or '未找到连通区域'}")
+            return
+        selection["outline_path"] = outline_path
+        label_id = int(selection["label_id"])
         selection_index = next(
             (
                 index for index, item in enumerate(self._selected_mask_components)
@@ -2779,6 +2911,7 @@ class ImageSegmentationDialog(QDialog):
         selected_count = len(self._selected_mask_components)
         if selected_count:
             label_name = next((item.name for item in self.project.labels if item.id == label_id), f"标签 {label_id}")
+            area = int(selection["area"])
             hint = "Ctrl+点击可继续多选" if not additive else "Ctrl+再次点击可取消选择"
             self.status_label.setText(f"已选中 {selected_count} 个 Mask 区域；当前：{label_name}（{area:,} 像素）。{hint}，点击标签可批量修改类别")
         else:
@@ -2817,6 +2950,7 @@ class ImageSegmentationDialog(QDialog):
         self.status_label.setText(f"已将 {len(changed_selections)} 个选中 Mask 区域修改为：{label_name}（值 {label_id}）")
 
     def _clear_mask_selection(self) -> None:
+        self._mask_selection_generation += 1
         if not self._selected_mask_components:
             return
         self._selected_mask_components = []
@@ -2835,9 +2969,14 @@ class ImageSegmentationDialog(QDialog):
         selections = self._selected_mask_components
         for canvas in self._all_canvases():
             if not selections:
-                canvas.update_mask_selections([])
+                canvas.update_mask_selection_path(None)
             else:
-                canvas.update_mask_selections([(item["mask"], item["bbox"]) for item in selections])
+                path = QPainterPath()
+                for item in selections:
+                    outline_path = item.get("outline_path")
+                    if outline_path is not None:
+                        path.addPath(outline_path)
+                canvas.update_mask_selection_path(path)
                 canvas.set_mask_selection_dash_offset(self._mask_selection_dash_offset)
 
     def _read_aux_raster_pixel(self, layer: dict, image_x: int, image_y: int):
@@ -3320,6 +3459,10 @@ class ImageSegmentationDialog(QDialog):
         if self._last_magic_seed != (x, y):
             self._set_preview_vector_visibility(False, user_initiated=False)
         self._magic_preview_in_progress = True
+        full_rgb = self._ensure_full_analysis_rgb()
+        if full_rgb is not None and int(full_rgb.shape[0]) * int(full_rgb.shape[1]) <= 4_000_000:
+            self._start_full_magic_preview_worker(x, y, full_rgb)
+            return
         try:
             self._update_progress(20, "正在计算局部识别区域...", maximum=100)
             mapped_mask, mapped_bbox, preview_info = self._build_magic_preview_result(int(np.floor(x)), int(np.floor(y)))
@@ -3380,6 +3523,69 @@ class ImageSegmentationDialog(QDialog):
             raise
         finally:
             self._magic_preview_in_progress = False
+
+    def _start_full_magic_preview_worker(self, x: int, y: int, rgb_image: np.ndarray) -> None:
+        """Dispatch the common full-image preview path without freezing the canvas."""
+        self._magic_preview_request_id += 1
+        request_id = self._magic_preview_request_id
+        generation = self._magic_preview_generation
+        worker = MagicPreviewWorker(request_id, rgb_image, (x, y), self.magic_panel.params())
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(
+            lambda completed_request, mask, bbox, info, _path, error, expected_generation=generation, seed=(x, y):
+            self._on_full_magic_preview_finished(completed_request, expected_generation, seed, mask, bbox, info, error)
+        )
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda request=request_id: self._magic_preview_threads.pop(request, None))
+        thread.finished.connect(lambda request=request_id: self._magic_preview_workers.pop(request, None))
+        thread.finished.connect(thread.deleteLater)
+        self._magic_preview_threads[request_id] = thread
+        self._magic_preview_workers[request_id] = worker
+        thread.start()
+
+    def _on_full_magic_preview_finished(self, request_id: int, generation: int, seed, mapped_mask, mapped_bbox, preview_info, error: str) -> None:
+        if generation != self._magic_preview_generation or request_id != self._magic_preview_request_id:
+            return
+        self._magic_preview_in_progress = False
+        if error:
+            self._fail_progress("魔法棒识别失败")
+            self.status_label.setText(f"魔法棒识别失败：{error}")
+            return
+        if mapped_mask is None or mapped_bbox is None:
+            self._current_magic_seed = None
+            if preview_info and preview_info.get("filtered_by_min_area"):
+                self._finish_progress(
+                    f"识别区域像素数 {int(preview_info.get('pixel_area', 0))} 小于最小面积阈值 "
+                    f"{int(preview_info.get('min_area', self.magic_panel.params().min_area))}，已忽略"
+                )
+            else:
+                self._finish_progress("没有识别到有效选区，可能是阈值太小或者最小面积参数太大了")
+            return
+        self._update_progress(70, "正在合并预览 Mask...", maximum=100)
+        x, y = seed
+        if self.magic_panel.merge_preview_enabled():
+            if not self._merge_preview_has_seed(seed):
+                self._push_preview_history()
+            self._upsert_merge_preview_entry(seed, mapped_mask, mapped_bbox)
+            self._rebuild_merge_preview_from_entries()
+        else:
+            self._clear_preview_history()
+            self._merge_preview_entries = []
+            self._preview_mask = mapped_mask
+            self._preview_bbox = mapped_bbox
+        self.preview_selection = PreviewSelection(
+            seed_point=self._current_magic_seed or (x, y), params=self.magic_panel.params(),
+            bbox=self._preview_bbox, mask=self._preview_mask, contours=[], polygon_preview=[],
+            pixel_area=int(preview_info.get("pixel_area", 0) if preview_info else 0),
+            filtered_by_min_area=bool(preview_info.get("filtered_by_min_area", False) if preview_info else False),
+        )
+        self._last_magic_seed = seed
+        self._update_progress(95, "正在刷新预览显示...", maximum=100)
+        self._update_preview_display()
+        self._finish_progress("魔法棒识别完成")
 
     def _schedule_magic_preview(self, _params) -> None:
         if self._current_magic_seed is None or self.tool_controller.active_tool != SegmentationToolController.TOOL_MAGIC_WAND:
@@ -3540,6 +3746,8 @@ class ImageSegmentationDialog(QDialog):
             raise
 
     def _clear_magic_preview(self) -> None:
+        self._magic_preview_generation += 1
+        self._magic_preview_in_progress = False
         self._merge_preview_entries = []
         self._clear_preview_history()
         self.preview_selection = None
@@ -4466,16 +4674,54 @@ class ImageSegmentationDialog(QDialog):
         preview_visible = display_mask is not None and self._preview_bbox is not None
         if preview_visible:
             self._preview_mask_outline_timer.start()
+            self._queue_preview_outline(display_mask, self._preview_bbox)
         else:
             self._preview_mask_outline_timer.stop()
             self._preview_mask_dash_offset = 0.0
+            self._preview_outline_generation += 1
+            self._preview_outline_path = None
         for canvas in self._all_canvases():
+            canvas.update_preview_mask_layer(display_mask if preview_visible else None, self._preview_bbox if preview_visible else None, color)
+            canvas.update_preview_outline_path(self._preview_outline_path if preview_visible else None, color)
             if preview_visible:
-                canvas.update_preview_mask(display_mask, self._preview_bbox, color)
                 canvas.set_preview_mask_dash_offset(self._preview_mask_dash_offset)
-            else:
-                canvas.update_preview_mask(None, None, color)
             canvas.update_preview_polygons([], color)
+
+    def _queue_preview_outline(self, mask: np.ndarray, bbox: tuple[int, int, int, int]) -> None:
+        """Create only the vector outline; the preview mask is never painted as an image layer."""
+        self._preview_outline_generation += 1
+        generation = self._preview_outline_generation
+        self._preview_outline_path = None
+        self._preview_outline_request_id += 1
+        request_id = self._preview_outline_request_id
+        worker = MaskOutlineWorker(request_id, mask, bbox)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(
+            lambda completed_request, path, error, expected_generation=generation:
+            self._on_preview_outline_finished(completed_request, expected_generation, path, error)
+        )
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda request=request_id: self._preview_outline_threads.pop(request, None))
+        thread.finished.connect(lambda request=request_id: self._preview_outline_workers.pop(request, None))
+        thread.finished.connect(thread.deleteLater)
+        self._preview_outline_threads[request_id] = thread
+        self._preview_outline_workers[request_id] = worker
+        thread.start()
+
+    def _on_preview_outline_finished(self, request_id: int, generation: int, path, error: str) -> None:
+        if generation != self._preview_outline_generation or request_id != self._preview_outline_request_id:
+            return
+        if error or path is None:
+            self.status_label.setText(f"魔法棒蚂蚁线生成失败：{error or '未知错误'}")
+            return
+        self._preview_outline_path = path
+        color = self._active_label_color()
+        for canvas in self._all_canvases():
+            canvas.update_preview_outline_path(path, color)
+            canvas.set_preview_mask_dash_offset(self._preview_mask_dash_offset)
 
     def _advance_preview_mask_outline_animation(self) -> None:
         if self._preview_mask is None or self._preview_bbox is None:

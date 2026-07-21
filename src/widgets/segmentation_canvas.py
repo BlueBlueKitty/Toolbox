@@ -36,6 +36,7 @@ class SegmentationCanvas(LayeredRasterCanvas):
 
     LAYER_ANNOTATIONS = "annotations"
     LAYER_MASK = "mask"
+    LAYER_PREVIEW_MASK = "preview_mask"
     LAYER_PREVIEW_VECTOR = "preview_vector"
     LAYER_DRAFT = "draft"
     LAYER_SNAP = "snap"
@@ -60,6 +61,8 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self.view_box.setAspectLocked(True)
         self.view_box.setMouseMode(pg.ViewBox.PanMode)
 
+        # The preview Mask uses the same managed raster-overlay route as the
+        # committed Mask.  The dialog filters this internal layer from its UI.
         self.preview_mask_item = PreviewMaskItem()
         self.mask_selection_item = MaskSelectionItem()
         self.preview_mask_outline_item = MaskSelectionItem("#ffd43b", "#ffffff")
@@ -74,6 +77,7 @@ class SegmentationCanvas(LayeredRasterCanvas):
 
         self.layer_manager.add_layer(LayerSpec(self.LAYER_ANNOTATIONS, "矢量", "vector", opacity=1.0))
         self.layer_manager.add_layer(LayerSpec(self.LAYER_MASK, "Mask", "raster_overlay", opacity=0.5, locked=True))
+        self.layer_manager.add_layer(LayerSpec(self.LAYER_PREVIEW_MASK, "预览Mask", "raster_overlay", visible=True, locked=True, selectable=False), self.preview_mask_item)
         self.layer_manager.add_layer(LayerSpec(self.LAYER_PREVIEW_VECTOR, "预览矢量", "vector", opacity=1.0))
         self.layer_manager.add_layer(LayerSpec(self.LAYER_DRAFT, "绘制草稿", "vector", opacity=1.0), self.draft_item.path_item)
         self.layer_manager.add_layer(LayerSpec(self.LAYER_SNAP, "吸附提示", "vector", opacity=1.0), self.snap_item.path_item)
@@ -233,10 +237,20 @@ class SegmentationCanvas(LayeredRasterCanvas):
             name="矢量",
         )
 
-    def update_preview_mask(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None, color_name: str = "#ffd43b") -> None:
-        self.preview_mask_item.update_mask(mask, bbox, color_name)
+    def update_preview_outline_path(self, path: QPainterPath | None, color_name: str = "#ffd43b") -> None:
+        """Display magic-wand preview as a lightweight vector outline only."""
         self.preview_mask_outline_item.set_colors(color_name, "#ffffff")
-        self.preview_mask_outline_item.update_mask(mask, bbox)
+        self.preview_mask_outline_item.update_path(path)
+
+    def update_preview_mask_layer(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None, color_name: str = "#ffd43b") -> None:
+        """Update the internal preview through the normal raster-overlay path."""
+        if mask is None or bbox is None:
+            self.set_raster_overlay(self.LAYER_PREVIEW_MASK, None, name="预览Mask")
+            return
+        rgba = np.zeros((mask.shape[0], mask.shape[1], 4), dtype=np.uint8)
+        color = QColor(color_name)
+        rgba[np.asarray(mask) > 0] = [color.red(), color.green(), color.blue(), 128]
+        self.set_raster_overlay(self.LAYER_PREVIEW_MASK, rgba, bbox, name="预览Mask", opacity=1.0)
 
     def set_preview_mask_dash_offset(self, offset: float) -> None:
         self.preview_mask_outline_item.set_dash_offset(offset)
@@ -246,6 +260,9 @@ class SegmentationCanvas(LayeredRasterCanvas):
 
     def update_mask_selections(self, selections) -> None:
         self.mask_selection_item.update_masks(selections)
+
+    def update_mask_selection_path(self, path: QPainterPath | None) -> None:
+        self.mask_selection_item.update_path(path)
 
     def set_mask_selection_dash_offset(self, offset: float) -> None:
         self.mask_selection_item.set_dash_offset(offset)
