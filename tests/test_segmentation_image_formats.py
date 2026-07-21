@@ -9,6 +9,8 @@ from PySide6.QtWidgets import QApplication
 from src.dialogs.image_segmentation_dialog import ImageSegmentationDialog
 from src.dialogs.segmentation_export_dialog import SegmentationExportDialog
 from src.rendering.models import ImageSourceMetadata
+from src.rendering.config import default_raster_render_config
+from src.rendering.models import RenderRequest
 from src.rendering.raster_source_utils import (
     SEGMENTATION_RASTER_EXTENSIONS,
     is_segmentation_raster_file,
@@ -37,6 +39,32 @@ def test_open_raster_source_reads_bmp_image(tmp_path):
     metadata = source.metadata()
     assert (metadata.width, metadata.height, metadata.band_count) == (2, 1, 3)
     np.testing.assert_array_equal(source.read_window_native(0, 0, 2, 1), expected)
+
+
+def test_rgb_raster_default_render_keeps_channel_colours(tmp_path):
+    """RGB auxiliary rasters must never inherit an unsafe fixed [0, 1] range."""
+    image_path = tmp_path / "rgb.png"
+    rgb = np.array(
+        [
+            [[10, 50, 200], [200, 10, 50]],
+            [[50, 200, 10], [120, 80, 30]],
+        ],
+        dtype=np.uint8,
+    )
+    Image.fromarray(rgb, mode="RGB").save(image_path)
+    source = open_raster_source(str(image_path), pyramid_threshold_mb=1024)
+    metadata = source.metadata()
+    config = default_raster_render_config(metadata.band_count)
+
+    assert config.display_mode == "RGB"
+    assert config.auto_range is True
+    result = source.render(
+        RenderRequest(x=0, y=0, width=2, height=2, screen_width=2, screen_height=2),
+        config,
+    )
+    rendered = result.display_rgb[:, :, :3]
+    assert np.any(rendered[:, :, 0] != rendered[:, :, 1])
+    assert np.any(rendered[:, :, 1] != rendered[:, :, 2])
 
 
 def _mask_project(labels: list[LabelClass], mask: np.ndarray) -> SegmentationProject:

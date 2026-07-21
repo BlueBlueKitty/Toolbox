@@ -60,7 +60,10 @@ def default_raster_render_config(band_count: int = 1, has_color_table: bool = Fa
         config.display_mode = "RGB"
         config.rgb_bands = (1, 2, 3)
         config.stretch_mode = "最大最小"
-        config.auto_range = False
+        # RGB samples are not universally normalized to [0, 1] (PNG/JPEG are
+        # normally uint8).  Keeping the dataclass fallback range while turning
+        # auto range off clips every channel identically and destroys colour.
+        config.auto_range = True
     else:
         config.display_mode = "灰度"
         config.gray_band = 1

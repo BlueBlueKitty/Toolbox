@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from src.rendering.layer_operations import is_layer_removable, ui_index_to_z_index
+from src.rendering.layer_operations import is_layer_removable
 
 
 class LayerPanelController:
@@ -21,7 +21,7 @@ class LayerPanelController:
         self.canvas = canvas
         self.exclude_layer_ids = set(exclude_layer_ids or set())
         self.on_layer_visibility: Callable[[str, bool], None] | None = None
-        self.on_layer_order: Callable[[str, int], None] | None = None
+        self.on_layer_order: Callable[[list[str]], None] | None = None
         self.on_layer_opacity: Callable[[str, float], None] | None = None
         self.on_layer_blend_mode: Callable[[str, str], None] | None = None
         self.on_layer_selected: Callable[[str | None], None] | None = None
@@ -75,12 +75,14 @@ class LayerPanelController:
         self._connect_canvas_layer_signal()
 
     def rebuild_panel_items(self) -> None:
+        active_layer_id = self.canvas.layer_manager.active_layer_id()
         states = [
             state
             for state in self.canvas.layer_manager.layers()
             if state.spec.id not in self.exclude_layer_ids
         ]
         self.layer_panel.set_layers([state.spec for state in reversed(states)])
+        self.layer_panel.set_current_layer(active_layer_id)
 
     def apply_visibility_map(self, visibility_map: dict[str, bool]) -> None:
         for layer_id, visible in (visibility_map or {}).items():
@@ -99,20 +101,24 @@ class LayerPanelController:
             self.on_layer_visibility(layer_id, visible)
         self._invoke_after_change()
 
-    def _handle_order_changed(self, layer_id: str, ui_index: int) -> None:
-        states = [
-            state
-            for state in self.canvas.layer_manager.layers()
-            if state.spec.id not in self.exclude_layer_ids
-        ]
-        if self.canvas.layer_manager.layer(layer_id):
-            # 映射到全量图层序号，避免被未显示在面板中的内部图层“卡住”
-            total_all = len(self.canvas.layer_manager.layers())
-            z_index = ui_index_to_z_index(ui_index, len(states))
-            base_index = max(0, total_all - len(states))
-            self.canvas.move_layer(layer_id, base_index + z_index)
+    def _apply_panel_order(self, canvas, ui_order: list[str]) -> None:
+        """Apply a flat panel stack to one canvas in one atomic reorder."""
+        all_states = canvas.layer_manager.layers()
+        managed_ids = [state.spec.id for state in all_states if state.spec.id not in self.exclude_layer_ids]
+        managed_set = set(managed_ids)
+        # Panel order is high -> low, whereas LayerManager order is low -> high.
+        normalized_ui = [str(layer_id) for layer_id in ui_order if str(layer_id) in managed_set]
+        normalized_ui.extend(layer_id for layer_id in reversed(managed_ids) if layer_id not in normalized_ui)
+        # Internal drawing layers remain above the user-managed render stack.
+        internal_ids = [state.spec.id for state in all_states if state.spec.id in self.exclude_layer_ids]
+        canvas.layer_manager.set_layer_order(list(reversed(normalized_ui)) + internal_ids)
+
+    def _handle_order_changed(self, ui_order: list[str]) -> None:
+        self._apply_panel_order(self.canvas, ui_order)
         if self.on_layer_order is not None:
-            self.on_layer_order(layer_id, ui_index)
+            self.on_layer_order(list(ui_order))
+        # QTreeWidget can discard setItemWidget controls while moving rows.
+        self.rebuild_panel_items()
         self._invoke_after_change()
 
     def _handle_zoom_to_layer(self, layer_id: str) -> None:
@@ -168,16 +174,16 @@ class LayerPanelController:
         self._invoke_after_change()
 
     def _handle_move_layer_top(self, layer_id: str) -> None:
-        if self.canvas.layer_manager.layer(layer_id):
-            self.canvas.move_layer(layer_id, len(self.canvas.layer_manager.layers()) - 1)
-            self.rebuild_panel_items()
-            self._invoke_after_change()
+        ui_order = self.layer_panel.layer_order()
+        if layer_id in ui_order:
+            ui_order.remove(layer_id)
+            self._handle_order_changed([layer_id, *ui_order])
 
     def _handle_move_layer_bottom(self, layer_id: str) -> None:
-        if self.canvas.layer_manager.layer(layer_id):
-            self.canvas.move_layer(layer_id, 0)
-            self.rebuild_panel_items()
-            self._invoke_after_change()
+        ui_order = self.layer_panel.layer_order()
+        if layer_id in ui_order:
+            ui_order.remove(layer_id)
+            self._handle_order_changed([*ui_order, layer_id])
 
     def _handle_nodata_changed(self, layer_id: str, value) -> None:
         if self.on_layer_nodata is not None:

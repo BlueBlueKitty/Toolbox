@@ -6,7 +6,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
+    QAbstractItemView,
     QCheckBox,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
@@ -20,10 +23,130 @@ from PySide6.QtWidgets import (
 from src.rendering.models import LayerSpec
 
 
+class _FlatLayerTreeWidget(QTreeWidget):
+    """Flat, deterministic layer-stack drag handling plus external file drops."""
+
+    files_dropped = Signal(list)
+    layer_order_dropped = Signal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._dragged_item: QTreeWidgetItem | None = None
+        self._drag_start_pos = None
+        self._dragging_layer = False
+        self._drop_indicator = QFrame(self.viewport())
+        self._drop_indicator.setFrameShape(QFrame.HLine)
+        self._drop_indicator.setFrameShadow(QFrame.Plain)
+        self._drop_indicator.setStyleSheet("color: #3b82f6; background: #3b82f6;")
+        self._drop_indicator.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._drop_indicator.hide()
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+            if paths:
+                self.files_dropped.emit(paths)
+                event.acceptProposedAction()
+                return
+        super().dropEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._dragged_item = self.itemAt(event.position().toPoint())
+            self._drag_start_pos = event.position().toPoint()
+            self._dragging_layer = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if (
+            self._dragged_item is not None
+            and self._drag_start_pos is not None
+            and event.buttons() & Qt.LeftButton
+            and (event.position().toPoint() - self._drag_start_pos).manhattanLength() >= QApplication.startDragDistance()
+        ):
+            self._dragging_layer = True
+            self.viewport().setCursor(Qt.ClosedHandCursor)
+            self._show_drop_indicator(self._drop_index(event.position().toPoint()))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        item = self._dragged_item
+        was_dragging = self._dragging_layer
+        self._dragged_item = None
+        self._drag_start_pos = None
+        self._dragging_layer = False
+        self.viewport().unsetCursor()
+        self._drop_indicator.hide()
+        if event.button() == Qt.LeftButton and was_dragging and item is not None:
+            self._move_top_level_item(item, self._drop_index(event.position().toPoint()))
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._drop_indicator.hide()
+        super().leaveEvent(event)
+
+    def _drop_index(self, position) -> int:
+        """Return a top-level insertion index; no drop can create children."""
+        for index in range(self.topLevelItemCount()):
+            rect = self.visualItemRect(self.topLevelItem(index))
+            if position.y() < rect.center().y():
+                return index
+        return self.topLevelItemCount()
+
+    def _show_drop_indicator(self, target_index: int) -> None:
+        """Draw the insertion line that native tree dragging would provide."""
+        count = self.topLevelItemCount()
+        if count <= 0:
+            self._drop_indicator.hide()
+            return
+        target_index = max(0, min(int(target_index), count))
+        if target_index < count:
+            y = self.visualItemRect(self.topLevelItem(target_index)).top()
+        else:
+            y = self.visualItemRect(self.topLevelItem(count - 1)).bottom() + 1
+        self._drop_indicator.setGeometry(0, y - 1, self.viewport().width(), 2)
+        self._drop_indicator.show()
+        self._drop_indicator.raise_()
+
+    def _move_top_level_item(self, item: QTreeWidgetItem, target_index: int) -> None:
+        source_index = self.indexOfTopLevelItem(item)
+        if source_index < 0:
+            return
+        target_index = max(0, min(int(target_index), self.topLevelItemCount()))
+        if source_index < target_index:
+            target_index -= 1
+        if source_index == target_index:
+            return
+        moved_item = self.takeTopLevelItem(source_index)
+        self.insertTopLevelItem(target_index, moved_item)
+        self.setCurrentItem(moved_item)
+        self.layer_order_dropped.emit([
+            self.topLevelItem(index).data(0, Qt.UserRole)
+            for index in range(self.topLevelItemCount())
+        ])
+
+
 class LayerPanelWidget(QGroupBox):
     visibility_changed = Signal(str, bool)
     window_visibility_changed = Signal(str, str, bool)
-    order_changed = Signal(str, int)
+    # The full UI order (top -> bottom) is emitted once an internal drag ends.
+    order_changed = Signal(list)
     zoom_to_layer_requested = Signal(str)
     opacity_changed = Signal(str, float)
     blend_mode_changed = Signal(str, str)
@@ -40,20 +163,22 @@ class LayerPanelWidget(QGroupBox):
         super().__init__("图层", parent)
         self.setAcceptDrops(True)
         layout = QVBoxLayout(self)
-        self.layer_tree = QTreeWidget()
+        self.layer_tree = _FlatLayerTreeWidget()
         self.layer_tree.setAcceptDrops(True)
         self.layer_tree.setColumnCount(3)
         self.layer_tree.setHeaderLabels(["图层", "窗口1", "窗口2"])
         self.layer_tree.setRootIsDecorated(False)
         self.layer_tree.setItemsExpandable(False)
-        self.layer_tree.setDragDropMode(QTreeWidget.InternalMove)
-        self.layer_tree.setDefaultDropAction(Qt.MoveAction)
+        # Internal movement is handled above so QTreeWidget can never create
+        # child rows; DropOnly keeps external file dragging available.
+        self.layer_tree.setDragDropMode(QAbstractItemView.DropOnly)
         self.layer_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.layer_tree.itemChanged.connect(self._on_item_changed)
         self.layer_tree.itemClicked.connect(self._on_item_clicked)
         self.layer_tree.currentItemChanged.connect(self._on_current_item_changed)
         self.layer_tree.customContextMenuRequested.connect(self._open_context_menu)
-        self.layer_tree.model().rowsMoved.connect(self._on_rows_moved)
+        self.layer_tree.files_dropped.connect(self.files_dropped)
+        self.layer_tree.layer_order_dropped.connect(self._on_layer_order_dropped)
         self.layer_tree.setColumnWidth(0, 220)
         self.layer_tree.setColumnWidth(1, 72)
         self.layer_tree.setColumnWidth(2, 72)
@@ -73,7 +198,10 @@ class LayerPanelWidget(QGroupBox):
             item.setData(0, Qt.UserRole + 2, str(getattr(layer, "layer_type", "")))
             item.setData(0, Qt.UserRole + 3, float(getattr(layer, "opacity", 1.0)))
             item.setData(0, Qt.UserRole + 4, str(getattr(layer, "blend_mode", "source_over")))
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled)
+            # The panel is a flat stack.  Allowing ``OnItem`` drops makes
+            # QTreeWidget turn a layer into an invisible child item.
+            flags = item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled | Qt.ItemNeverHasChildren
+            item.setFlags(flags & ~Qt.ItemIsDropEnabled)
             item.setCheckState(0, Qt.Checked if layer.visible else Qt.Unchecked)
             self.layer_tree.addTopLevelItem(item)
             self._attach_window_checkbox(item, "viewer_1", 1, True)
@@ -105,6 +233,13 @@ class LayerPanelWidget(QGroupBox):
         self._updating = True
         check.setChecked(bool(visible))
         self._updating = False
+
+    def set_window_controls_enabled(self, layer_id: str, enabled: bool) -> None:
+        """Enable or disable the two per-window controls for a layer."""
+        for window_id in ("viewer_1", "viewer_2"):
+            check = self._window_checkboxes.get((str(layer_id), window_id))
+            if check is not None:
+                check.setEnabled(bool(enabled))
 
     def set_layer_checked(self, layer_id: str, visible: bool) -> None:
         item = self._item_for_layer(layer_id)
@@ -150,13 +285,13 @@ class LayerPanelWidget(QGroupBox):
             return
         self._last_changed_item = None
 
-    def _on_rows_moved(self, *_args) -> None:
-        if self._updating:
-            return
-        for index, layer_id in enumerate(self.layer_order()):
-            self.order_changed.emit(layer_id, index)
+    def _on_layer_order_dropped(self, order: list[str]) -> None:
+        if not self._updating:
+            self.order_changed.emit(order)
 
     def _on_current_item_changed(self, current: QTreeWidgetItem, _previous: QTreeWidgetItem) -> None:
+        if self._updating:
+            return
         layer_id = None if current is None else current.data(0, Qt.UserRole)
         self.layer_selected.emit(layer_id)
 

@@ -502,8 +502,14 @@ class ImageSegmentationDialog(QDialog):
     def _rebuild_layer_panel_items(self) -> None:
         self.layer_controller.rebuild_panel_items()
         for layer_id in self.layer_panel.layer_order():
-            self.layer_panel.set_window_visibility(layer_id, "viewer_1", self._layer_visible_in_window(layer_id, "viewer_1"))
-            self.layer_panel.set_window_visibility(layer_id, "viewer_2", self._layer_visible_in_window(layer_id, "viewer_2"))
+            globally_visible = bool(self.project.layer_visibility.get(layer_id, True))
+            for window_id in ("viewer_1", "viewer_2"):
+                self.layer_panel.set_window_visibility(
+                    layer_id,
+                    window_id,
+                    globally_visible and self._layer_visible_in_window(layer_id, window_id),
+                )
+            self.layer_panel.set_window_controls_enabled(layer_id, globally_visible)
 
     def _all_canvases(self) -> list[SegmentationCanvas]:
         canvases: list[SegmentationCanvas] = []
@@ -1960,6 +1966,7 @@ class ImageSegmentationDialog(QDialog):
         self.project.layer_visibility = project.layer_visibility
         self.project.export_prefs = project.export_prefs
         self._saved_export_output_dir = self._project_export_output_dir(project)
+        self._restore_layer_window_visibility_from_project()
         self._restore_auxiliary_layers_from_project()
         self._restore_canvas_view_state()
         self.layer_controller.apply_visibility_map(self.project.layer_visibility)
@@ -1987,11 +1994,9 @@ class ImageSegmentationDialog(QDialog):
     def _save_layer_order_to_project(self) -> None:
         if not isinstance(self.project.export_prefs, dict):
             self.project.export_prefs = {}
-        self.project.export_prefs["layer_order"] = [
-            state.spec.id
-            for state in self.canvas.layer_manager.layers()
-            if state.spec.id not in {"draft", "snap", "preview_vector", "annotations"}
-        ]
+        # Store the same low-to-high managed order that LayerManager uses.
+        # Internal editing layers are intentionally not project layer data.
+        self.project.export_prefs["layer_order"] = list(reversed(self.layer_panel.layer_order()))
 
     def _restore_layer_order_from_project(self) -> None:
         if not isinstance(self.project.export_prefs, dict):
@@ -1999,11 +2004,39 @@ class ImageSegmentationDialog(QDialog):
         order = self.project.export_prefs.get("layer_order")
         if not isinstance(order, list):
             return
+        ui_order = list(reversed([str(layer_id) for layer_id in order]))
         for canvas in self._all_canvases():
-            for index, layer_id in enumerate(order):
-                if canvas.layer_manager.layer(layer_id):
-                    canvas.move_layer(layer_id, index)
+            self.layer_controller._apply_panel_order(canvas, ui_order)
         self._rebuild_layer_panel_items()
+
+    def _save_layer_window_visibility_to_project(self) -> None:
+        if not isinstance(self.project.export_prefs, dict):
+            self.project.export_prefs = {}
+        self.project.export_prefs["layer_window_visibility"] = {
+            str(layer_id): {
+                window_id: bool(visible)
+                for window_id, visible in window_map.items()
+                if window_id in self.workspace.window_ids
+            }
+            for layer_id, window_map in self._layer_window_visibility.items()
+            if isinstance(window_map, dict)
+        }
+
+    def _restore_layer_window_visibility_from_project(self) -> None:
+        self._layer_window_visibility = {}
+        if not isinstance(self.project.export_prefs, dict):
+            return
+        saved = self.project.export_prefs.get("layer_window_visibility")
+        if not isinstance(saved, dict):
+            return
+        for layer_id, window_map in saved.items():
+            if not isinstance(window_map, dict):
+                continue
+            self._layer_window_visibility[str(layer_id)] = {
+                window_id: bool(visible)
+                for window_id, visible in window_map.items()
+                if window_id in self.workspace.window_ids
+            }
 
     def _save_auxiliary_layers_to_project(self) -> None:
         if not isinstance(self.project.export_prefs, dict):
@@ -2087,6 +2120,7 @@ class ImageSegmentationDialog(QDialog):
         self._sync_display_state_from_canvas()
         self._save_canvas_view_state()
         self._save_layer_order_to_project()
+        self._save_layer_window_visibility_to_project()
         self._save_auxiliary_layers_to_project()
         self.project.magic_panel_settings = self.magic_panel.get_panel_state()
         self._start_progress("正在保存项目...")
@@ -2205,20 +2239,29 @@ class ImageSegmentationDialog(QDialog):
 
     def _import_auxiliary_paths(self, file_paths: list[str]) -> None:
         imported_any = False
+        errors: list[str] = []
+        unsupported_paths: list[str] = []
         for file_path in file_paths:
             lower = str(file_path).lower()
-            if lower.endswith((".shp", ".geojson", ".json", ".gpkg", ".kml", ".kmz", ".gml")):
-                self._import_aux_vector(file_path)
-                imported_any = True
-                continue
-            if is_segmentation_raster_file(file_path):
-                self._import_aux_raster(file_path)
-                imported_any = True
-                continue
+            try:
+                if lower.endswith((".shp", ".geojson", ".json", ".gpkg", ".kml", ".kmz", ".gml")):
+                    self._import_aux_vector(file_path)
+                    imported_any = True
+                    continue
+                if is_segmentation_raster_file(file_path):
+                    self._import_aux_raster(file_path)
+                    imported_any = True
+                    continue
+                unsupported_paths.append(os.path.basename(file_path))
+            except Exception as exc:
+                errors.append(f"{os.path.basename(file_path)}：{exc}")
         if imported_any:
             self._rebuild_layer_panel_items()
             self._refresh_canvas()
             self._set_dirty(True)
+        messages = errors + ([f"不支持的文件：{', '.join(unsupported_paths)}"] if unsupported_paths else [])
+        if messages:
+            raise RuntimeError("\n".join(messages))
 
     def _next_aux_layer_id(self, prefix: str) -> str:
         self._auxiliary_layer_counter += 1
@@ -2284,6 +2327,15 @@ class ImageSegmentationDialog(QDialog):
         elif int(meta.band_count or 1) >= 3:
             render_cfg.display_mode = "RGB"
             render_cfg.rgb_bands = (1, 2, 3)
+            # Project files saved before the safe RGB default was introduced
+            # may contain the old, unusable fixed [0, 1] range.  It was never
+            # a meaningful default for byte RGB imagery, so migrate it here.
+            if (
+                not render_cfg.auto_range
+                and tuple(render_cfg.value_range) == (0.0, 1.0)
+                and str(meta.dtype).lower() in {"byte", "uint8"}
+            ):
+                render_cfg.auto_range = True
         nodata_override = (reuse or {}).get("nodata_override")
 
         for canvas in self._all_canvases():
@@ -3858,17 +3910,17 @@ class ImageSegmentationDialog(QDialog):
             self.layer_panel.set_window_visibility(
                 layer_name,
                 window_id,
-                self._layer_visible_in_window(layer_name, window_id) if visible else False,
+                bool(visible and self._layer_visible_in_window(layer_name, window_id)),
             )
+        self.layer_panel.set_window_controls_enabled(layer_name, bool(visible))
         if layer_name == "preview_vector" and visible:
             self._refresh_preview_vector(force=True)
 
-    def _layer_order_callback(self, layer_name: str, index: int) -> None:
+    def _layer_order_callback(self, ui_order: list[str]) -> None:
         for canvas in self._all_canvases():
             if canvas is self.canvas:
                 continue
-            if canvas.layer_manager.layer(layer_name):
-                canvas.move_layer(layer_name, index)
+            self.layer_controller._apply_panel_order(canvas, ui_order)
 
     def _layer_opacity_callback(self, layer_name: str, opacity: float) -> None:
         if not isinstance(self.project.export_prefs, dict):
@@ -4271,10 +4323,21 @@ class ImageSegmentationDialog(QDialog):
             self.status_label.setText("像素坐标模式：仅主窗口保证标注精确显示")
 
     def _refresh_auxiliary_layers(self) -> None:
-        for canvas in self._all_canvases():
+        for window_id in self.workspace.window_ids:
+            canvas = self._canvas_for_window(window_id)
+            if canvas is None:
+                continue
             for layer in self._auxiliary_layers:
                 layer_id = layer.get("id")
                 if not layer_id:
+                    continue
+                effective_visible = (
+                    bool(self.project.layer_visibility.get(str(layer_id), True))
+                    and self._layer_visible_in_window(str(layer_id), window_id)
+                )
+                if not effective_visible:
+                    if canvas.layer_manager.layer(layer_id):
+                        canvas.set_layer_visible(layer_id, False)
                     continue
                 if layer.get("type") == "raster":
                     self._refresh_aux_raster_layer(layer, canvas=canvas)
@@ -4317,13 +4380,17 @@ class ImageSegmentationDialog(QDialog):
         current_layer = None if layer_state is None else layer_state.layer
         render_style = None if current_layer is None else current_layer.render_style
         display_settings = None if current_layer is None else current_layer.display_settings
-        render_cfg = (
-            style_to_legacy_config(render_style, display_settings)
-            if render_style is not None and display_settings is not None
-            else layer.get("render_config") or default_raster_render_config(meta.band_count, bool(meta.has_color_table))
+        # ``layer['render_config']`` is the project-owned source of truth for
+        # auxiliary-raster pixels.  The RasterLayer held by each canvas is a
+        # runtime projection used by the layer panel; never read its previous
+        # style back here, otherwise a stale canvas can overwrite an edit made
+        # through the render sidebar.
+        render_cfg = layer.get("render_config") or default_raster_render_config(
+            meta.band_count,
+            bool(meta.has_color_table),
         )
         try:
-            style = render_style or legacy_config_to_style(render_cfg, meta)
+            style = legacy_config_to_style(render_cfg, meta)
             resolved_display_settings = display_settings or default_display_settings(nodata_value=layer.get("nodata_override", meta.nodata))
             resolved_display_settings = replace(
                 resolved_display_settings,

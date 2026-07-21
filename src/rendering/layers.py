@@ -144,6 +144,22 @@ class LayerManager(QObject):
         self._sync_z_order()
         self.layer_order_changed.emit()
 
+    def set_layer_order(self, layer_ids: list[str]) -> None:
+        """Apply a complete low-to-high order in one model update.
+
+        Unknown IDs are ignored. Existing IDs that the caller omitted are
+        retained after the requested ones in their previous relative order.
+        """
+        requested = [str(layer_id) for layer_id in layer_ids if str(layer_id) in self._layers]
+        requested_set = set(requested)
+        ordered = [(layer_id, self._layers[layer_id]) for layer_id in requested]
+        ordered.extend((layer_id, state) for layer_id, state in self._layers.items() if layer_id not in requested_set)
+        if [layer_id for layer_id, _state in ordered] == list(self._layers):
+            return
+        self._layers = OrderedDict(ordered)
+        self._sync_z_order()
+        self.layer_order_changed.emit()
+
     def set_blend_mode(self, layer_id: str, blend_mode: str) -> None:
         state = self._require(layer_id)
         state.spec.blend_mode = str(blend_mode or "source_over")
