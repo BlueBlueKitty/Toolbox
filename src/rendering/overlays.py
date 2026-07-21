@@ -11,11 +11,6 @@ from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsSimpleTextItem
 
 import pyqtgraph as pg
 
-try:
-    import cv2
-except Exception:  # pragma: no cover - OpenCV is an optional rendering dependency.
-    cv2 = None
-
 
 def build_polygon_path(feature) -> QPainterPath:
     path = QPainterPath()
@@ -32,6 +27,50 @@ def build_polygon_path(feature) -> QPainterPath:
     add_ring(getattr(feature, "exterior", []))
     for hole in getattr(feature, "holes", []) or []:
         add_ring(hole)
+    return path
+
+
+def build_mask_outer_boundary_path(mask: np.ndarray, bbox: tuple[int, int, int, int]) -> QPainterPath:
+    """Build boundaries on pixel-cell edges instead of pixel centres.
+
+    ``findContours`` follows foreground pixel centres.  For a one-pixel-wide
+    region that produces a degenerate path which travels out and back along
+    the same line.  Here every foreground pixel is treated as a unit square
+    and only its exposed edges are retained, producing its true outer border.
+    """
+    binary = np.asarray(mask, dtype=bool)
+    height, width = binary.shape[:2]
+    x0, y0, _, _ = bbox
+    outgoing: dict[tuple[int, int], list[tuple[int, int]]] = {}
+
+    def add_edge(start: tuple[int, int], end: tuple[int, int]) -> None:
+        outgoing.setdefault(start, []).append(end)
+
+    for row, col in np.argwhere(binary):
+        x, y = int(x0 + col), int(y0 + row)
+        if row == 0 or not binary[row - 1, col]:
+            add_edge((x, y), (x + 1, y))
+        if col == width - 1 or not binary[row, col + 1]:
+            add_edge((x + 1, y), (x + 1, y + 1))
+        if row == height - 1 or not binary[row + 1, col]:
+            add_edge((x + 1, y + 1), (x, y + 1))
+        if col == 0 or not binary[row, col - 1]:
+            add_edge((x, y + 1), (x, y))
+
+    path = QPainterPath()
+    while outgoing:
+        start = next(iter(outgoing))
+        current = start
+        path.moveTo(float(current[0]), float(current[1]))
+        while current in outgoing:
+            end = outgoing[current].pop()
+            if not outgoing[current]:
+                del outgoing[current]
+            path.lineTo(float(end[0]), float(end[1]))
+            current = end
+            if current == start:
+                path.closeSubpath()
+                break
     return path
 
 
@@ -111,7 +150,7 @@ class PreviewMaskItem(pg.ImageItem):
             return
         rgba = np.zeros((mask.shape[0], mask.shape[1], 4), dtype=np.uint8)
         color = QColor(color_name)
-        rgba[mask > 0] = [color.red(), color.green(), color.blue(), 255]
+        rgba[mask > 0] = [color.red(), color.green(), color.blue(), 128]
         self.setImage(rgba, autoLevels=False)
         x, y, width, height = bbox
         self.setRect(pg.QtCore.QRectF(x, y, width, height))
@@ -120,12 +159,14 @@ class PreviewMaskItem(pg.ImageItem):
 class MaskSelectionItem:
     """Photoshop-style animated outline for a selected Mask connected component."""
 
-    def __init__(self):
+    def __init__(self, primary_color: str = "#111111", secondary_color: str = "#ffffff"):
         self.path_item = QGraphicsPathItem()
         self.white_path_item = QGraphicsPathItem(self.path_item)
         self.path_item.setZValue(20_100)
         self.path_item.setBrush(QBrush(Qt.NoBrush))
         self.white_path_item.setBrush(QBrush(Qt.NoBrush))
+        self._primary_color = QColor(primary_color)
+        self._secondary_color = QColor(secondary_color)
         self._dash_offset = 0.0
         self._set_pen()
         self.clear()
@@ -145,21 +186,7 @@ class MaskSelectionItem:
             return
         path = QPainterPath()
         for mask, bbox in valid_selections:
-            binary = np.ascontiguousarray(mask > 0, dtype=np.uint8)
-            if cv2 is not None:
-                contours, _ = cv2.findContours(binary, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
-                x0, y0, _, _ = bbox
-                for contour in contours:
-                    if contour.size == 0:
-                        continue
-                    points = contour.reshape(-1, 2)
-                    path.moveTo(float(x0 + points[0][0]) + 0.5, float(y0 + points[0][1]) + 0.5)
-                    for x, y in points[1:]:
-                        path.lineTo(float(x0 + x) + 0.5, float(y0 + y) + 0.5)
-                    path.closeSubpath()
-            else:  # A compact fallback when OpenCV is unavailable.
-                x0, y0, width, height = bbox
-                path.addRect(float(x0), float(y0), float(width), float(height))
+            path.addPath(build_mask_outer_boundary_path(mask, bbox))
         self.path_item.setPath(path)
         self.white_path_item.setPath(path)
         self.path_item.setVisible(not path.isEmpty())
@@ -168,10 +195,15 @@ class MaskSelectionItem:
         self._dash_offset = float(offset)
         self._set_pen()
 
+    def set_colors(self, primary_color: str, secondary_color: str = "#ffffff") -> None:
+        self._primary_color = QColor(primary_color)
+        self._secondary_color = QColor(secondary_color)
+        self._set_pen()
+
     def _set_pen(self) -> None:
         for item, color, offset in (
-            (self.path_item, QColor("#111111"), self._dash_offset),
-            (self.white_path_item, QColor("#ffffff"), self._dash_offset + 3.0),
+            (self.path_item, self._primary_color, self._dash_offset),
+            (self.white_path_item, self._secondary_color, self._dash_offset + 3.0),
         ):
             pen = QPen(color)
             pen.setWidthF(1.6)

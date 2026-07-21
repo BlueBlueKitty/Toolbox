@@ -166,6 +166,10 @@ class ImageSegmentationDialog(QDialog):
         self._mask_selection_timer = QTimer(self)
         self._mask_selection_timer.setInterval(100)
         self._mask_selection_timer.timeout.connect(self._advance_mask_selection_animation)
+        self._preview_mask_dash_offset = 0.0
+        self._preview_mask_outline_timer = QTimer(self)
+        self._preview_mask_outline_timer.setInterval(140)
+        self._preview_mask_outline_timer.timeout.connect(self._advance_preview_mask_outline_animation)
         self._merge_preview_entries: list[dict] = []
         self._preview_undo_stack: list[dict] = []
         self._preview_redo_stack: list[dict] = []
@@ -3355,12 +3359,8 @@ class ImageSegmentationDialog(QDialog):
             self._update_preview_display()
 
     def _ensure_preview_mask_layer_visible_for_magic(self) -> None:
-        if self.project.layer_visibility.get("preview_mask", True):
-            return
-        self.project.layer_visibility["preview_mask"] = True
-        self.layer_panel.set_layer_checked("preview_mask", True)
-        if self.canvas.layer_manager.layer("preview_mask"):
-            self.canvas.set_layer_visible("preview_mask", True)
+        """预览 Mask 是临时交互叠加，不在图层面板中提供可见性开关。"""
+        return
 
     def _snapshot_preview_state(self) -> dict:
         entries = []
@@ -4420,12 +4420,27 @@ class ImageSegmentationDialog(QDialog):
         display_mask = self._preview_mask
         if self.magic_panel.only_show_new_region_enabled():
             display_mask = self._preview_mask_without_overlap(self._preview_mask, self._preview_bbox)
+        preview_visible = display_mask is not None and self._preview_bbox is not None
+        if preview_visible:
+            self._preview_mask_outline_timer.start()
+        else:
+            self._preview_mask_outline_timer.stop()
+            self._preview_mask_dash_offset = 0.0
         for canvas in self._all_canvases():
-            if self.project.layer_visibility.get("preview_mask", True) and display_mask is not None and self._preview_bbox is not None:
+            if preview_visible:
                 canvas.update_preview_mask(display_mask, self._preview_bbox, color)
+                canvas.set_preview_mask_dash_offset(self._preview_mask_dash_offset)
             else:
                 canvas.update_preview_mask(None, None, color)
             canvas.update_preview_polygons([], color)
+
+    def _advance_preview_mask_outline_animation(self) -> None:
+        if self._preview_mask is None or self._preview_bbox is None:
+            self._preview_mask_outline_timer.stop()
+            return
+        self._preview_mask_dash_offset += 1.0
+        for canvas in self._all_canvases():
+            canvas.set_preview_mask_dash_offset(self._preview_mask_dash_offset)
 
     def closeEvent(self, event) -> None:
         if not self._finish_node_edit_session():

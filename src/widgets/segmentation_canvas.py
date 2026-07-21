@@ -36,7 +36,6 @@ class SegmentationCanvas(LayeredRasterCanvas):
 
     LAYER_ANNOTATIONS = "annotations"
     LAYER_MASK = "mask"
-    LAYER_PREVIEW_MASK = "preview_mask"
     LAYER_PREVIEW_VECTOR = "preview_vector"
     LAYER_DRAFT = "draft"
     LAYER_SNAP = "snap"
@@ -63,21 +62,21 @@ class SegmentationCanvas(LayeredRasterCanvas):
 
         self.preview_mask_item = PreviewMaskItem()
         self.mask_selection_item = MaskSelectionItem()
+        self.preview_mask_outline_item = MaskSelectionItem("#ffd43b", "#ffffff")
         self.draft_item = DraftOverlayItem()
         self.snap_item = SnapIndicatorItem()
         self.view_box.addItem(self.preview_mask_item)
         self.mask_selection_item.path_item.setParentItem(self.view_box.childGroup)
+        self.preview_mask_outline_item.path_item.setParentItem(self.view_box.childGroup)
         self.view_box.addItem(self.draft_item.scatter)
         self.draft_item.path_item.setParentItem(self.view_box.childGroup)
         self.snap_item.path_item.setParentItem(self.view_box.childGroup)
 
-        self.layer_manager.add_layer(LayerSpec(self.LAYER_PREVIEW_MASK, "预览Mask", "raster_overlay", opacity=1.0, locked=True), self.preview_mask_item)
         self.layer_manager.add_layer(LayerSpec(self.LAYER_ANNOTATIONS, "矢量", "vector", opacity=1.0))
-        self.layer_manager.add_layer(LayerSpec(self.LAYER_MASK, "Mask", "raster_overlay", opacity=0.45, locked=True))
+        self.layer_manager.add_layer(LayerSpec(self.LAYER_MASK, "Mask", "raster_overlay", opacity=0.5, locked=True))
         self.layer_manager.add_layer(LayerSpec(self.LAYER_PREVIEW_VECTOR, "预览矢量", "vector", opacity=1.0))
         self.layer_manager.add_layer(LayerSpec(self.LAYER_DRAFT, "绘制草稿", "vector", opacity=1.0), self.draft_item.path_item)
         self.layer_manager.add_layer(LayerSpec(self.LAYER_SNAP, "吸附提示", "vector", opacity=1.0), self.snap_item.path_item)
-        self.layer_manager.move_layer(self.LAYER_PREVIEW_MASK, len(self.layer_manager.layers()) - 1)
 
         self._preview_polygon_items: list[object] = []
         self._interaction_mode = "browse"
@@ -236,6 +235,11 @@ class SegmentationCanvas(LayeredRasterCanvas):
 
     def update_preview_mask(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None, color_name: str = "#ffd43b") -> None:
         self.preview_mask_item.update_mask(mask, bbox, color_name)
+        self.preview_mask_outline_item.set_colors(color_name, "#ffffff")
+        self.preview_mask_outline_item.update_mask(mask, bbox)
+
+    def set_preview_mask_dash_offset(self, offset: float) -> None:
+        self.preview_mask_outline_item.set_dash_offset(offset)
 
     def update_mask_selection(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None) -> None:
         self.mask_selection_item.update_mask(mask, bbox)
