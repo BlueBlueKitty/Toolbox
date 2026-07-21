@@ -408,6 +408,8 @@ class ImageSegmentationDialog(QDialog):
         canvas.mouse_moved.connect(self.tool_controller.handle_move)
         canvas.mouse_released.connect(self._handle_mouse_release)
         canvas.view_transformed.connect(self._on_canvas_view_transformed)
+        # Mask 图层按当前底图渲染窗口裁剪；视图刷新后必须同步更新该裁剪窗口。
+        canvas.view_state_changed.connect(self._on_view_state_changed)
         canvas.tool_wheel_adjust_requested.connect(self._adjust_active_tool_slider)
 
     def _unbind_canvas_signals(self, canvas) -> None:
@@ -418,6 +420,7 @@ class ImageSegmentationDialog(QDialog):
             (canvas.mouse_moved, self.tool_controller.handle_move),
             (canvas.mouse_released, self._handle_mouse_release),
             (canvas.view_transformed, self._on_canvas_view_transformed),
+            (canvas.view_state_changed, self._on_view_state_changed),
             (canvas.tool_wheel_adjust_requested, self._adjust_active_tool_slider),
         ]:
             try:
