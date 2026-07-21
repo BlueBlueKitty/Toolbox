@@ -67,7 +67,9 @@ class SegmentationProjectManager:
             if project.mask_data is not None:
                 mask_path = self.mask_sidecar_path(project_path)
                 np.savez_compressed(mask_path, mask=project.mask_data)
+                existing_mask_asset = dict(project.mask_asset or {})
                 payload["mask_asset"] = {
+                    **existing_mask_asset,
                     "path_mode": "relative",
                     "path": Path(mask_path).name,
                     "dtype": str(project.mask_data.dtype),

@@ -396,6 +396,9 @@ class GeometryService:
                 continue
             rgb = [int(color[i:i + 2], 16) for i in (0, 2, 4)]
             rgba[mask == label_id] = [rgb[0], rgb[1], rgb[2], 255]
+        # 删除标签后像素仍是有效分类数据；以中性灰而非透明显示，便于恢复同值标签。
+        unknown = (mask != 0) & ~np.isin(mask, list(label_lookup))
+        rgba[unknown] = [148, 163, 184, 255]
         return rgba
 
     @staticmethod

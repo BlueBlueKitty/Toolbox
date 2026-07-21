@@ -24,8 +24,8 @@ def export_mask_file(
 ) -> None:
     """导出分割 Mask。
 
-    ``indexed`` 模式输出单通道连续标签值：0 为背景，标签按项目标签
-    列表顺序映射到 1、2、3……。``colored`` 模式用于可视化输出。
+    ``indexed`` 模式直接输出单通道 Mask 类别值：0 为背景，其余值保持
+    用户在标签面板中设定的值。``colored`` 模式用于可视化输出。
     ``colored`` 参数保留为旧调用方的兼容入口。
     """
     if project.image_asset is None:
@@ -53,7 +53,7 @@ def export_mask_file(
         raise ValueError("Mask 仅支持导出为 PNG、BMP 或 GeoTIFF 格式")
 
     if encoding == "indexed":
-        indexed_mask = _build_indexed_mask(mask, project, binary_label_id=binary_label_id)
+        indexed_mask = _preserve_mask_values(mask)
         if suffix == ".bmp" and indexed_mask.dtype != np.uint8:
             raise ValueError("BMP 单通道标签导出最多支持 255 个标签，请改用 PNG 或 GeoTIFF。")
         if suffix in {".png", ".bmp"}:
@@ -69,31 +69,12 @@ def export_mask_file(
     _write_geotiff_mask(project, output_path, mask, colored=True)
 
 
-def _build_indexed_mask(
-    mask: np.ndarray,
-    project: SegmentationProject,
-    *,
-    binary_label_id: int | None = None,
-) -> np.ndarray:
-    """把内部标签 ID 映射为连续的单通道导出值。"""
-    if binary_label_id is not None:
-        label_mapping = {int(binary_label_id): 1}
-    else:
-        label_mapping = {int(label.id): index for index, label in enumerate(project.labels, start=1)}
-    values = {int(value) for value in np.unique(mask)}
-    unknown_values = sorted(value for value in values if value != 0 and value not in label_mapping)
-    if unknown_values:
-        values_text = "、".join(str(value) for value in unknown_values)
-        raise ValueError(f"Mask 中存在未定义的标签 ID：{values_text}")
-
-    max_value = len(label_mapping)
-    if max_value > np.iinfo(np.uint16).max:
-        raise ValueError("单通道标签导出最多支持 65535 个标签")
-    dtype = np.uint8 if max_value <= np.iinfo(np.uint8).max else np.uint16
-    indexed_mask = np.zeros(mask.shape, dtype=dtype)
-    for label_id, export_value in label_mapping.items():
-        indexed_mask[mask == label_id] = export_value
-    return indexed_mask
+def _preserve_mask_values(mask: np.ndarray) -> np.ndarray:
+    """保留当前 Mask 的类别值，包括已删除标签留下的未定义值。"""
+    values = np.asarray(mask)
+    if np.any(values < 0) or np.any(values > np.iinfo(np.uint16).max):
+        raise ValueError("单通道 Mask 类别值必须在 0 到 65535 之间")
+    return values.astype(np.uint8 if int(values.max(initial=0)) <= 255 else np.uint16, copy=False)
 
 
 def _write_geotiff_mask(
@@ -131,6 +112,11 @@ def _write_geotiff_mask(
                 continue
             rgb = tuple(int(color[index:index + 2], 16) for index in (0, 2, 4))
             color_table.SetColorEntry(int(label.id), (*rgb, 255))
+        known_values = {int(label.id) for label in project.labels}
+        for value in np.unique(mask):
+            value = int(value)
+            if value != 0 and value not in known_values:
+                color_table.SetColorEntry(value, (148, 163, 184, 255))
         band.SetRasterColorTable(color_table)
         band.SetRasterColorInterpretation(gdal.GCI_PaletteIndex)
     band.WriteArray(mask)
@@ -151,4 +137,7 @@ def _colorize_mask_rgb(mask: np.ndarray, project: SegmentationProject) -> np.nda
             continue
         rgb = [int(color[index:index + 2], 16) for index in (0, 2, 4)]
         rgb_mask[mask == int(label.id)] = rgb
+    known_values = [int(label.id) for label in project.labels]
+    unknown = (mask != 0) & ~np.isin(mask, known_values)
+    rgb_mask[unknown] = [148, 163, 184]
     return rgb_mask

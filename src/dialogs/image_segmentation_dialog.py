@@ -54,7 +54,7 @@ from src.segmentation import (
     UpdateLabelAssignmentCommand,
     UpdateMaskPatchCommand,
 )
-from src.segmentation.models import DisplayState, PreviewSelection
+from src.segmentation.models import DisplayState, LabelClass, PreviewSelection
 from src.segmentation.algorithms import MagicWandSegmenter
 from src.segmentation.exporters import (
     export_coco,
@@ -64,6 +64,7 @@ from src.segmentation.exporters import (
     export_yolo,
 )
 from src.segmentation.geometry_service import GeometryService
+from src.segmentation.mask_importer import import_mask_for_image
 from src.rendering.sources import GdalRasterSource, StandardImageSource
 from src.rendering.raster_source_utils import (
     SEGMENTATION_RASTER_EXTENSIONS,
@@ -193,6 +194,7 @@ class ImageSegmentationDialog(QDialog):
         self._last_image_dir = self.project_manager.settings.value("last_image_dir", "", type=str)
         self._last_project_dir = self.project_manager.settings.value("last_project_dir", "", type=str)
         self._last_aux_dir = self.project_manager.settings.value("last_aux_dir", self._last_image_dir, type=str)
+        self._last_mask_dir = self.project_manager.settings.value("last_mask_dir", self._last_image_dir, type=str)
         self._geotiff_full_render_cache_limit_mb = self.pyramid_threshold_mb
 
         self._create_ui()
@@ -215,6 +217,7 @@ class ImageSegmentationDialog(QDialog):
         self.open_project_action = QAction(self.style().standardIcon(QStyle.SP_FileDialogContentsView), "打开项目", self)
         self.save_project_action = QAction(self.style().standardIcon(QStyle.SP_DialogSaveButton), "保存项目", self)
         self.import_aux_action = QAction(self._make_tool_icon("layers"), "导入辅助数据，可直接将辅助数据拖入图层管理窗口中", self)
+        self.import_mask_action = QAction(self._make_tool_icon("grid_on"), "导入 Mask（替换当前 Mask）", self)
         self.export_action = QAction(self.style().standardIcon(QStyle.SP_DialogApplyButton), "导出...", self)
         self.undo_action = QAction(self.style().standardIcon(QStyle.SP_ArrowBack), "撤销", self)
         self.redo_action = QAction(self.style().standardIcon(QStyle.SP_ArrowForward), "重做", self)
@@ -223,6 +226,7 @@ class ImageSegmentationDialog(QDialog):
         self.open_project_action.setIcon(self._make_tool_icon("folder_open"))
         self.save_project_action.setIcon(self._make_tool_icon("save"))
         self.import_aux_action.setIcon(self._make_tool_icon("layers"))
+        self.import_mask_action.setIcon(self._make_tool_icon("grid_on"))
         self.export_action.setIcon(self._make_tool_icon("ios_share"))
         self.undo_action.setIcon(self._make_tool_icon("undo"))
         self.redo_action.setIcon(self._make_tool_icon("redo"))
@@ -236,6 +240,7 @@ class ImageSegmentationDialog(QDialog):
             self.open_project_action,
             self.save_project_action,
             self.import_aux_action,
+            self.import_mask_action,
             self.export_action,
             self.undo_action,
             self.redo_action,
@@ -356,7 +361,7 @@ class ImageSegmentationDialog(QDialog):
         splitter.setStretchFactor(1, 1)
 
         bottom_layout = QHBoxLayout()
-        self.mouse_pos_label = QLabel("行: -, 列: - | 渲染RGB: - | 原值: - | Mask 标签: 无标签")
+        self.mouse_pos_label = QLabel("行: -, 列: - | 渲染RGB: - | 原值: - | Mask 标签: 无标签 | Mask 值: -")
         self.status_label = QLabel("未打开图像")
         bottom_layout.addWidget(self.mouse_pos_label)
         bottom_layout.addStretch(1)
@@ -545,6 +550,7 @@ class ImageSegmentationDialog(QDialog):
         self.open_project_action.triggered.connect(self.open_project)
         self.save_project_action.triggered.connect(self.save_project)
         self.import_aux_action.triggered.connect(self.import_auxiliary_data)
+        self.import_mask_action.triggered.connect(self.import_mask)
         self.export_action.triggered.connect(self.export_data)
         self.undo_action.triggered.connect(self.undo)
         self.redo_action.triggered.connect(self.redo)
@@ -574,6 +580,8 @@ class ImageSegmentationDialog(QDialog):
         self.tool_controller.message_requested.connect(self._show_tool_message)
 
         self.label_panel.active_label_changed.connect(self._set_active_label)
+        self.label_panel.label_value_changed.connect(self._on_label_value_changed)
+        self.label_panel.label_deleted.connect(self._on_label_deleted)
         self.label_panel.labels_changed.connect(self._replace_labels)
         self.layer_controller.on_layer_visibility = self._layer_visibility_callback
         self.layer_controller.on_layer_order = self._layer_order_callback
@@ -633,6 +641,7 @@ class ImageSegmentationDialog(QDialog):
         self.open_project_action.setIcon(self._make_tool_icon("folder_open"))
         self.save_project_action.setIcon(self._make_tool_icon("save"))
         self.import_aux_action.setIcon(self._make_tool_icon("layers"))
+        self.import_mask_action.setIcon(self._make_tool_icon("grid_on"))
         self.export_action.setIcon(self._make_tool_icon("ios_share"))
         self.undo_action.setIcon(self._make_tool_icon("undo"))
         self.redo_action.setIcon(self._make_tool_icon("redo"))
@@ -1287,8 +1296,7 @@ class ImageSegmentationDialog(QDialog):
         elif update_mask:
             bbox = affected_bbox
             before_patch = self._extract_mask_patch(bbox)
-            after_annotations = self._annotations_after_commands(commands)
-            after_patch = self._rasterize_annotations_patch(after_annotations, bbox)
+            after_patch = self._apply_annotation_commands_to_mask_patch(before_patch, commands, bbox)
         else:
             bbox = None
             before_patch = None
@@ -1419,6 +1427,65 @@ class ImageSegmentationDialog(QDialog):
         self._refresh_canvas()
         self._set_dirty(True)
 
+    def _on_label_value_changed(self, old_value: int, new_value: int) -> None:
+        """标签 ID 就是 Mask 分类值，改值必须同步重写项目数据。"""
+        old_value, new_value = int(old_value), int(new_value)
+        if old_value == new_value:
+            return
+        if self.project.mask_data is not None:
+            self.project.mask_data[self.project.mask_data == old_value] = new_value
+            self._mark_mask_overlay_dirty()
+        for annotation in self.project.annotations:
+            if annotation.label_id == old_value:
+                annotation.label_id = new_value
+        if self.project.active_label_id == old_value:
+            self.project.active_label_id = new_value
+        self.command_stack = CommandStack(self.project)
+        self.tool_controller.set_annotations(self.project.annotations)
+        self._set_dirty(True)
+
+    def _apply_annotation_commands_to_mask_patch(self, before_patch, commands, bbox):
+        """只修改命令实际影响的像素，保留外部 Mask 在同一补丁内的其余分类。"""
+        if bbox is None:
+            return None
+        _, _, width, height = bbox
+        patch = np.zeros((height, width), dtype=np.uint16) if before_patch is None else before_patch.copy()
+
+        def erase(annotation: AnnotationObject) -> None:
+            raster = self._rasterize_annotations_patch([annotation], bbox)
+            if raster is not None:
+                patch[raster == annotation.label_id] = 0
+
+        def paint(annotation: AnnotationObject) -> None:
+            raster = self._rasterize_annotations_patch([annotation], bbox)
+            if raster is not None:
+                patch[raster > 0] = raster[raster > 0]
+
+        for command in commands:
+            nested = command.commands if isinstance(command, BatchCommand) else [command]
+            for item in nested:
+                if isinstance(item, AddAnnotationCommand):
+                    paint(item.annotation)
+                elif isinstance(item, DeleteAnnotationCommand):
+                    erase(item.annotation)
+                elif isinstance(item, UpdateGeometryCommand):
+                    erase(item.before)
+                    paint(item.after)
+                elif isinstance(item, UpdateLabelAssignmentCommand):
+                    annotation = next((value for value in self.project.annotations if value.id == item.annotation_id), None)
+                    if annotation is not None:
+                        old = annotation.clone()
+                        old.label_id = item.before_label_id
+                        new = annotation.clone()
+                        new.label_id = item.after_label_id
+                        erase(old)
+                        paint(new)
+        return patch
+
+    def _on_label_deleted(self, label_value: int) -> None:
+        """删除只移除标签定义，像素和标注依产品约定保留。"""
+        self.status_label.setText(f"已删除标签值 {label_value}；对应 Mask 像素保留并以灰色显示")
+
     def _set_active_label(self, label_id: int) -> None:
         self._apply_label_choice(label_id)
 
@@ -1448,6 +1515,8 @@ class ImageSegmentationDialog(QDialog):
 
     def _refresh_label_ui(self) -> None:
         self.label_panel.blockSignals(True)
+        mask_values = [] if self.project.mask_data is None else np.unique(self.project.mask_data)
+        self.label_panel.set_reserved_values(mask_values)
         self.label_panel.set_labels(self.project.labels, self.project.active_label_id)
         self.label_panel.blockSignals(False)
 
@@ -1861,6 +1930,67 @@ class ImageSegmentationDialog(QDialog):
         except Exception as exc:
             QMessageBox.warning(self, "导入失败", str(exc))
 
+    def import_mask(self) -> None:
+        """导入单波段分类 Mask；该操作始终替换当前 Mask 与标签列表。"""
+        if self.project.image_asset is None:
+            QMessageBox.warning(self, "提示", "请先打开待分割影像，再导入 Mask。")
+            return
+        if not self._finish_node_edit_session() or not self._handle_pending_magic_session():
+            return
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "导入 Mask（替换）",
+            self._last_mask_dir or self._last_image_dir,
+            "分类 Mask (*.tif *.tiff *.png *.bmp)",
+        )
+        if not file_path:
+            return
+        reply = QMessageBox.question(
+            self,
+            "替换当前 Mask",
+            "导入将替换当前 Mask、标签列表和撤销/重做历史。\n"
+            "如需合并多个 Mask，请先在外部完成合并。是否继续？",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            mask, asset = import_mask_for_image(file_path, self.project.image_asset)
+            self._replace_imported_mask(mask, asset)
+        except Exception as exc:
+            QMessageBox.warning(self, "导入 Mask 失败", str(exc))
+            return
+        self._last_mask_dir = str(Path(file_path).parent)
+        self.project_manager.settings.setValue("last_mask_dir", self._last_mask_dir)
+        QMessageBox.information(self, "导入 Mask", f"已导入 {len(asset['values'])} 个分类值。")
+
+    def _replace_imported_mask(self, mask: np.ndarray, mask_asset: dict) -> None:
+        """无 UI 的替换入口，便于测试与后续拖放扩展。"""
+        values = [int(value) for value in np.unique(mask) if int(value) != 0]
+        labels: list[LabelClass] = []
+        colors: list[str] = []
+        for value in values:
+            color = self._next_import_label_color(colors)
+            colors.append(color)
+            labels.append(LabelClass(value, f"类别 {value}", color, str(value)))
+        self._set_project_mask(mask)
+        self.project.mask_asset = dict(mask_asset)
+        self.project.labels = labels
+        self.label_store.set_labels(labels)
+        self.project.active_label_id = labels[0].id if labels else None
+        self.command_stack = CommandStack(self.project)
+        self._refresh_label_ui()
+        for canvas in self._all_canvases():
+            canvas.set_tool_color(self._active_label_color())
+        self._refresh_canvas()
+        self._set_dirty(True)
+
+    @staticmethod
+    def _next_import_label_color(colors: list[str]) -> str:
+        from src.widgets.label_panel_widget import generate_distinct_label_color
+        return generate_distinct_label_color(colors)
+
     def _on_layer_panel_files_dropped(self, paths: list[str]) -> None:
         if self.project.image_asset is None:
             QMessageBox.warning(self, "提示", "请先打开待分割影像，再导入辅助数据。")
@@ -2220,7 +2350,11 @@ class ImageSegmentationDialog(QDialog):
             default_name=default_name,
             default_dir=default_dir,
             has_geo=bool(self.project.image_asset.has_georef),
-            prefer_tif_mask=self.project.image_asset.path.lower().endswith((".tif", ".tiff")),
+            prefer_tif_mask=(
+                bool(self.project.image_asset.has_georef)
+                and self.project.image_asset.path.lower().endswith((".tif", ".tiff"))
+            ),
+            initial_settings=self._export_dialog_preferences(),
             parent=self,
         )
         if not settings:
@@ -2312,7 +2446,12 @@ class ImageSegmentationDialog(QDialog):
                         )
                     step_index += 1
                     self._update_progress(step_index * 100, maximum=max(total_steps * 100, 100))
-            self.project.export_prefs = dict(settings)
+            if not isinstance(self.project.export_prefs, dict):
+                self.project.export_prefs = {}
+            self.project.export_prefs["export_dialog"] = dict(settings)
+            self._saved_export_output_dir = str(settings["output_dir"])
+            # 导出选项属于项目状态；后续保存项目时必须写入 .seg_proj。
+            self._set_dirty(True)
             if failed_exports:
                 final_message = []
                 if exported_paths:
@@ -2334,8 +2473,26 @@ class ImageSegmentationDialog(QDialog):
     def _project_export_output_dir(project: SegmentationProject) -> str:
         """读取项目中已保存的导出目录；无有效设置时保持为空。"""
         preferences = project.export_prefs if isinstance(project.export_prefs, dict) else {}
-        output_dir = preferences.get("output_dir", "")
+        dialog_preferences = preferences.get("export_dialog", {})
+        if not isinstance(dialog_preferences, dict):
+            dialog_preferences = preferences
+        output_dir = dialog_preferences.get("output_dir", "")
         return str(output_dir).strip() if isinstance(output_dir, str) else ""
+
+    def _export_dialog_preferences(self) -> dict:
+        """读取项目保存的导出对话框设置，兼容旧项目的扁平结构。"""
+        preferences = self.project.export_prefs if isinstance(self.project.export_prefs, dict) else {}
+        nested = preferences.get("export_dialog")
+        if isinstance(nested, dict):
+            return dict(nested)
+        return {
+            key: preferences[key]
+            for key in (
+                "output_dir", "base_name", "export_vector", "export_mask", "vector_format",
+                "mask_format", "mask_encoding", "export_split_masks",
+            )
+            if key in preferences
+        }
 
     def _build_export_project_from_mask(self):
         if self.project.image_asset is None:
@@ -4031,14 +4188,14 @@ class ImageSegmentationDialog(QDialog):
         if bool(payload.buttons & (Qt.LeftButton | Qt.MiddleButton | Qt.RightButton)):
             return
         if not self.project.image_asset:
-            self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: - | Mask 标签: 无标签")
+            self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: - | Mask 标签: 无标签 | Mask 值: -")
             return
         row = int(np.floor(payload.y))
         col = int(np.floor(payload.x))
         if 0 <= row < self.project.image_asset.height and 0 <= col < self.project.image_asset.width:
             original_value = self.current_source.read_pixel(col, row) if self.current_source else None
             rendered_rgb = self.canvas.rendered_rgb_at(col, row) or self._rendered_rgb_from_original(original_value)
-            mask_label_name = self._mask_label_name_at(col, row)
+            mask_label_name, mask_label_value = self._mask_label_info_at(col, row)
             rgb_text = (
                 f"({rendered_rgb[0]}, {rendered_rgb[1]}, {rendered_rgb[2]})"
                 if rendered_rgb is not None else "-"
@@ -4053,23 +4210,24 @@ class ImageSegmentationDialog(QDialog):
                 if lon is not None and lat is not None:
                     geo_text = f" | 地理坐标: ({lon:.6f}, {lat:.6f})"
             self.mouse_pos_label.setText(
-                f"行: {row}, 列: {col} | 渲染RGB: {rgb_text} | 原值: {original_text} | Mask 标签: {mask_label_name}{geo_text}"
+                f"行: {row}, 列: {col} | 渲染RGB: {rgb_text} | 原值: {original_text}"
+                f" | Mask 标签: {mask_label_name} | Mask 值: {mask_label_value}{geo_text}"
             )
         else:
-            self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: - | Mask 标签: 无标签")
+            self.mouse_pos_label.setText("行: -, 列: - | 渲染RGB: - | 原值: - | Mask 标签: 无标签 | Mask 值: -")
 
-    def _mask_label_name_at(self, col: int, row: int) -> str:
+    def _mask_label_info_at(self, col: int, row: int) -> tuple[str, str]:
         if self.project.mask_data is None:
-            return "无标签"
+            return "无标签", "-"
         if not (0 <= row < self.project.mask_data.shape[0] and 0 <= col < self.project.mask_data.shape[1]):
-            return "无标签"
+            return "无标签", "-"
         label_id = int(self.project.mask_data[row, col])
         if label_id <= 0:
-            return "无标签"
+            return "无标签", "0"
         for label in self.project.labels:
             if label.id == label_id:
-                return label.name
-        return "无标签"
+                return label.name, str(label_id)
+        return "未定义标签", str(label_id)
 
     def _rendered_rgb_from_original(self, original_value):
         if original_value is None:

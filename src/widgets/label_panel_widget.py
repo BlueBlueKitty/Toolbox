@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSpinBox,
+    QMessageBox,
     QColorDialog,
     QLabel,
     QVBoxLayout,
@@ -29,6 +31,8 @@ from src.segmentation.models import LabelClass
 class LabelPanelWidget(QGroupBox):
     active_label_changed = Signal(int)
     labels_changed = Signal(object)
+    label_value_changed = Signal(int, int)
+    label_deleted = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__("标签", parent)
@@ -49,13 +53,21 @@ class LabelPanelWidget(QGroupBox):
         button_row = QHBoxLayout()
         self.add_button = QPushButton("新增")
         self.edit_button = QPushButton("编辑")
+        self.delete_button = QPushButton("删除")
         button_row.addWidget(self.add_button)
         button_row.addWidget(self.edit_button)
+        button_row.addWidget(self.delete_button)
         layout.addLayout(button_row)
         self.list_widget.currentRowChanged.connect(self._on_current_changed)
         self.add_button.clicked.connect(self._add_label)
         self.edit_button.clicked.connect(self._edit_label)
+        self.delete_button.clicked.connect(self._delete_label)
         self._labels: list[LabelClass] = []
+        self._reserved_values: set[int] = set()
+
+    def set_reserved_values(self, values) -> None:
+        """保留仍存在于 Mask、但可能尚未定义标签的类别值。"""
+        self._reserved_values = {int(value) for value in values if 0 < int(value) <= 65535}
 
     def set_labels(self, labels: list[LabelClass], active_label_id: int | None = None) -> None:
         self._labels = labels[:]
@@ -63,7 +75,7 @@ class LabelPanelWidget(QGroupBox):
         self.list_widget.clear()
         current_row = 0
         for index, label in enumerate(labels):
-            item = QListWidgetItem(f"{label.name}  快捷键 {label.shortcut}")
+            item = QListWidgetItem(f"{label.name} · 值 {label.id} · 快捷键 {label.shortcut}")
             item.setIcon(self._make_color_icon(label.color))
             item.setToolTip(f"颜色: {label.color}")
             self.list_widget.addItem(item)
@@ -78,7 +90,7 @@ class LabelPanelWidget(QGroupBox):
             self.active_label_changed.emit(self._labels[row].id)
 
     def _add_label(self) -> None:
-        next_id = max([label.id for label in self._labels], default=0) + 1
+        next_id = self._next_available_value()
         suggested_color = self._generate_next_label_color()
         dialog = LabelEditDialog(
             LabelClass(next_id, f"类别 {next_id}", suggested_color, str(next_id)),
@@ -89,10 +101,10 @@ class LabelPanelWidget(QGroupBox):
         if dialog.exec() != QDialog.Accepted:
             return
         created = dialog.label()
-        self._labels.append(LabelClass(next_id, created.name, created.color, created.shortcut))
+        self._labels.append(LabelClass(created.id, created.name, created.color, created.shortcut))
         self.labels_changed.emit(self._labels[:])
-        self.set_labels(self._labels, next_id)
-        self.active_label_changed.emit(next_id)
+        self.set_labels(self._labels, created.id)
+        self.active_label_changed.emit(created.id)
 
     def _edit_label(self) -> None:
         row = self.list_widget.currentRow()
@@ -103,9 +115,36 @@ class LabelPanelWidget(QGroupBox):
         if dialog.exec() != QDialog.Accepted:
             return
         edited = dialog.label()
-        self._labels[row] = LabelClass(label.id, edited.name, edited.color, edited.shortcut, label.visible, label.locked)
+        if edited.id != label.id:
+            self.label_value_changed.emit(label.id, edited.id)
+        self._labels[row] = LabelClass(edited.id, edited.name, edited.color, edited.shortcut, label.visible, label.locked)
         self.labels_changed.emit(self._labels[:])
-        self.set_labels(self._labels, label.id)
+        self.set_labels(self._labels, edited.id)
+
+    def _delete_label(self) -> None:
+        row = self.list_widget.currentRow()
+        if not (0 <= row < len(self._labels)):
+            return
+        label = self._labels[row]
+        confirmed = QMessageBox.question(
+            self,
+            "删除标签",
+            f"确定删除标签“{label.name}”（值 {label.id}）吗？\nMask 中值为 {label.id} 的像素会保留。",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if confirmed != QMessageBox.Yes:
+            return
+        self.label_deleted.emit(label.id)
+        del self._labels[row]
+        self.labels_changed.emit(self._labels[:])
+
+    def _next_available_value(self) -> int:
+        used = {int(label.id) for label in self._labels} | self._reserved_values
+        for value in range(1, 65536):
+            if value not in used:
+                return value
+        raise ValueError("标签值已用尽")
 
     def _make_color_icon(self, color_name: str) -> QIcon:
         pixmap = QPixmap(14, 14)
@@ -214,6 +253,11 @@ class LabelEditDialog(QDialog):
         layout.addWidget(QLabel("快捷键"))
         self.shortcut_edit = QLineEdit(label.shortcut)
         layout.addWidget(self.shortcut_edit)
+        layout.addWidget(QLabel("标签值"))
+        self.value_spin = QSpinBox()
+        self.value_spin.setRange(1, 65535)
+        self.value_spin.setValue(int(label.id))
+        layout.addWidget(self.value_spin)
         self.color_button = QPushButton()
         self.color_button.clicked.connect(self._choose_color)
         layout.addWidget(QLabel("标签颜色"))
@@ -230,6 +274,7 @@ class LabelEditDialog(QDialog):
         self.ok_button = buttons.button(QDialogButtonBox.Ok)
         self.name_edit.textChanged.connect(self._validate)
         self.shortcut_edit.textChanged.connect(self._validate)
+        self.value_spin.valueChanged.connect(self._validate)
         self._validate()
 
     def _choose_color(self):
@@ -248,6 +293,7 @@ class LabelEditDialog(QDialog):
     def _validate(self):
         name = self.name_edit.text().strip()
         shortcut = self.shortcut_edit.text().strip()
+        value = self.value_spin.value()
         color_name = self._color.name().lower()
         error = ""
         if not name:
@@ -256,6 +302,8 @@ class LabelEditDialog(QDialog):
             error = "标签名称已存在，请立即修改。"
         elif any(item.color.lower() == color_name and item.id != self._label_id for item in self._existing_labels):
             error = "标签颜色已存在，请立即修改。"
+        elif any(item.id == value and item.id != self._label_id for item in self._existing_labels):
+            error = "标签值已存在，请立即修改。"
         elif not shortcut:
             error = "快捷键不能为空。"
         self.validation_label.setText(error)
@@ -264,7 +312,7 @@ class LabelEditDialog(QDialog):
 
     def label(self) -> LabelClass:
         return LabelClass(
-            id=0,
+            id=self.value_spin.value(),
             name=self.name_edit.text().strip() or "未命名标签",
             color=self._color.name(),
             shortcut=self.shortcut_edit.text().strip() or "",

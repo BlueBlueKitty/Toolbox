@@ -45,7 +45,7 @@ class SegmentationExportDialog(QDialog):
     }
 
     MASK_ENCODINGS = {
-        "单通道标签值（0=背景，1…=标签）": "indexed",
+        "单通道标签值（保留用户设定值）": "indexed",
         "标签颜色（用于可视化）": "colored",
     }
 
@@ -65,7 +65,15 @@ class SegmentationExportDialog(QDialog):
             return "geo"
         return "image"
 
-    def __init__(self, default_name: str, default_dir: str, has_geo: bool, prefer_tif_mask: bool, parent=None):
+    def __init__(
+        self,
+        default_name: str,
+        default_dir: str,
+        has_geo: bool,
+        prefer_tif_mask: bool,
+        parent=None,
+        initial_settings: dict | None = None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("导出设置")
         self.resize(520, 390)
@@ -112,6 +120,7 @@ class SegmentationExportDialog(QDialog):
 
         self.mask_encoding_combo = QComboBox()
         self.mask_encoding_combo.addItems(self.MASK_ENCODINGS.keys())
+        self.mask_encoding_combo.setCurrentText("标签颜色（用于可视化）")
         form.addRow("Mask 编码", self.mask_encoding_combo)
 
         self.export_split_masks_check = QCheckBox("另按标签分别导出 Mask（文件名前缀1、2、3…）")
@@ -132,7 +141,32 @@ class SegmentationExportDialog(QDialog):
         self.vector_format_combo.currentTextChanged.connect(self._update_enabled_state)
         self.mask_format_combo.currentTextChanged.connect(self._update_enabled_state)
         self.mask_encoding_combo.currentTextChanged.connect(self._update_enabled_state)
+        self._apply_initial_settings(initial_settings or {})
         self._update_enabled_state()
+
+    def _apply_initial_settings(self, settings: dict) -> None:
+        """仅恢复有效的项目导出设置，旧项目则保留当前默认值。"""
+        if not isinstance(settings, dict):
+            return
+        if isinstance(settings.get("base_name"), str) and settings["base_name"].strip():
+            self.base_name_edit.setText(settings["base_name"].strip())
+        if isinstance(settings.get("output_dir"), str) and settings["output_dir"].strip():
+            self.dir_edit.setText(settings["output_dir"].strip())
+        self.export_vector_check.setChecked(bool(settings.get("export_vector", self.export_vector_check.isChecked())))
+        self.export_mask_check.setChecked(bool(settings.get("export_mask", self.export_mask_check.isChecked())))
+        self.export_split_masks_check.setChecked(bool(settings.get("export_split_masks", self.export_split_masks_check.isChecked())))
+        self._set_combo_value(self.vector_format_combo, settings.get("vector_format"))
+        self._set_combo_value(self.mask_format_combo, settings.get("mask_format"))
+        encoding = settings.get("mask_encoding")
+        for display_name, value in self.MASK_ENCODINGS.items():
+            if value == encoding:
+                self.mask_encoding_combo.setCurrentText(display_name)
+                break
+
+    @staticmethod
+    def _set_combo_value(combo: QComboBox, value) -> None:
+        if isinstance(value, str) and combo.findText(value) >= 0:
+            combo.setCurrentText(value)
 
     def _browse_dir(self) -> None:
         current = self.dir_edit.text().strip()
@@ -148,7 +182,7 @@ class SegmentationExportDialog(QDialog):
         self.mask_encoding_combo.setEnabled(mask_enabled)
         self.export_split_masks_check.setEnabled(mask_enabled)
         if self.MASK_ENCODINGS[self.mask_encoding_combo.currentText()] == "indexed":
-            self.hint_label.setText("单通道标签值：背景为 0，标签按标签面板顺序连续写为 1、2、3……")
+            self.hint_label.setText("单通道标签值：背景为 0，其余像素保留标签面板中设定的类别值。")
         elif self.mask_format_combo.currentText() == "GeoTIFF":
             self.hint_label.setText("标签颜色：GeoTIFF 写入单波段调色板，用于可视化。")
         else:
@@ -187,8 +221,23 @@ class SegmentationExportDialog(QDialog):
         }
 
     @classmethod
-    def get_settings(cls, default_name: str, default_dir: str, has_geo: bool, prefer_tif_mask: bool, parent=None):
-        dialog = cls(default_name, default_dir, has_geo, prefer_tif_mask, parent)
+    def get_settings(
+        cls,
+        default_name: str,
+        default_dir: str,
+        has_geo: bool,
+        prefer_tif_mask: bool,
+        parent=None,
+        initial_settings: dict | None = None,
+    ):
+        dialog = cls(
+            default_name,
+            default_dir,
+            has_geo,
+            prefer_tif_mask,
+            parent=parent,
+            initial_settings=initial_settings,
+        )
         if dialog.exec() != QDialog.Accepted:
             return None
         return dialog._current_settings()
