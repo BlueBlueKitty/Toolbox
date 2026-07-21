@@ -161,6 +161,11 @@ class ImageSegmentationDialog(QDialog):
         self._mask_paint_bbox: tuple[int, int, int, int] | None = None
         self._mask_paint_before_patch: np.ndarray | None = None
         self._last_mask_paint_point: tuple[float, float] | None = None
+        self._selected_mask_components: list[dict] = []
+        self._mask_selection_dash_offset = 0.0
+        self._mask_selection_timer = QTimer(self)
+        self._mask_selection_timer.setInterval(100)
+        self._mask_selection_timer.timeout.connect(self._advance_mask_selection_animation)
         self._merge_preview_entries: list[dict] = []
         self._preview_undo_stack: list[dict] = []
         self._preview_redo_stack: list[dict] = []
@@ -1490,6 +1495,8 @@ class ImageSegmentationDialog(QDialog):
         self._apply_label_choice(label_id)
 
     def _apply_label_choice(self, label_id: int) -> None:
+        if self._selected_mask_components:
+            self._relabel_selected_mask_components(int(label_id))
         selected_annotations = [
             item for item in self.project.annotations
             if item.id in self.tool_controller.selected_annotation_ids and item.label_id != label_id
@@ -1974,6 +1981,7 @@ class ImageSegmentationDialog(QDialog):
             color = self._next_import_label_color(colors)
             colors.append(color)
             labels.append(LabelClass(value, f"类别 {value}", color, str(value)))
+        self._clear_mask_selection()
         self._set_project_mask(mask)
         self.project.mask_asset = dict(mask_asset)
         self.project.labels = labels
@@ -2524,6 +2532,7 @@ class ImageSegmentationDialog(QDialog):
         if not self._finish_node_edit_session():
             return
         if self.command_stack.undo():
+            self._clear_mask_selection()
             self._mark_mask_overlay_dirty()
             self.tool_controller.set_annotations(self.project.annotations)
             self._refresh_canvas()
@@ -2538,6 +2547,7 @@ class ImageSegmentationDialog(QDialog):
         if not self._finish_node_edit_session():
             return
         if self.command_stack.redo():
+            self._clear_mask_selection()
             self._mark_mask_overlay_dirty()
             self.tool_controller.set_annotations(self.project.annotations)
             self._refresh_canvas()
@@ -2615,6 +2625,8 @@ class ImageSegmentationDialog(QDialog):
     def _escape_action(self) -> None:
         if self.tool_controller.active_tool == SegmentationToolController.TOOL_MAGIC_WAND and self._preview_mask is not None:
             self._clear_magic_preview()
+        elif self._selected_mask_components:
+            self._clear_mask_selection()
         elif self.tool_controller.selected_annotation_ids:
             self._set_controller_selection(set())
         else:
@@ -2625,7 +2637,7 @@ class ImageSegmentationDialog(QDialog):
             self.tool_controller.active_tool == SegmentationToolController.TOOL_BROWSE
             and payload.button == Qt.LeftButton
         ):
-            self._show_raster_pixel_menu(payload)
+            self._select_mask_component(payload.x, payload.y, bool(payload.modifiers & Qt.ControlModifier))
             return
         if self._handle_mask_paint_payload(payload, begin=True):
             return
@@ -2659,6 +2671,127 @@ class ImageSegmentationDialog(QDialog):
             action = menu.addAction(f"{name}: {text}")
             action.setEnabled(False)
         menu.exec(QCursor.pos())
+
+    def _select_mask_component(self, image_x: float, image_y: float, additive: bool = False) -> None:
+        """Select the clicked non-background Mask connected component (8-neighbourhood)."""
+        mask = self.project.mask_data
+        x, y = int(np.floor(image_x)), int(np.floor(image_y))
+        if mask is None or not (0 <= y < mask.shape[0] and 0 <= x < mask.shape[1]):
+            if not additive:
+                self._clear_mask_selection()
+            return
+        label_id = int(mask[y, x])
+        if label_id <= 0:
+            if not additive:
+                self._clear_mask_selection()
+            return
+        try:
+            import cv2
+            binary = np.ascontiguousarray(mask == label_id, dtype=np.uint8)
+            component_count, component_map, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+        except Exception as exc:
+            self.status_label.setText(f"无法选择 Mask：{exc}")
+            return
+        component_id = int(component_map[y, x])
+        if component_id <= 0 or component_id >= component_count:
+            if not additive:
+                self._clear_mask_selection()
+            return
+        left = int(stats[component_id, cv2.CC_STAT_LEFT])
+        top = int(stats[component_id, cv2.CC_STAT_TOP])
+        width = int(stats[component_id, cv2.CC_STAT_WIDTH])
+        height = int(stats[component_id, cv2.CC_STAT_HEIGHT])
+        area = int(stats[component_id, cv2.CC_STAT_AREA])
+        component_mask = (component_map[top:top + height, left:left + width] == component_id).astype(np.uint8)
+        selection = {
+            "bbox": (left, top, width, height),
+            "mask": component_mask,
+            "label_id": label_id,
+            "area": area,
+        }
+        selection_index = next(
+            (
+                index for index, item in enumerate(self._selected_mask_components)
+                if item["label_id"] == label_id and item["bbox"] == selection["bbox"]
+            ),
+            None,
+        )
+        if additive and selection_index is not None:
+            self._selected_mask_components.pop(selection_index)
+        elif additive:
+            self._selected_mask_components.append(selection)
+        else:
+            self._selected_mask_components = [selection]
+        self._set_controller_selection(set())
+        self._mask_selection_dash_offset = 0.0
+        if self._selected_mask_components:
+            self._mask_selection_timer.start()
+        else:
+            self._mask_selection_timer.stop()
+        self._update_mask_selection_display()
+        selected_count = len(self._selected_mask_components)
+        if selected_count:
+            label_name = next((item.name for item in self.project.labels if item.id == label_id), f"标签 {label_id}")
+            hint = "Ctrl+点击可继续多选" if not additive else "Ctrl+再次点击可取消选择"
+            self.status_label.setText(f"已选中 {selected_count} 个 Mask 区域；当前：{label_name}（{area:,} 像素）。{hint}，点击标签可批量修改类别")
+        else:
+            self.status_label.setText("已取消 Mask 选择")
+
+    def _relabel_selected_mask_components(self, label_id: int) -> None:
+        if not self._selected_mask_components or self.project.mask_data is None:
+            return
+        changed_selections = [
+            item for item in self._selected_mask_components
+            if int(item["label_id"]) != label_id
+        ]
+        if not changed_selections:
+            return
+        left = min(item["bbox"][0] for item in changed_selections)
+        top = min(item["bbox"][1] for item in changed_selections)
+        right = max(item["bbox"][0] + item["bbox"][2] for item in changed_selections)
+        bottom = max(item["bbox"][1] + item["bbox"][3] for item in changed_selections)
+        bbox = (left, top, right - left, bottom - top)
+        before_patch = self._extract_mask_patch(bbox)
+        if before_patch is None:
+            self._clear_mask_selection()
+            return
+        after_patch = before_patch.copy()
+        for selection in changed_selections:
+            x, y, width, height = selection["bbox"]
+            offset_x, offset_y = x - left, y - top
+            region = after_patch[offset_y:offset_y + height, offset_x:offset_x + width]
+            region[np.asarray(selection["mask"], dtype=bool)] = int(label_id)
+            selection["label_id"] = int(label_id)
+        self.command_stack.push(UpdateMaskPatchCommand(bbox, before_patch, after_patch))
+        self._mark_mask_overlay_dirty()
+        self._set_dirty(True)
+        self._refresh_canvas()
+        label_name = next((item.name for item in self.project.labels if item.id == label_id), f"标签 {label_id}")
+        self.status_label.setText(f"已将 {len(changed_selections)} 个选中 Mask 区域修改为：{label_name}（值 {label_id}）")
+
+    def _clear_mask_selection(self) -> None:
+        if not self._selected_mask_components:
+            return
+        self._selected_mask_components = []
+        self._mask_selection_timer.stop()
+        self._update_mask_selection_display()
+
+    def _advance_mask_selection_animation(self) -> None:
+        if not self._selected_mask_components:
+            self._mask_selection_timer.stop()
+            return
+        self._mask_selection_dash_offset += 1.2
+        for canvas in self._all_canvases():
+            canvas.set_mask_selection_dash_offset(self._mask_selection_dash_offset)
+
+    def _update_mask_selection_display(self) -> None:
+        selections = self._selected_mask_components
+        for canvas in self._all_canvases():
+            if not selections:
+                canvas.update_mask_selections([])
+            else:
+                canvas.update_mask_selections([(item["mask"], item["bbox"]) for item in selections])
+                canvas.set_mask_selection_dash_offset(self._mask_selection_dash_offset)
 
     def _read_aux_raster_pixel(self, layer: dict, image_x: int, image_y: int):
         source = layer.get("source")
@@ -2759,6 +2892,8 @@ class ImageSegmentationDialog(QDialog):
                     break
             return
         self.tool_controller.set_tool(target)
+        if target != SegmentationToolController.TOOL_BROWSE:
+            self._clear_mask_selection()
         for canvas in self._all_canvases():
             canvas.set_interaction_mode(target)
         if target != SegmentationToolController.TOOL_MAGIC_WAND:
@@ -3804,6 +3939,7 @@ class ImageSegmentationDialog(QDialog):
                 active_vertex=self.tool_controller.selected_vertex_index,
             )
             canvas.update_raster_mask(raster_rgba, raster_bbox)
+        self._update_mask_selection_display()
         self._refresh_auxiliary_layers()
         self._update_preview_display()
         for layer_id, vis_map in self._layer_window_visibility.items():
@@ -4264,6 +4400,7 @@ class ImageSegmentationDialog(QDialog):
             bbox = (0, 0, self.project.image_asset.width, self.project.image_asset.height)
             after_patch = np.zeros((bbox[3], bbox[2]), dtype=np.uint16)
             self._push_mask_only_patch(bbox, after_patch)
+            self._clear_mask_selection()
             self.tool_controller.set_annotations(self.project.annotations)
             self.tool_controller.selected_annotation_id = None
             self._refresh_canvas()

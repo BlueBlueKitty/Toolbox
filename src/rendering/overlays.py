@@ -11,6 +11,11 @@ from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsSimpleTextItem
 
 import pyqtgraph as pg
 
+try:
+    import cv2
+except Exception:  # pragma: no cover - OpenCV is an optional rendering dependency.
+    cv2 = None
+
 
 def build_polygon_path(feature) -> QPainterPath:
     path = QPainterPath()
@@ -110,6 +115,74 @@ class PreviewMaskItem(pg.ImageItem):
         self.setImage(rgba, autoLevels=False)
         x, y, width, height = bbox
         self.setRect(pg.QtCore.QRectF(x, y, width, height))
+
+
+class MaskSelectionItem:
+    """Photoshop-style animated outline for a selected Mask connected component."""
+
+    def __init__(self):
+        self.path_item = QGraphicsPathItem()
+        self.white_path_item = QGraphicsPathItem(self.path_item)
+        self.path_item.setZValue(20_100)
+        self.path_item.setBrush(QBrush(Qt.NoBrush))
+        self.white_path_item.setBrush(QBrush(Qt.NoBrush))
+        self._dash_offset = 0.0
+        self._set_pen()
+        self.clear()
+
+    def update_mask(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None) -> None:
+        self.update_masks([] if mask is None or bbox is None else [(mask, bbox)])
+
+    def update_masks(self, selections) -> None:
+        """Update one combined outline for one or more selected local Mask patches."""
+        valid_selections = [
+            (mask, bbox)
+            for mask, bbox in (selections or [])
+            if mask is not None and bbox is not None and np.any(mask)
+        ]
+        if not valid_selections:
+            self.clear()
+            return
+        path = QPainterPath()
+        for mask, bbox in valid_selections:
+            binary = np.ascontiguousarray(mask > 0, dtype=np.uint8)
+            if cv2 is not None:
+                contours, _ = cv2.findContours(binary, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+                x0, y0, _, _ = bbox
+                for contour in contours:
+                    if contour.size == 0:
+                        continue
+                    points = contour.reshape(-1, 2)
+                    path.moveTo(float(x0 + points[0][0]) + 0.5, float(y0 + points[0][1]) + 0.5)
+                    for x, y in points[1:]:
+                        path.lineTo(float(x0 + x) + 0.5, float(y0 + y) + 0.5)
+                    path.closeSubpath()
+            else:  # A compact fallback when OpenCV is unavailable.
+                x0, y0, width, height = bbox
+                path.addRect(float(x0), float(y0), float(width), float(height))
+        self.path_item.setPath(path)
+        self.white_path_item.setPath(path)
+        self.path_item.setVisible(not path.isEmpty())
+
+    def set_dash_offset(self, offset: float) -> None:
+        self._dash_offset = float(offset)
+        self._set_pen()
+
+    def _set_pen(self) -> None:
+        for item, color, offset in (
+            (self.path_item, QColor("#111111"), self._dash_offset),
+            (self.white_path_item, QColor("#ffffff"), self._dash_offset + 3.0),
+        ):
+            pen = QPen(color)
+            pen.setWidthF(1.6)
+            pen.setCosmetic(True)
+            pen.setDashPattern([3.0, 3.0])
+            pen.setDashOffset(offset)
+            item.setPen(pen)
+
+    def clear(self) -> None:
+        self.path_item.setPath(QPainterPath())
+        self.path_item.setVisible(False)
 
 
 class DraftOverlayItem:

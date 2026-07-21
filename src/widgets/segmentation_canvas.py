@@ -14,7 +14,7 @@ import pyqtgraph as pg
 
 from src.rendering.canvas import LayeredRasterCanvas
 from src.rendering.models import LayerSpec
-from src.rendering.overlays import DraftOverlayItem, PreviewMaskItem, SnapIndicatorItem
+from src.rendering.overlays import DraftOverlayItem, MaskSelectionItem, PreviewMaskItem, SnapIndicatorItem
 
 
 @dataclass
@@ -62,9 +62,11 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self.view_box.setMouseMode(pg.ViewBox.PanMode)
 
         self.preview_mask_item = PreviewMaskItem()
+        self.mask_selection_item = MaskSelectionItem()
         self.draft_item = DraftOverlayItem()
         self.snap_item = SnapIndicatorItem()
         self.view_box.addItem(self.preview_mask_item)
+        self.mask_selection_item.path_item.setParentItem(self.view_box.childGroup)
         self.view_box.addItem(self.draft_item.scatter)
         self.draft_item.path_item.setParentItem(self.view_box.childGroup)
         self.snap_item.path_item.setParentItem(self.view_box.childGroup)
@@ -234,6 +236,15 @@ class SegmentationCanvas(LayeredRasterCanvas):
 
     def update_preview_mask(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None, color_name: str = "#ffd43b") -> None:
         self.preview_mask_item.update_mask(mask, bbox, color_name)
+
+    def update_mask_selection(self, mask: np.ndarray | None, bbox: tuple[int, int, int, int] | None) -> None:
+        self.mask_selection_item.update_mask(mask, bbox)
+
+    def update_mask_selections(self, selections) -> None:
+        self.mask_selection_item.update_masks(selections)
+
+    def set_mask_selection_dash_offset(self, offset: float) -> None:
+        self.mask_selection_item.set_dash_offset(offset)
 
     def update_preview_polygons(self, annotations, color_name: str = "#ffd43b") -> None:
         self.set_vector_overlay(
