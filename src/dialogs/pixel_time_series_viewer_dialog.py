@@ -228,7 +228,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self._converted_to_db = False  # 是否已转换为dB
         self._loading_new_series = False
         self._material_icon_family = self._load_material_icon_font()
-        self._theme_mode = "dark"
+        self._theme_mode = getattr(parent, "theme_mode", "dark")
         self._last_jump_row_1b = 1
         self._last_jump_col_1b = 1
         
@@ -300,7 +300,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
         self.toggle_sidebar_btn = QToolButton()
         self.toggle_sidebar_btn.setToolTip("渲染控制侧边栏")
         self.toggle_sidebar_btn.setAutoRaise(True)
-        self._update_sidebar_toggle_icon()
+        self._refresh_toolbar_icons()
         self.toggle_sidebar_btn.setIconSize(QSize(20, 20))
         self.toggle_sidebar_btn.clicked.connect(self._toggle_sidebar)
         control_layout1.addWidget(self.toggle_sidebar_btn)
@@ -534,7 +534,7 @@ class PixelTimeSeriesViewerDialog(QDialog):
             viewer = getattr(self, f"image_viewer_{viewer_id}", None)
             if viewer is not None:
                 viewer._apply_background_from_palette()
-        self._update_sidebar_toggle_icon()
+        self._refresh_toolbar_icons()
 
     def _on_viewer_files_dropped(self, viewer_id: int, paths: list[str]) -> None:
         mode, target = self._classify_drop_target(paths)
@@ -1213,7 +1213,10 @@ class PixelTimeSeriesViewerDialog(QDialog):
             pixmap = pixmap.transformed(QTransform().rotate(float(rotation_angle)), Qt.SmoothTransformation)
         return QIcon(pixmap)
 
-    def _update_sidebar_toggle_icon(self) -> None:
+    def _refresh_toolbar_icons(self) -> None:
+        """Regenerate Material icons after the foreground theme color changes."""
+        if hasattr(self, "toggle_window_layout_btn") and self.toggle_window_layout_btn is not None:
+            self.toggle_window_layout_btn.setIcon(self._material_icon("splitscreen", rotation_angle=90))
         if hasattr(self, "toggle_sidebar_btn") and self.toggle_sidebar_btn is not None:
             self.toggle_sidebar_btn.setIcon(self._material_icon("tune"))
 

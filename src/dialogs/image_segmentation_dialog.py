@@ -339,6 +339,7 @@ class ImageSegmentationDialog(QDialog):
     def _create_ui(self) -> None:
         main_layout = QVBoxLayout(self)
         self.toolbar = QToolBar()
+        self._apply_toolbar_theme(getattr(self.parent(), "theme_mode", "dark"))
         main_layout.addWidget(self.toolbar)
 
         self.open_action = QAction(self.style().standardIcon(QStyle.SP_DialogOpenButton), "打开图像", self)
@@ -759,8 +760,28 @@ class ImageSegmentationDialog(QDialog):
         super().changeEvent(event)
 
     def on_theme_mode_changed(self, _mode: str) -> None:
+        self._apply_toolbar_theme(_mode)
         self._refresh_toolbar_icons()
         self.magic_panel.refresh_icons()
+
+    def _apply_toolbar_theme(self, mode: str) -> None:
+        """Apply the light-theme selected state to all checkable tool buttons."""
+        # The rule belongs on the dialog rather than the toolbar so checkable
+        # tool buttons in parameter panels receive the same selected feedback.
+        self.toolbar.setStyleSheet("")
+        if mode == "light":
+            self.setStyleSheet(
+                "QToolButton:checked {"
+                "background-color: #DCEBFA;"
+                "border: 1px solid #8BB9E8;"
+                "border-radius: 4px;"
+                "}"
+                "QToolButton:checked:hover {background-color: #C8DDF5;}"
+                "QToolButton:checked:pressed {background-color: #B3D2EF;}"
+            )
+        else:
+            # Keep the native dark-theme appearance unchanged.
+            self.setStyleSheet("")
 
     def _refresh_toolbar_icons(self) -> None:
         if not hasattr(self, "open_action"):

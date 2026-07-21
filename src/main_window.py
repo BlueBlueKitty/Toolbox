@@ -517,6 +517,32 @@ class MainWindow(QMainWindow):
             palette.setColor(QPalette.PlaceholderText, QColor(130, 130, 130))
         return palette
 
+    @staticmethod
+    def _light_panel_stylesheet() -> str:
+        """Provide visible panel boundaries without changing the native button style."""
+        return (
+            "QGroupBox {"
+            "border: 1px solid #CBD5E1; border-radius: 5px;"
+            "margin-top: 0.7em; padding-top: 0.5em;"
+            "}"
+            "QGroupBox::title {"
+            "subcontrol-origin: margin; subcontrol-position: top left;"
+            "left: 9px; padding: 0 4px; color: #334155; background: #F5F6F8;"
+            "}"
+            "QSplitter::handle {background: #CBD5E1;}"
+            "QSplitter::handle:horizontal {width: 2px;}"
+            "QSplitter::handle:vertical {height: 2px;}"
+            "QSplitter::handle:hover {background: #94A3B8;}"
+            "QMenu {"
+            "background: #FFFFFF; color: #1E293B; border: 1px solid #CBD5E1;"
+            "padding: 4px;"
+            "}"
+            "QMenu::item {padding: 6px 24px 6px 10px; border-radius: 3px;}"
+            "QMenu::item:selected {background: #DBEAFE; color: #1E293B;}"
+            "QMenu::item:disabled {color: #94A3B8;}"
+            "QMenu::separator {height: 1px; background: #E2E8F0; margin: 4px 6px;}"
+        )
+
     def _apply_theme(self, mode: str, persist: bool = True) -> None:
         app = QApplication.instance()
         if app is None:
@@ -525,6 +551,7 @@ class MainWindow(QMainWindow):
         if self._native_style_name:
             app.setStyle(self._native_style_name)
         app.setPalette(self._build_palette(mode))
+        app.setStyleSheet(self._light_panel_stylesheet() if mode == "light" else "")
         self.theme_mode = mode
         if mode == "dark":
             self.setStyleSheet(
