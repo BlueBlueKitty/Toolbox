@@ -588,6 +588,7 @@ class ImageSegmentationDialog(QDialog):
         self.canvas.set_interaction_mode(self.tool_controller.active_tool)
         self.canvas.set_tool_color(self._active_label_color())
         self.canvas.set_brush_radius(max(0.2, float(self.magic_panel.brush_size())))
+        self.canvas.set_brush_rectangle_style(self.magic_panel.brush_rectangle_style_enabled())
         if self.current_source is not None:
             self.canvas.set_render_config(self.render_config)
             self._refresh_canvas()
@@ -734,6 +735,8 @@ class ImageSegmentationDialog(QDialog):
         self.magic_panel.slider_config_changed.connect(self._on_magic_slider_config_changed)
         self.magic_panel.brush_size_changed.connect(self._on_brush_size_changed)
         self.magic_panel.brush_size_changed.connect(lambda *_: self._sync_magic_panel_state_to_project(mark_dirty=True))
+        self.magic_panel.brush_rectangle_style_changed.connect(self._on_brush_rectangle_style_changed)
+        self.magic_panel.brush_rectangle_style_changed.connect(lambda *_: self._sync_magic_panel_state_to_project(mark_dirty=True))
         self.magic_panel.confirm_requested.connect(self._confirm_magic_preview)
         self.magic_panel.cancel_requested.connect(self._clear_magic_preview)
         self.render_settings.settings_changed.connect(self.on_render_settings_changed)
@@ -1704,6 +1707,10 @@ class ImageSegmentationDialog(QDialog):
         value = max(0.2, float(radius))
         for canvas in self._all_canvases():
             canvas.set_brush_radius(value)
+
+    def _on_brush_rectangle_style_changed(self, enabled: bool) -> None:
+        for canvas in self._all_canvases():
+            canvas.set_brush_rectangle_style(enabled)
 
     def _refresh_label_ui(self) -> None:
         self.label_panel.blockSignals(True)
@@ -3216,9 +3223,12 @@ class ImageSegmentationDialog(QDialog):
             after_patch = np.zeros((y1 - y0, x1 - x0), dtype=np.uint16) if before_patch is None else before_patch.copy()
         if after_patch is None:
             after_patch = np.zeros((y1 - y0, x1 - x0), dtype=np.uint16)
-        yy, xx = np.ogrid[y0:y1, x0:x1]
-        disk = (xx - cx) ** 2 + (yy - cy) ** 2 <= float(radius) ** 2
-        after_patch[disk] = 0 if erase else int(self.project.active_label_id)
+        if self.magic_panel.brush_rectangle_style_enabled():
+            footprint = np.ones((y1 - y0, x1 - x0), dtype=bool)
+        else:
+            yy, xx = np.ogrid[y0:y1, x0:x1]
+            footprint = (xx - cx) ** 2 + (yy - cy) ** 2 <= float(radius) ** 2
+        after_patch[footprint] = 0 if erase else int(self.project.active_label_id)
         if self._mask_painting:
             self.project.mask_data[y0:y1, x0:x1] = after_patch
             self._mark_mask_overlay_dirty()
@@ -3533,6 +3543,9 @@ class ImageSegmentationDialog(QDialog):
                 return
             self._update_progress(70, "正在合并预览 Mask...", maximum=100)
             if self.magic_panel.merge_preview_enabled():
+                # 合并模式可能是在已有单次预览之后才开启。先把当前显示的
+                # 预览固化为一个条目，避免后续重建时只保留本次点击结果。
+                self._capture_current_preview_as_merge_entry()
                 if not self._merge_preview_has_seed((x, y)):
                     self._push_preview_history()
                 self._upsert_merge_preview_entry((x, y), mapped_mask, mapped_bbox)
@@ -3615,6 +3628,7 @@ class ImageSegmentationDialog(QDialog):
         self._update_progress(70, "正在合并预览 Mask...", maximum=100)
         x, y = seed
         if self.magic_panel.merge_preview_enabled():
+            self._capture_current_preview_as_merge_entry()
             if not self._merge_preview_has_seed(seed):
                 self._push_preview_history()
             self._upsert_merge_preview_entry(seed, mapped_mask, mapped_bbox)
@@ -3650,16 +3664,7 @@ class ImageSegmentationDialog(QDialog):
         if enabled:
             # 单次选区切换为合并选区时，当前预览本身就是合并结果的第一个条目。
             # 否则下一次点击会从空条目列表重建预览，导致原有选区被覆盖。
-            if (
-                not self._merge_preview_entries
-                and self._preview_mask is not None
-                and self._preview_bbox is not None
-            ):
-                seed = self._last_magic_seed
-                if seed is None and self.preview_selection is not None:
-                    seed = self.preview_selection.seed_point
-                if seed is not None:
-                    self._upsert_merge_preview_entry(seed, self._preview_mask, self._preview_bbox)
+            self._capture_current_preview_as_merge_entry()
             return
 
         self._merge_preview_entries = []
@@ -4772,6 +4777,21 @@ class ImageSegmentationDialog(QDialog):
         self._preview_outline_threads[request_id] = thread
         self._preview_outline_workers[request_id] = worker
         thread.start()
+
+    def _capture_current_preview_as_merge_entry(self) -> None:
+        """Preserve the visible pre-merge selection before rebuilding a union.
+
+        The preview mask is the source of truth while users are switching
+        between single and merge selection modes.  The entry list may still be
+        empty at that moment (including when a worker just completed), so never
+        assume the mode toggle itself was able to populate it.
+        """
+        if self._preview_mask is None or self._preview_bbox is None:
+            return
+        seed = self.preview_selection.seed_point if self.preview_selection is not None else self._last_magic_seed
+        if seed is None:
+            return
+        self._upsert_merge_preview_entry(tuple(seed), self._preview_mask, self._preview_bbox)
 
     def _on_preview_outline_finished(self, request_id: int, generation: int, path, error: str) -> None:
         if generation != self._preview_outline_generation or request_id != self._preview_outline_request_id:

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6.QtCore import QEvent, QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QTransform
-from PySide6.QtWidgets import QGraphicsEllipseItem
+from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsRectItem
 import pyqtgraph as pg
 
 from src.rendering.canvas import LayeredRasterCanvas
@@ -89,7 +89,9 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self._tool_color = QColor("#ffd43b")
         self._tool_icon_sources: dict[str, QIcon] = {}
         self._brush_radius = 6.0
+        self._brush_rectangle_style = False
         self._brush_range_item = QGraphicsEllipseItem()
+        self._brush_range_rect_item = QGraphicsRectItem()
         range_pen = QPen(self._tool_color, 1.2)
         range_pen.setCosmetic(True)
         self._brush_range_item.setPen(range_pen)
@@ -97,6 +99,11 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self._brush_range_item.setZValue(20_000)
         self._brush_range_item.setVisible(False)
         self.view_box.addItem(self._brush_range_item)
+        self._brush_range_rect_item.setPen(range_pen)
+        self._brush_range_rect_item.setBrush(Qt.NoBrush)
+        self._brush_range_rect_item.setZValue(20_000)
+        self._brush_range_rect_item.setVisible(False)
+        self.view_box.addItem(self._brush_range_rect_item)
         self._tool_cursors = {
             "magic_wand": self._make_tool_cursor("magic"),
             "brush": self._make_tool_cursor("brush"),
@@ -117,9 +124,16 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self.view_box.setMouseMode(pg.ViewBox.PanMode)
         self.graphics.viewport().setCursor(self._cursor_for_tool(tool_name))
         self._brush_range_item.setVisible(False)
+        self._brush_range_rect_item.setVisible(False)
 
     def set_brush_radius(self, radius: float) -> None:
         self._brush_radius = max(0.2, float(radius))
+        if self._last_pointer_payload is not None:
+            self._update_brush_range_indicator(self._last_pointer_payload)
+
+    def set_brush_rectangle_style(self, enabled: bool) -> None:
+        """Switch the brush range indicator between the circular and square footprint."""
+        self._brush_rectangle_style = bool(enabled)
         if self._last_pointer_payload is not None:
             self._update_brush_range_indicator(self._last_pointer_payload)
 
@@ -133,6 +147,7 @@ class SegmentationCanvas(LayeredRasterCanvas):
         pen = QPen(range_color, 1.2)
         pen.setCosmetic(True)
         self._brush_range_item.setPen(pen)
+        self._brush_range_rect_item.setPen(pen)
         self._rebuild_tool_cursors()
         if self._last_pointer_payload is not None:
             self._update_brush_range_indicator(self._last_pointer_payload)
@@ -432,11 +447,15 @@ class SegmentationCanvas(LayeredRasterCanvas):
     def _update_brush_range_indicator(self, payload: CanvasMousePayload) -> None:
         if self._interaction_mode not in {"brush", "eraser"}:
             self._brush_range_item.setVisible(False)
+            self._brush_range_rect_item.setVisible(False)
             return
         radius = float(max(0.2, self._brush_radius))
-        self._brush_range_item.setRect(payload.x - radius, payload.y - radius, radius * 2, radius * 2)
-        self._brush_range_item.setVisible(True)
-        self._brush_range_item.update()
+        range_item = self._brush_range_rect_item if self._brush_rectangle_style else self._brush_range_item
+        inactive_item = self._brush_range_item if self._brush_rectangle_style else self._brush_range_rect_item
+        range_item.setRect(payload.x - radius, payload.y - radius, radius * 2, radius * 2)
+        range_item.setVisible(True)
+        inactive_item.setVisible(False)
+        range_item.update()
         self.graphics.viewport().update()
 
     def _emit_mouse_moved(self, x: int, y: int, _value, event=None) -> None:

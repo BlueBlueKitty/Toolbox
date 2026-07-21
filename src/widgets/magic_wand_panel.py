@@ -35,6 +35,7 @@ class MagicWandPanel(QGroupBox):
     params_changed = Signal(object)
     merge_preview_changed = Signal(bool)
     brush_size_changed = Signal(float)
+    brush_rectangle_style_changed = Signal(bool)
     show_new_region_only_changed = Signal(bool)
     confirm_requested = Signal()
     cancel_requested = Signal()
@@ -127,16 +128,18 @@ class MagicWandPanel(QGroupBox):
         layout.addRow(self._form_label("填补孔洞", "控制识别结果中内部孔洞的填补方式。"), fill_holes_row)
 
         self.brush_size_slider, self.brush_size_value = self._make_slider(1, 104, 10)
-        self.brush_size_slider.setToolTip("笔刷和橡皮擦的直径。")
+        self.brush_size_slider.setToolTip("笔刷和橡皮擦的作用范围。")
         brush_label, self.brush_settings_btn = self._form_label_with_settings(
             "笔刷/橡皮擦粗细",
             "控制笔刷和橡皮擦的作用范围。",
             "brush_size",
         )
-        layout.addRow(
-            brush_label,
-            self._slider_row(self.brush_size_slider, self.brush_size_value),
-        )
+        brush_row = self._slider_row(self.brush_size_slider, self.brush_size_value)
+        brush_row.layout().addSpacing(8)
+        self.brush_rectangle_style_check = QCheckBox("矩形样式")
+        self.brush_rectangle_style_check.setToolTip("勾选后笔刷和橡皮擦使用矩形范围；未勾选时使用圆形范围。")
+        brush_row.layout().addWidget(self.brush_rectangle_style_check)
+        layout.addRow(brush_label, brush_row)
 
         self.confirm_button = QPushButton("确认预览")
         self.cancel_button = QPushButton("取消预览")
@@ -155,6 +158,7 @@ class MagicWandPanel(QGroupBox):
         self.merge_preview_button.clicked.connect(lambda checked: self._set_merge_preview(checked))
         self.show_new_region_only_check.toggled.connect(self.show_new_region_only_changed.emit)
         self.brush_size_slider.valueChanged.connect(lambda *_: self.brush_size_changed.emit(self.brush_size()))
+        self.brush_rectangle_style_check.toggled.connect(self.brush_rectangle_style_changed.emit)
         self.tolerance_slider.valueChanged.connect(lambda value: self._on_slider_value_changed("tolerance", value))
         self.brush_size_slider.valueChanged.connect(lambda value: self._on_slider_value_changed("brush_size", value))
         for widget in [
@@ -194,6 +198,9 @@ class MagicWandPanel(QGroupBox):
 
     def only_show_new_region_enabled(self) -> bool:
         return self.show_new_region_only_check.isChecked()
+
+    def brush_rectangle_style_enabled(self) -> bool:
+        return self.brush_rectangle_style_check.isChecked()
 
     def _set_merge_preview(self, enabled: bool) -> None:
         self.merge_preview_button.blockSignals(True)
@@ -346,6 +353,7 @@ class MagicWandPanel(QGroupBox):
             "slider_configs": self.get_slider_configs(),
             "tolerance": int(self.tolerance_slider.value()),
             "brush_size": int(self.brush_size_slider.value()),
+            "brush_rectangle_style": bool(self.brush_rectangle_style_enabled()),
             "similarity_mode": str(self.mode_combo.currentData()),
             "connectivity": int(self.connectivity_combo.currentText()),
             "min_area": str(self.min_area_edit.text().strip() or "16"),
@@ -378,6 +386,7 @@ class MagicWandPanel(QGroupBox):
         self.fill_small_holes_radio.setChecked(not fill_all)
         self._set_merge_preview(bool(payload.get("merge_preview", False)))
         self.show_new_region_only_check.setChecked(bool(payload.get("show_new_region_only", False)))
+        self.brush_rectangle_style_check.setChecked(bool(payload.get("brush_rectangle_style", False)))
         tolerance_value = payload.get("tolerance", self.tolerance_slider.value())
         brush_value = payload.get("brush_size", self.brush_size_slider.value())
         try:
@@ -396,6 +405,7 @@ class MagicWandPanel(QGroupBox):
             self.slider_config_changed.emit("all", self.get_slider_configs())
             self._emit_params()
             self.brush_size_changed.emit(self.brush_size())
+            self.brush_rectangle_style_changed.emit(self.brush_rectangle_style_enabled())
             self.show_new_region_only_changed.emit(self.only_show_new_region_enabled())
 
     def _set_mode_by_value(self, mode: str) -> None:
