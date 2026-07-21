@@ -1499,6 +1499,19 @@ class ImageSegmentationDialog(QDialog):
         self._apply_label_choice(label_id)
 
     def _apply_label_choice(self, label_id: int) -> None:
+        if (
+            self.tool_controller.active_tool == SegmentationToolController.TOOL_MAGIC_WAND
+            and self._preview_mask is not None
+            and self._preview_bbox is not None
+        ):
+            # 标签点击在魔法棒预览阶段即是“以此类别确认”，避免用户先切换
+            # 标签、再额外点击确认按钮的重复步骤。
+            self.project.active_label_id = int(label_id)
+            self._refresh_label_ui()
+            for canvas in self._all_canvases():
+                canvas.set_tool_color(self._active_label_color())
+            self._confirm_magic_preview()
+            return
         if self._selected_mask_components:
             self._relabel_selected_mask_components(int(label_id))
         selected_annotations = [
