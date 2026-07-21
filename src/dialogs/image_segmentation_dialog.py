@@ -2588,6 +2588,9 @@ class ImageSegmentationDialog(QDialog):
             self._set_dirty(True)
 
     def delete_selected(self) -> None:
+        if self._selected_mask_components:
+            self._delete_selected_mask_components()
+            return
         if self.tool_controller.selected_vertex_index is not None:
             updated = self.tool_controller.remove_selected_vertex()
             if updated is not None:
@@ -2607,6 +2610,33 @@ class ImageSegmentationDialog(QDialog):
         self.tool_controller.selected_annotation_ids.clear()
         self._refresh_canvas()
         self._set_dirty(True)
+
+    def _delete_selected_mask_components(self) -> None:
+        """Delete all selected Mask connected components as one undoable edit."""
+        if not self._selected_mask_components or self.project.mask_data is None:
+            return
+        left = min(item["bbox"][0] for item in self._selected_mask_components)
+        top = min(item["bbox"][1] for item in self._selected_mask_components)
+        right = max(item["bbox"][0] + item["bbox"][2] for item in self._selected_mask_components)
+        bottom = max(item["bbox"][1] + item["bbox"][3] for item in self._selected_mask_components)
+        bbox = (left, top, right - left, bottom - top)
+        before_patch = self._extract_mask_patch(bbox)
+        if before_patch is None:
+            self._clear_mask_selection()
+            return
+        after_patch = before_patch.copy()
+        for selection in self._selected_mask_components:
+            x, y, width, height = selection["bbox"]
+            offset_x, offset_y = x - left, y - top
+            region = after_patch[offset_y:offset_y + height, offset_x:offset_x + width]
+            region[np.asarray(selection["mask"], dtype=bool)] = 0
+        deleted_count = len(self._selected_mask_components)
+        self.command_stack.push(UpdateMaskPatchCommand(bbox, before_patch, after_patch))
+        self._mark_mask_overlay_dirty()
+        self._clear_mask_selection()
+        self._refresh_canvas()
+        self._set_dirty(True)
+        self.status_label.setText(f"已删除 {deleted_count} 个选中 Mask 区域；可按 Ctrl+Z 撤销")
 
     def _backspace_action(self) -> None:
         if self.tool_controller.active_tool == SegmentationToolController.TOOL_POLYGON:
