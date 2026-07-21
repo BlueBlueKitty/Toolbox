@@ -557,9 +557,10 @@ class LocalImageViewerDialog(QDialog):
         self._sidebar_visible = False
         self._sidebar_base_width = total_width
         self.render_sidebar.setVisible(False)
-        main_layout.addWidget(outer_splitter)
+        # 将最大化后的额外高度交给图像/图表工作区，而不是底部状态区。
+        main_layout.addWidget(outer_splitter, 1)
         self.operation_progress = OperationProgressWidget()
-        main_layout.addWidget(self.operation_progress)
+        main_layout.addWidget(self.operation_progress, 0)
         
     def _on_viewer_files_dropped(self, paths: list[str]) -> None:
         mode, target = self._classify_drop_target(paths)

@@ -277,7 +277,8 @@ class ImageSegmentationDialog(QDialog):
         self.toolbar.addAction(self.toggle_sidebar_action)
 
         splitter = QSplitter(Qt.Horizontal)
-        main_layout.addWidget(splitter)
+        # 图像工作区是主内容，最大化时应优先获得额外的垂直空间。
+        main_layout.addWidget(splitter, 1)
 
         self.workspace = MultiCanvasWorkspace(
             canvas_factory=lambda _wid: SegmentationCanvas(),
@@ -362,7 +363,7 @@ class ImageSegmentationDialog(QDialog):
         bottom_layout.addWidget(self.status_label)
         main_layout.addLayout(bottom_layout)
         self.operation_progress = OperationProgressWidget()
-        main_layout.addWidget(self.operation_progress)
+        main_layout.addWidget(self.operation_progress, 0)
 
     def _rebuild_layer_panel_items(self) -> None:
         self.layer_controller.rebuild_panel_items()

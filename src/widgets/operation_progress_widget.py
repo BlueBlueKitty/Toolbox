@@ -5,12 +5,15 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QSizePolicy, QWidget
 
 
 class OperationProgressWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        # 这是对话框底部的单行状态区，不应在窗口最大化时参与垂直扩张。
+        # 否则 QVBoxLayout 可能会把内容区剩余高度分给它，而非图像画布。
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
