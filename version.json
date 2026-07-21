@@ -1,7 +1,7 @@
 {
   "version": "1.8.1",
-  "name": "v1.8.0版本, 新增macos版本",
-  "changelog": "软件发布x86_64和M系列芯片两种macos版本, 欢迎下载使用",
+  "name": "v1.8.2版本, 优化图像分割工具",
+  "changelog": "软件优化了图像分割工具的导入导出以及渲染功能",
   "release_url": "https://github.com/BlueBlueKitty/Toolbox/releases/tag/v1.8.1",
   "downloads": {
     "windows_x86_64": "https://github.com/BlueBlueKitty/Toolbox/releases/download/v1.8.1/Toolbox_1.8.1_windows_x86_64.exe",
