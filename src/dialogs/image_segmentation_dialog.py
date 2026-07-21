@@ -339,7 +339,7 @@ class ImageSegmentationDialog(QDialog):
     def _create_ui(self) -> None:
         main_layout = QVBoxLayout(self)
         self.toolbar = QToolBar()
-        self._apply_toolbar_theme(getattr(self.parent(), "theme_mode", "dark"))
+        self._apply_control_theme(getattr(self.parent(), "theme_mode", "dark"))
         main_layout.addWidget(self.toolbar)
 
         self.open_action = QAction(self.style().standardIcon(QStyle.SP_DialogOpenButton), "打开图像", self)
@@ -760,17 +760,25 @@ class ImageSegmentationDialog(QDialog):
         super().changeEvent(event)
 
     def on_theme_mode_changed(self, _mode: str) -> None:
-        self._apply_toolbar_theme(_mode)
+        self._apply_control_theme(_mode)
         self._refresh_toolbar_icons()
         self.magic_panel.refresh_icons()
 
-    def _apply_toolbar_theme(self, mode: str) -> None:
-        """Apply the light-theme selected state to all checkable tool buttons."""
-        # The rule belongs on the dialog rather than the toolbar so checkable
-        # tool buttons in parameter panels receive the same selected feedback.
+    def _apply_control_theme(self, mode: str) -> None:
+        """Give segmentation controls distinct borders in the light theme."""
+        # The rule belongs on the dialog rather than the toolbar so controls in
+        # both the toolbar and parameter panels receive the same visual states.
         self.toolbar.setStyleSheet("")
         if mode == "light":
+            icon_dir = Path(__file__).resolve().parents[2] / "resources" / "icons"
+            checkbox_checked_icon = (icon_dir / "checkbox_checked.svg").as_posix()
+            radio_checked_icon = (icon_dir / "radio_checked.svg").as_posix()
             self.setStyleSheet(
+                "QToolButton {"
+                "background-color: transparent; color: #1E293B;"
+                "border: 1px solid transparent; border-radius: 4px; padding: 4px;"
+                "}"
+                "QToolButton:hover {background-color: #F3F6FB; border-color: #8BB9E8;}"
                 "QToolButton:checked {"
                 "background-color: #DCEBFA;"
                 "border: 1px solid #8BB9E8;"
@@ -778,6 +786,25 @@ class ImageSegmentationDialog(QDialog):
                 "}"
                 "QToolButton:checked:hover {background-color: #C8DDF5;}"
                 "QToolButton:checked:pressed {background-color: #B3D2EF;}"
+                "QPushButton {"
+                "border: 1px solid #CBD5E1; border-radius: 4px; padding: 5px 9px;"
+                "}"
+                "QPushButton:hover {border-color: #8BB9E8;}"
+                "QCheckBox::indicator, QRadioButton::indicator {"
+                "width: 14px; height: 14px; background: #FFFFFF;"
+                "border: 1px solid #94A3B8;"
+                "}"
+                "QCheckBox::indicator {border-radius: 3px;}"
+                "QRadioButton::indicator {border-radius: 8px;}"
+                "QCheckBox::indicator:hover, QRadioButton::indicator:hover {border-color: #1E78DC;}"
+                "QCheckBox::indicator:checked {"
+                "background: #DCEBFA; border-color: #8BB9E8;"
+                f"image: url({checkbox_checked_icon});"
+                "}"
+                "QRadioButton::indicator:checked {"
+                "background: #DCEBFA; border-color: #8BB9E8;"
+                f"image: url({radio_checked_icon});"
+                "}"
             )
         else:
             # Keep the native dark-theme appearance unchanged.
