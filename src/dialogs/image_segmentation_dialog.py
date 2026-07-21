@@ -182,10 +182,6 @@ class ImageSegmentationDialog(QDialog):
         self._render_update_timer.setInterval(100)
         self._render_update_timer.setSingleShot(True)
         self._render_update_timer.timeout.connect(self._apply_render_settings_update)
-        self._view_overlay_update_timer = QTimer(self)
-        self._view_overlay_update_timer.setSingleShot(True)
-        self._view_overlay_update_timer.setInterval(240)
-        self._view_overlay_update_timer.timeout.connect(self._apply_view_overlay_update)
         self._updating_view_overlays = False
         self._mask_nonzero_revision = -1
         self._mask_has_nonzero_cached = False
@@ -3859,8 +3855,11 @@ class ImageSegmentationDialog(QDialog):
             show_preview_vector=self.project.display_state.show_preview_vector,
             show_preview_mask=self.project.display_state.show_preview_mask,
         )
-        # 合并连续缩放/平移事件，避免视图变化时高频重算叠加层造成交互卡顿。
-        self._view_overlay_update_timer.start()
+        # 此信号由 SegmentationCanvas.refresh_view() 在底图瓦片替换完成后发出。
+        # Mask 仅保存该瓦片对应 source_window 内的像素；若再延迟更新，就会在
+        # 新底图与旧 Mask 裁剪窗口之间出现一帧（或数百毫秒）的截断区域。
+        # 因此这里必须与底图同轮同步替换 Mask，而不是合并为延迟刷新。
+        self._apply_view_overlay_update()
 
     def _apply_view_overlay_update(self) -> None:
         if self.project.image_asset is None:
