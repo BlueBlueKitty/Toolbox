@@ -206,12 +206,33 @@ def test_export_dialog_defaults_to_indexed_masks_and_lists_common_formats():
     dialog.close()
 
 
-def test_export_directory_is_read_only_from_saved_project_preferences():
-    project = _mask_project([], np.zeros((1, 1), dtype=np.uint8))
-    assert ImageSegmentationDialog._project_export_output_dir(project) == ""
+def test_export_directory_defaults_to_project_directory_only_when_saved():
+    app = QApplication.instance() or QApplication([])
+    dialog = ImageSegmentationDialog()
+    dialog.project.export_prefs = {"export_dialog": {"output_dir": "D:/old-exports"}}
 
-    project.export_prefs = {"output_dir": "D:/exports"}
-    assert ImageSegmentationDialog._project_export_output_dir(project) == "D:/exports"
+    assert dialog._default_export_output_dir() == ""
 
-    project.export_prefs = {"output_dir": None}
-    assert ImageSegmentationDialog._project_export_output_dir(project) == ""
+    dialog.current_project_path = "D:/projects/example.seg_proj"
+    assert dialog._default_export_output_dir() == "D:/projects"
+
+
+def test_export_dialog_browse_uses_image_directory_when_output_is_empty(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    dialog = SegmentationExportDialog(
+        "mask",
+        "",
+        has_geo=False,
+        prefer_tif_mask=False,
+        browse_dir="D:/images",
+    )
+    requested_dirs = []
+    monkeypatch.setattr(
+        "src.dialogs.segmentation_export_dialog.QFileDialog.getExistingDirectory",
+        lambda _parent, _title, initial: requested_dirs.append(initial) or "",
+    )
+
+    dialog._browse_dir()
+
+    assert dialog.dir_edit.text() == ""
+    assert requested_dirs == ["D:/images"]

@@ -221,6 +221,10 @@ class MagicPreviewWorker(QObject):
 
 
 class ImageSegmentationDialog(QDialog):
+    # Keep the marching-ants implementation available for a future display
+    # mode, but use the solid preview Mask as the default interaction.
+    SHOW_MAGIC_PREVIEW_OUTLINE = False
+
     def __init__(self, parent=None, pyramid_threshold_mb=DEFAULT_PYRAMID_THRESHOLD_MB):
         super().__init__(parent)
         self.setWindowTitle("图像分割工具")
@@ -445,7 +449,7 @@ class ImageSegmentationDialog(QDialog):
         self.layer_controller = LayerPanelController(
             self.layer_panel,
             self.canvas,
-            exclude_layer_ids={"draft", "snap", "preview_vector", "preview_mask", "annotations"},
+            exclude_layer_ids={"draft", "snap", "preview_vector", "annotations"},
         )
         self.magic_panel = MagicWandPanel()
         self.render_sidebar = self.workspace.render_sidebar
@@ -1965,7 +1969,7 @@ class ImageSegmentationDialog(QDialog):
         self.project.display_state = saved_display_state
         self.project.layer_visibility = project.layer_visibility
         self.project.export_prefs = project.export_prefs
-        self._saved_export_output_dir = self._project_export_output_dir(project)
+        self._saved_export_output_dir = self._default_export_output_dir()
         self._restore_layer_window_visibility_from_project()
         self._restore_auxiliary_layers_from_project()
         self._restore_canvas_view_state()
@@ -2127,7 +2131,7 @@ class ImageSegmentationDialog(QDialog):
         try:
             self._update_progress(30, "正在写入项目文件...", maximum=100)
             self.project_manager.save_project(self.project, self.current_project_path)
-            self._saved_export_output_dir = self._project_export_output_dir(self.project)
+            self._saved_export_output_dir = self._default_export_output_dir()
             self._update_progress(100, "项目保存完成", maximum=100)
             self._finish_progress("项目保存完成")
         except Exception as exc:
@@ -2597,7 +2601,7 @@ class ImageSegmentationDialog(QDialog):
         if self.project.image_asset is None:
             return
         default_name = f"{Path(self.project.image_asset.path).stem}_mask"
-        default_dir = self._saved_export_output_dir
+        default_dir = self._default_export_output_dir()
         settings = SegmentationExportDialog.get_settings(
             default_name=default_name,
             default_dir=default_dir,
@@ -2607,6 +2611,7 @@ class ImageSegmentationDialog(QDialog):
                 and self.project.image_asset.path.lower().endswith((".tif", ".tiff"))
             ),
             initial_settings=self._export_dialog_preferences(),
+            browse_dir=os.path.dirname(self.project.image_asset.path),
             parent=self,
         )
         if not settings:
@@ -2699,7 +2704,7 @@ class ImageSegmentationDialog(QDialog):
             if not isinstance(self.project.export_prefs, dict):
                 self.project.export_prefs = {}
             self.project.export_prefs["export_dialog"] = dict(settings)
-            self._saved_export_output_dir = str(settings["output_dir"])
+            self._saved_export_output_dir = self._default_export_output_dir()
             # 导出选项属于项目状态；后续保存项目时必须写入 .seg_proj。
             self._set_dirty(True)
             if failed_exports:
@@ -2719,15 +2724,9 @@ class ImageSegmentationDialog(QDialog):
             self._fail_progress("导出失败")
             QMessageBox.warning(self, "导出失败", self._format_exception_message(exc, "导出失败。"))
 
-    @staticmethod
-    def _project_export_output_dir(project: SegmentationProject) -> str:
-        """读取项目中已保存的导出目录；无有效设置时保持为空。"""
-        preferences = project.export_prefs if isinstance(project.export_prefs, dict) else {}
-        dialog_preferences = preferences.get("export_dialog", {})
-        if not isinstance(dialog_preferences, dict):
-            dialog_preferences = preferences
-        output_dir = dialog_preferences.get("output_dir", "")
-        return str(output_dir).strip() if isinstance(output_dir, str) else ""
+    def _default_export_output_dir(self) -> str:
+        """Saved projects export beside their project file; unsaved projects stay blank."""
+        return os.path.dirname(self.current_project_path) if self.current_project_path else ""
 
     def _export_dialog_preferences(self) -> dict:
         """读取项目保存的导出对话框设置，兼容旧项目的扁平结构。"""
@@ -3725,8 +3724,10 @@ class ImageSegmentationDialog(QDialog):
         self._update_preview_display()
 
     def _ensure_preview_mask_layer_visible_for_magic(self) -> None:
-        """预览 Mask 是临时交互叠加，不在图层面板中提供可见性开关。"""
-        return
+        """Start each magic-wand session with its managed preview layer visible."""
+        if self.project.layer_visibility.get("preview_mask", True):
+            return
+        self._layer_visibility_callback("preview_mask", True)
 
     def _snapshot_preview_state(self) -> dict:
         entries = []
@@ -4804,7 +4805,7 @@ class ImageSegmentationDialog(QDialog):
         if self.magic_panel.only_show_new_region_enabled():
             display_mask = self._preview_mask_without_overlap(self._preview_mask, self._preview_bbox)
         preview_visible = display_mask is not None and self._preview_bbox is not None
-        if preview_visible:
+        if preview_visible and self.SHOW_MAGIC_PREVIEW_OUTLINE:
             self._preview_mask_outline_timer.start()
             self._queue_preview_outline(display_mask, self._preview_bbox)
         else:
@@ -4814,8 +4815,11 @@ class ImageSegmentationDialog(QDialog):
             self._preview_outline_path = None
         for canvas in self._all_canvases():
             canvas.update_preview_mask_layer(display_mask if preview_visible else None, self._preview_bbox if preview_visible else None, color)
-            canvas.update_preview_outline_path(self._preview_outline_path if preview_visible else None, color)
-            if preview_visible:
+            canvas.update_preview_outline_path(
+                self._preview_outline_path if preview_visible and self.SHOW_MAGIC_PREVIEW_OUTLINE else None,
+                color,
+            )
+            if preview_visible and self.SHOW_MAGIC_PREVIEW_OUTLINE:
                 canvas.set_preview_mask_dash_offset(self._preview_mask_dash_offset)
             canvas.update_preview_polygons([], color)
 

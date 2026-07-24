@@ -62,7 +62,8 @@ class SegmentationCanvas(LayeredRasterCanvas):
         self.view_box.setMouseMode(pg.ViewBox.PanMode)
 
         # The preview Mask uses the same managed raster-overlay route as the
-        # committed Mask.  The dialog filters this internal layer from its UI.
+        # committed Mask and is exposed in the layer panel for visibility and
+        # ordering control.
         self.preview_mask_item = PreviewMaskItem()
         self.mask_selection_item = MaskSelectionItem()
         self.preview_mask_outline_item = MaskSelectionItem("#ffd43b", "#ffffff")
@@ -264,7 +265,7 @@ class SegmentationCanvas(LayeredRasterCanvas):
             return
         rgba = np.zeros((mask.shape[0], mask.shape[1], 4), dtype=np.uint8)
         color = QColor(color_name)
-        rgba[np.asarray(mask) > 0] = [color.red(), color.green(), color.blue(), 128]
+        rgba[np.asarray(mask) > 0] = [color.red(), color.green(), color.blue(), 255]
         self.set_raster_overlay(self.LAYER_PREVIEW_MASK, rgba, bbox, name="预览Mask", opacity=1.0)
 
     def set_preview_mask_dash_offset(self, offset: float) -> None:

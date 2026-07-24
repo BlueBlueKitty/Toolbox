@@ -12,7 +12,7 @@ from src.widgets.segmentation_canvas import SegmentationCanvas
 
 
 INTERNAL_SEGMENTATION_LAYERS = {
-    "annotations", "draft", "snap", "preview_vector", "preview_mask",
+    "annotations", "draft", "snap", "preview_vector",
 }
 
 
@@ -31,14 +31,14 @@ def test_flat_layer_panel_reorders_managed_layers_as_one_stack():
 
     # The panel is high -> low.  Mask must therefore render over the base and
     # the auxiliary raster must stay at the bottom.
-    controller._handle_order_changed(["mask", "base_raster", "aux_raster"])
+    controller._handle_order_changed(["preview_mask", "mask", "base_raster", "aux_raster"])
     app.processEvents()
 
     assert _layer_ids(canvas) == [
-        "aux_raster", "base_raster", "mask",
-        "annotations", "preview_mask", "preview_vector", "draft", "snap",
+        "aux_raster", "base_raster", "mask", "preview_mask",
+        "annotations", "preview_vector", "draft", "snap",
     ]
-    assert panel.layer_order() == ["mask", "base_raster", "aux_raster"]
+    assert panel.layer_order() == ["preview_mask", "mask", "base_raster", "aux_raster"]
     assert panel.layer_tree.itemWidget(panel.layer_tree.topLevelItem(0), 1) is not None
     assert not bool(panel.layer_tree.topLevelItem(0).flags() & Qt.ItemIsDropEnabled)
 
@@ -133,6 +133,48 @@ def test_rebuilding_panel_keeps_active_layer_selected():
 
     assert canvas.layer_manager.active_layer_id() == "mask"
     assert panel.layer_tree.currentItem().data(0, Qt.UserRole) == "mask"
+
+
+def test_preview_mask_is_opaque_and_visible_in_layer_panel():
+    app = QApplication.instance() or QApplication([])
+    dialog = ImageSegmentationDialog()
+    dialog.canvas.update_preview_mask_layer(
+        np.array([[0, 1], [1, 0]], dtype=np.uint8),
+        (3, 4, 2, 2),
+        "#123456",
+    )
+    preview_state = dialog.canvas.layer_manager.layer("preview_mask")
+
+    assert "preview_mask" in dialog.layer_panel.layer_order()
+    assert preview_state.spec.opacity == 1.0
+    assert preview_state.item.image[0, 1].tolist() == [18, 52, 86, 255]
+
+
+def test_magic_wand_reenables_preview_mask_layer():
+    app = QApplication.instance() or QApplication([])
+    dialog = ImageSegmentationDialog()
+    dialog._layer_visibility_callback("preview_mask", False)
+
+    dialog._ensure_preview_mask_layer_visible_for_magic()
+
+    assert dialog.project.layer_visibility["preview_mask"] is True
+    assert dialog.canvas.layer_manager.layer("preview_mask").spec.visible
+    assert dialog.layer_panel._item_for_layer("preview_mask").checkState(0) == Qt.Checked
+
+
+def test_default_preview_display_does_not_start_marching_ants(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    dialog = ImageSegmentationDialog()
+    dialog._preview_mask = np.ones((1, 1), dtype=np.uint8)
+    dialog._preview_bbox = (0, 0, 1, 1)
+    queued = []
+    monkeypatch.setattr(dialog, "_queue_preview_outline", lambda *args: queued.append(args))
+
+    dialog._update_preview_display()
+
+    assert queued == []
+    assert not dialog._preview_mask_outline_timer.isActive()
+    assert dialog._preview_outline_path is None
 
 
 def test_partial_auxiliary_import_syncs_successes_and_reports_failures(monkeypatch):

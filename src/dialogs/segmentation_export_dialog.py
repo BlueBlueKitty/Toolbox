@@ -67,12 +67,14 @@ class SegmentationExportDialog(QDialog):
         prefer_tif_mask: bool,
         parent=None,
         initial_settings: dict | None = None,
+        browse_dir: str = "",
     ):
         super().__init__(parent)
         self.setWindowTitle("导出设置")
         self.resize(520, 1)
         self._has_geo = has_geo
         self._vector_formats = self.available_vector_formats(has_geo)
+        self._browse_start_dir = str(browse_dir).strip()
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -138,8 +140,6 @@ class SegmentationExportDialog(QDialog):
             return
         if isinstance(settings.get("base_name"), str) and settings["base_name"].strip():
             self.base_name_edit.setText(settings["base_name"].strip())
-        if isinstance(settings.get("output_dir"), str) and settings["output_dir"].strip():
-            self.dir_edit.setText(settings["output_dir"].strip())
         self.export_vector_check.setChecked(bool(settings.get("export_vector", self.export_vector_check.isChecked())))
         self.export_mask_check.setChecked(bool(settings.get("export_mask", self.export_mask_check.isChecked())))
         self.export_split_masks_check.setChecked(bool(settings.get("export_split_masks", self.export_split_masks_check.isChecked())))
@@ -153,7 +153,11 @@ class SegmentationExportDialog(QDialog):
 
     def _browse_dir(self) -> None:
         current = self.dir_edit.text().strip()
-        selected = QFileDialog.getExistingDirectory(self, "选择导出目录", current or str(Path.home()))
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "选择导出目录",
+            current or self._browse_start_dir or str(Path.home()),
+        )
         if selected:
             self.dir_edit.setText(selected)
 
@@ -204,6 +208,7 @@ class SegmentationExportDialog(QDialog):
         prefer_tif_mask: bool,
         parent=None,
         initial_settings: dict | None = None,
+        browse_dir: str = "",
     ):
         dialog = cls(
             default_name,
@@ -212,6 +217,7 @@ class SegmentationExportDialog(QDialog):
             prefer_tif_mask,
             parent=parent,
             initial_settings=initial_settings,
+            browse_dir=browse_dir,
         )
         if dialog.exec() != QDialog.Accepted:
             return None
